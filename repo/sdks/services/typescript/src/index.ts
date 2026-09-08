@@ -4,6 +4,11 @@ export const title = "KuberCloud ANI Services API" as const;
 export const version = "1.0.0" as const;
 export const serverURL = "https://{host}/api/v1/svc" as const;
 export const operations = [
+  "createBillingAdjustment",
+  "generateBillingInvoice",
+  "invoiceBillingAction",
+  "getBillingOverview",
+  "exportBillingOverview",
   "listGpuContainers",
   "createGpuContainer",
   "listAvailableGpus",
@@ -126,6 +131,11 @@ export const operations = [
   "listTenantAssignableRoles"
 ] as const;
 export const paths = [
+  "POST /billing/adjustments",
+  "POST /billing/invoices/generate",
+  "POST /billing/invoices/{invoiceId}/actions",
+  "GET /billing/overview",
+  "GET /billing/overview/export",
   "GET /gpu-containers",
   "POST /gpu-containers",
   "GET /gpu-containers/available-gpus",
@@ -255,6 +265,14 @@ export const schemas = [
   "AsyncTask",
   "AvailableGpu",
   "AvailableTenantListResponse",
+  "BillingAdjustment",
+  "BillingAdjustmentCreateRequest",
+  "BillingInvoiceActionRequest",
+  "BillingInvoiceGenerateRequest",
+  "BillingInvoiceSummary",
+  "BillingOverviewItem",
+  "BillingOverviewResponse",
+  "BillingUsageBreakdownItem",
   "BindPlanRequest",
   "BoundTenant",
   "BoundTenantsResponse",
@@ -270,6 +288,7 @@ export const schemas = [
   "CreateTenantPlanRequest",
   "CreateWebhookRequest",
   "CursorPage",
+  "DevProfileInfo",
   "ErrorResponse",
   "ExtendSandboxRequest",
   "GetDocumentUploadURLRequest",
@@ -377,6 +396,9 @@ export const schemas = [
   "WebhookDeliveryListResponse"
 ] as const;
 export const idempotencyOperations = [
+  "createBillingAdjustment",
+  "generateBillingInvoice",
+  "invoiceBillingAction",
   "createGpuContainer",
   "patchGpuContainer",
   "createInferenceAccessPolicy",

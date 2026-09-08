@@ -65,6 +65,23 @@ func mapStoreError(err error) error {
 		return businessError(codes.FailedPrecondition, ports.ErrPasswordSameAsOld, "password same as old")
 	case errors.Is(err, ports.ErrNotImplemented):
 		return status.Error(codes.Unimplemented, ports.ErrNotImplemented.Error())
+	// 计费结算域（BILLING_*）
+	case errors.Is(err, ports.ErrBillingInvalidPeriod):
+		return businessError(codes.InvalidArgument, ports.ErrBillingInvalidPeriod, "period must match YYYY-MM with month 01-12")
+	case errors.Is(err, ports.ErrBillingTenantNotFound):
+		return businessError(codes.NotFound, ports.ErrBillingTenantNotFound, "tenant not found")
+	case errors.Is(err, ports.ErrBillingInvoiceNotFound):
+		return businessError(codes.NotFound, ports.ErrBillingInvoiceNotFound, "billing invoice not found")
+	case errors.Is(err, ports.ErrBillingInvoiceExists):
+		return businessError(codes.AlreadyExists, ports.ErrBillingInvoiceExists, "invoice already exists for tenant and period")
+	case errors.Is(err, ports.ErrBillingStateConflict):
+		return businessError(codes.FailedPrecondition, ports.ErrBillingStateConflict, "invoice already settled or credited")
+	case errors.Is(err, ports.ErrBillingActionInvalid):
+		return businessError(codes.InvalidArgument, ports.ErrBillingActionInvalid, "action must be settle or credit")
+	case errors.Is(err, ports.ErrBillingAmountInvalid):
+		return businessError(codes.InvalidArgument, ports.ErrBillingAmountInvalid, "amount_usd must not be zero")
+	case errors.Is(err, ports.ErrBillingIdempotencyConflict):
+		return businessError(codes.AlreadyExists, ports.ErrBillingIdempotencyConflict, "idempotency key conflict, please retry")
 	default:
 		return status.Errorf(codes.Internal, "tenant operation failed: %v", err)
 	}

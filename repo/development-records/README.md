@@ -13,6 +13,11 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 租户计费结算接口（2026-09，分支 feat/tenant-billing）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-BILLING-A | Services 层新增 BOSS 租户计费结算 5 端点 `/api/v1/svc/billing/*`（总览/CSV 导出/生成账单/账单动作 settle·credit/调账）：契约 `services/v1.yaml` + x-ani-authz（boundary=platform），实现 tenant-service gRPC + 网关 mixed handler；生成即出账（无 draft）、一期一单 `(tenant_id,period)` 唯一 + `idempotency_key` 幂等重放、overdue 读取时动态计算不落库、余额读取推导、单价只读 `billing_pricing`（6 行种子随迁移 ON CONFLICT DO NOTHING，代码零价格字面量）、用量仅经 Core SDK 调 `/metering/usage/platform` 不直查 Core 库、仅 token_total 计费其余 `data_source=unavailable`。本地集成实测 21 用例通过（测试环境占用未部署 K8s，不标 live/runtime ready）；`make validate-services`/`make validate-architecture` EXIT:0；`make test` 中 validate-gateway-authz 漂移为 main 既有问题 | TENANT-BILLING-A.md |
 ### 仓库范围清理（2026-09）
 
 | 批次 | 内容摘要 | 文件 |

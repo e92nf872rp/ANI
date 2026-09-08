@@ -1522,6 +1522,158 @@ components:
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）" }
 
+    DevProfileInfo:
+      type: object
+      description: "dev/local profile 标记（联调标记；结构对齐 Core CoreDevProfileInfo）。"
+      required: [mode, provider, real_provider]
+      properties:
+        mode:          { type: string, enum: [local, real] }
+        provider:      { type: string }
+        real_provider: { type: boolean }
+        reason:        { type: string, nullable: true }
+
+    BillingUsageBreakdownItem:
+      type: object
+      description: "账期用量明细行（单价 × 量 = 成本）。storage_gi / kb_queries 无采集源，落库前 tokens 均 data_source=unavailable。"
+      required: [metric, unit_cost, data_source]
+      properties:
+        metric:
+          type: string
+          enum: [gpu_hours, cpu_hours, memory_gb_hours, tokens, storage_gi, kb_queries]
+        amount:
+          type: number
+          format: double
+          nullable: true
+          description: "展示单位用量；data_source=unavailable 时为 null（不伪造 0）"
+        unit_cost:
+          type: number
+          format: double
+          nullable: true
+          description: "每展示单位价格（USD），读 billing_pricing 表；代码零单价字面量"
+        cost:
+          type: number
+          format: double
+          nullable: true
+          description: "amount × unit_cost（展示单位换算 gpu/cpu/memory ÷3600；tokens 直乘）；unavailable 时为 null"
+        data_source:
+          type: string
+          enum: [metered, unavailable]
+
+    BillingInvoiceSummary:
+      type: object
+      description: "账单摘要（生成即出账：无 draft 态；overdue 仅为读取时展示态，落库仍为 issued）。"
+      required: [id, no, period, amount_usd, status, issued_at, due_date]
+      properties:
+        id:         { type: string, format: uuid }
+        no:         { type: string, description: "账单号 INV-{YYMM}-{seq}" }
+        period:     { type: string, description: "账期 YYYY-MM" }
+        amount_usd: { type: number, format: double, description: "账单金额（USD）= 用量成本 + 当期调账合计" }
+        status:     { type: string, enum: [issued, settled, credited] }
+        due_date:   { type: string, description: "到期日 YYYY-MM-DD（issued_at + 30 天）" }
+        issued_at:  { type: string, description: "出账时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+        settled_at: { type: string, nullable: true, description: "结清时间；未结清为 null" }
+        credited_at: { type: string, nullable: true, description: "授信冲抵时间；未冲抵为 null" }
+
+    BillingAdjustment:
+      type: object
+      description: "调账记录（金额可负；已出账单金额不被修改——改账单为红冲，属后续迭代）。"
+      required: [id, tenant_id, period, amount_usd, reason, operator, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        tenant_id:  { type: string, format: uuid }
+        period:     { type: string, description: "账期 YYYY-MM" }
+        amount_usd: { type: number, format: double, description: "调账金额（USD），可为负；不为 0" }
+        reason:     { type: string }
+        operator:   { type: string, description: "操作人（网关透传 user_id）" }
+        created_at: { type: string, description: "创建时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+
+    BillingOverviewItem:
+      type: object
+      description: "账务总览行（表格 9 列 + 抽屉内嵌子数组）。"
+      required: [tenant_id, tenant_name, period, status, usage_breakdown, invoices, adjustments, updated_at]
+      properties:
+        tenant_id:  { type: string, format: uuid }
+        tenant_name: { type: string }
+        period:     { type: string, description: "账期 YYYY-MM" }
+        status:
+          type: string
+          enum: [current, overdue, settled, credited]
+          description: "行状态 = 当期账单状态映射：issued 展示为 current、now>due_date 展示为 overdue（不落库）、settled、credited；无账单为 current"
+        usage_cost_usd:
+          type: number
+          format: double
+          nullable: true
+          description: "usage_breakdown 各行 cost 合计（unavailable 行不计）；无任何可用成本数据时为 null"
+        credit_usd:
+          type: number
+          format: double
+          nullable: true
+          description: "授信额度（USD）；无授信账户记录时为 null"
+        balance_usd:
+          type: number
+          format: double
+          nullable: true
+          description: "余额 = credit − 未清账单金额 + 未出账调账（读取时推导，§6.3）；无授信账户时为 null"
+        invoice_no:
+          type: string
+          nullable: true
+          description: "当期账单号；无账单为 null"
+        due_date:
+          type: string
+          nullable: true
+          description: "当期账单到期日 YYYY-MM-DD；无账单为 null"
+        usage_breakdown:
+          type: array
+          items: { $ref: '#/components/schemas/BillingUsageBreakdownItem' }
+        invoices:
+          type: array
+          description: "该租户全部账单（跨账期，倒序）"
+          items: { $ref: '#/components/schemas/BillingInvoiceSummary' }
+        adjustments:
+          type: array
+          description: "该租户当期账期调账记录"
+          items: { $ref: '#/components/schemas/BillingAdjustment' }
+        updated_at: { type: string, description: "数据更新时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+
+    BillingOverviewResponse:
+      type: object
+      required: [items, total, dev_profile]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/BillingOverviewItem' } }
+        total: { type: integer, description: "items 长度" }
+        dev_profile: { $ref: '#/components/schemas/DevProfileInfo' }
+
+    BillingInvoiceGenerateRequest:
+      type: object
+      required: [tenant_id, period, idempotency_key]
+      properties:
+        tenant_id:      { type: string, format: uuid }
+        period:         { type: string, pattern: '^\d{4}-\d{2}$', description: "账期 YYYY-MM" }
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）；同 key 重放返回原账单" }
+
+    BillingInvoiceActionRequest:
+      type: object
+      required: [action, idempotency_key]
+      properties:
+        action:
+          type: string
+          enum: [settle, credit]
+          description: "settle=标记结清（若租户因欠费冻结则解冻，V1 视链路现状）；credit=授信冲抵"
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）" }
+
+    BillingAdjustmentCreateRequest:
+      type: object
+      required: [tenant_id, period, amount_usd, reason, idempotency_key]
+      properties:
+        tenant_id:      { type: string, format: uuid }
+        period:         { type: string, pattern: '^\d{4}-\d{2}$', description: "账期 YYYY-MM" }
+        amount_usd:
+          type: number
+          format: double
+          description: "调账金额（USD）；可为负，不可为 0"
+        reason:         { type: string, minLength: 1, maxLength: 512 }
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）" }
+
 paths:
   /models:
     get:
@@ -4083,6 +4235,174 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /billing/overview:
+    get:
+      operationId: getBillingOverview
+      summary: 查询租户账务总览（表格 9 列 + 抽屉内嵌子数据；需 platform-admin / platform-ops / platform-readonly）
+      description: |
+        BOSS 租户计费与用量页数据源。行状态 overdue 为读取时动态计算（issued 且 now > due_date），
+        落库状态仍为 issued，无定时 worker。storage_gi / kb_queries 与 Token 落库链路落地前的
+        tokens 行按 data_source=unavailable 返回（amount/cost 为 null，不伪造 0）。
+        用量数据经 tenant-service 调 Core GET /metering/usage/platform（月窗口 + group_by=tenant_id）折算。
+      tags: [Billing]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: billing
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      parameters:
+        - { name: period, in: query, required: false, schema: { type: string, pattern: '^\d{4}-\d{2}$' }, description: "账期 YYYY-MM；缺省=当月（UTC）" }
+        - { name: tenant_id, in: query, required: false, schema: { type: string, format: uuid }, description: "单租户筛选（钻取场景）" }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [current, overdue, settled, credited] }, description: "行状态筛选" }
+      responses:
+        "200":
+          description: 账务总览列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingOverviewResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "BILLING_INVALID_PERIOD（period 非 YYYY-MM）" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
+  /billing/overview/export:
+    get:
+      operationId: exportBillingOverview
+      summary: 导出账务对账 CSV（需 platform-admin / platform-ops / platform-readonly）
+      description: |
+        Query 与 overview 相同；响应 text/csv（UTF-8，Content-Disposition: attachment）。
+        列 = 表格 9 列 + 用量明细扁平展开（每租户一组行，含账单号分组列）。
+      tags: [Billing]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: billing
+        action: export
+        boundary: platform
+        principal_kinds: [user]
+      parameters:
+        - { name: period, in: query, required: false, schema: { type: string, pattern: '^\d{4}-\d{2}$' }, description: "账期 YYYY-MM；缺省=当月（UTC）" }
+        - { name: tenant_id, in: query, required: false, schema: { type: string, format: uuid }, description: "单租户筛选" }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [current, overdue, settled, credited] }, description: "行状态筛选" }
+      responses:
+        "200":
+          description: CSV 附件
+          content:
+            text/csv:
+              schema: { type: string }
+        "400": { $ref: '#/components/responses/BadRequest', description: "BILLING_INVALID_PERIOD" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
+  /billing/invoices/generate:
+    post:
+      operationId: generateBillingInvoice
+      summary: 生成账单（生成即出账 status=issued；需 platform-admin / platform-ops）
+      description: |
+        汇总该租户该账期用量成本（Core 平台聚合 × billing_pricing 定价）+ 当期调账合计 → amount_usd。
+        账单号 INV-{YYMM}-{seq}；due_date = issued_at + 30 天。
+        (tenant_id, period) 唯一（一期一单）：同 idempotency_key 重放返回原账单；不同 key 重复生成 → 409。
+      tags: [Billing]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: billing
+        action: write
+        boundary: platform
+        principal_kinds: [user]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BillingInvoiceGenerateRequest' }
+      responses:
+        "200":
+          description: 账单已生成（幂等重放返回原账单）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingInvoiceSummary' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "period 非法 / idempotency_key 缺失" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "BILLING_TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "BILLING_INVOICE_EXISTS（该租户该期已有账单且 key 不同）" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
+  /billing/invoices/{invoiceId}/actions:
+    post:
+      operationId: invoiceBillingAction
+      summary: 账单状态动作（settle 标记结清 / credit 授信冲抵；需 platform-admin / platform-ops）
+      description: |
+        状态机：issued → settled | credited（终态，重复动作 409 BILLING_STATE_CONFLICT）。
+        settle 记 settled_at；credit 授信冲抵记 credited_at，余额不变（§6.3 读取推导）。
+      tags: [Billing]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: billing
+        action: write
+        boundary: platform
+        principal_kinds: [user]
+      parameters:
+        - { name: invoiceId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BillingInvoiceActionRequest' }
+      responses:
+        "200":
+          description: 动作成功，返回更新后的账单
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingInvoiceSummary' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "非法 action / idempotency_key 缺失" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "BILLING_INVOICE_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "BILLING_STATE_CONFLICT（已 settled/credited 再操作）" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
+  /billing/adjustments:
+    post:
+      operationId: createBillingAdjustment
+      summary: 调账（±金额 + 原因；需 platform-admin / platform-ops）
+      description: |
+        写调账记录并更新余额；该期账单未生成时并入下一张账单金额；已生成（issued）时仅记调账
+        并更新余额，不改已出账单金额（改账单=红冲，后续迭代）。
+      tags: [Billing]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: billing
+        action: write
+        boundary: platform
+        principal_kinds: [user]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BillingAdjustmentCreateRequest' }
+      responses:
+        "200":
+          description: 调账记录已写入
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingAdjustment' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "amount=0 / period 非法 / reason 缺失" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "BILLING_TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
 tags:
   - { name: Models, description: "模型仓库" }
   - { name: InferenceServices, description: "推理服务" }
@@ -4093,4 +4413,5 @@ tags:
   - { name: TenantPlans, description: "配额套餐管理" }
   - { name: PlatformAdmins, description: "平台运营账号管理（创建/详情/角色/密码/禁用启用删除/审计）" }
   - { name: TenantAdmins, description: "租户管理员管理（邀请/角色/移交/禁用启用删除/审计）" }
+  - { name: Billing, description: "BOSS 租户计费结算（账务总览/对账导出/生成账单/账单动作/调账）" }
   - { name: Integrations, description: "第三方集成与企业通知" }

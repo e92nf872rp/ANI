@@ -19,6 +19,11 @@ const Version = "1.0.0"
 const ServerURL = "https://{host}/api/v1/svc"
 
 var Operations = []string{
+	"createBillingAdjustment",
+	"generateBillingInvoice",
+	"invoiceBillingAction",
+	"getBillingOverview",
+	"exportBillingOverview",
 	"listGpuContainers",
 	"createGpuContainer",
 	"listAvailableGpus",
@@ -141,6 +146,11 @@ var Operations = []string{
 	"listTenantAssignableRoles",
 }
 var Paths = []string{
+	"POST /billing/adjustments",
+	"POST /billing/invoices/generate",
+	"POST /billing/invoices/{invoiceId}/actions",
+	"GET /billing/overview",
+	"GET /billing/overview/export",
 	"GET /gpu-containers",
 	"POST /gpu-containers",
 	"GET /gpu-containers/available-gpus",
@@ -270,6 +280,14 @@ var Schemas = []string{
 	"AsyncTask",
 	"AvailableGpu",
 	"AvailableTenantListResponse",
+	"BillingAdjustment",
+	"BillingAdjustmentCreateRequest",
+	"BillingInvoiceActionRequest",
+	"BillingInvoiceGenerateRequest",
+	"BillingInvoiceSummary",
+	"BillingOverviewItem",
+	"BillingOverviewResponse",
+	"BillingUsageBreakdownItem",
 	"BindPlanRequest",
 	"BoundTenant",
 	"BoundTenantsResponse",
@@ -285,6 +303,7 @@ var Schemas = []string{
 	"CreateTenantPlanRequest",
 	"CreateWebhookRequest",
 	"CursorPage",
+	"DevProfileInfo",
 	"ErrorResponse",
 	"ExtendSandboxRequest",
 	"GetDocumentUploadURLRequest",
@@ -392,6 +411,9 @@ var Schemas = []string{
 	"WebhookDeliveryListResponse",
 }
 var IdempotencyOperations = []string{
+	"createBillingAdjustment",
+	"generateBillingInvoice",
+	"invoiceBillingAction",
 	"createGpuContainer",
 	"patchGpuContainer",
 	"createInferenceAccessPolicy",
