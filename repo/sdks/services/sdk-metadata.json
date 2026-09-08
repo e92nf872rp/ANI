@@ -425,6 +425,12 @@
       "scope": ""
     },
     {
+      "operationId": "getPlatformAdminPermissions",
+      "method": "GET",
+      "path": "/platform-admins/{userId}/permissions",
+      "scope": ""
+    },
+    {
       "operationId": "resetPlatformAdminPassword",
       "method": "POST",
       "path": "/platform-admins/{userId}/reset-password",
@@ -934,6 +940,7 @@
     "PlatformAdminDetail",
     "PlatformAdminListItem",
     "PlatformAdminListResponse",
+    "PlatformAdminPermissionsResponse",
     "PlatformAdminRoleUpdateRequest",
     "PlatformRole",
     "PlatformRoleListResponse",
