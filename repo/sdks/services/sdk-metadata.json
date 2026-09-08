@@ -281,6 +281,12 @@
       "scope": ""
     },
     {
+      "operationId": "getKnowledgeBasePermissions",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/permissions",
+      "scope": ""
+    },
+    {
       "operationId": "updateKnowledgeBasePermissions",
       "method": "PUT",
       "path": "/knowledge-bases/{kb_id}/permissions",
@@ -907,6 +913,7 @@
     "KBCitationListResponse",
     "KBConfig",
     "KBDocument",
+    "KBPermissions",
     "KBQueryRequest",
     "KBQueryResponse",
     "KBSession",

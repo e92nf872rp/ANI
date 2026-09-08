@@ -189,17 +189,30 @@ def test_delete_kb_without_pool_returns_failed_precondition(stub):
     assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
-# ── P1 RPCs: UpdateKBPermissions still UNIMPLEMENTED; B2 RPCs wired ──────────
+# ── P1 RPCs: B2 RPCs wired; permissions pair wired in B4 ─────────────────────
 
 
-def test_update_kb_permissions_still_unimplemented(stub):
+def test_update_kb_permissions_b4_wired_not_unimplemented(stub):
+    """B4 (kb-p1-plan §2.5): UpdateKBPermissions is implemented. Constructed
+    without a pool it must return FAILED_PRECONDITION — never UNIMPLEMENTED
+    (that would mean the P1 stub still shadows the servicer)."""
     with pytest.raises(grpc.RpcError) as exc:
         stub.UpdateKBPermissions(
             kb_pb.UpdateKBPermissionsRequest(
                 tenant_id=TENANT_ID, kb_id=KB_ID, idempotency_key=str(uuid.uuid4())
             )
         )
-    assert exc.value.code() == grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_get_kb_permissions_b4_wired_not_unimplemented(stub):
+    """B4 (kb-p1-plan §2.5): GetKBPermissions is implemented; without a pool
+    it returns FAILED_PRECONDITION — never UNIMPLEMENTED."""
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetKBPermissions(kb_pb.GetKBPermissionsRequest(tenant_id=TENANT_ID, kb_id=KB_ID))
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
 def test_b2_rpcs_wired_not_unimplemented(stub):

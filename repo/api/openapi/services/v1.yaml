@@ -951,7 +951,17 @@ components:
       properties:
         idempotency_key:  { type: string, format: uuid }
         public_read:      { type: boolean }
-        allowed_user_ids: { type: array, items: { type: string } }
+        allowed_user_ids: { type: array, items: { type: string, format: uuid } }
+
+    KBPermissions:
+      type: object
+      required: [kb_id, public_read, allowed_user_ids, updated_at]
+      description: 知识库访问权限（B4）。对齐 kb_service.proto KBPermissions。
+      properties:
+        kb_id:            { type: string, format: uuid }
+        public_read:      { type: boolean }
+        allowed_user_ids: { type: array, items: { type: string, format: uuid } }
+        updated_at:       { type: string, format: date-time }
 
     KBConfig:
       type: object
@@ -2745,6 +2755,24 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
 
   /knowledge-bases/{kb_id}/permissions:
+    get:
+      operationId: getKnowledgeBasePermissions
+      summary: 读取知识库访问权限
+      description: |
+        回显 KB 权限配置（public_read + allowed_user_ids）。
+        无权限记录时返回默认值（public_read=false, allowed_user_ids=[]），而非 404。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 当前权限配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBPermissions' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
     put:
       operationId: updateKnowledgeBasePermissions
       summary: 更新知识库访问权限

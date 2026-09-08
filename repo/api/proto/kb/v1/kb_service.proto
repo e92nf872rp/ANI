@@ -53,6 +53,9 @@ service KBService {
   rpc ListKBSessions(ListKBSessionsRequest) returns (ListKBSessionsResponse);
   // UpdateKBPermissions updates KB access permissions (P1).
   rpc UpdateKBPermissions(UpdateKBPermissionsRequest) returns (KnowledgeBase);
+  // GetKBPermissions returns the access permissions of a KB (P1).
+  // No kb_permissions row → returns defaults (public_read=false, empty list).
+  rpc GetKBPermissions(GetKBPermissionsRequest) returns (KBPermissions);
 
   // ListDocumentChunks returns the chunk details of a document (P1).
   rpc ListDocumentChunks(ListDocumentChunksRequest) returns (ListDocumentChunksResponse);
@@ -316,6 +319,18 @@ message UpdateKBPermissionsRequest {
   string idempotency_key = 3;
   bool   public_read     = 4;
   repeated string allowed_user_ids = 5;
+}
+
+message GetKBPermissionsRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+}
+
+message KBPermissions {
+  string kb_id                     = 1;
+  bool   public_read               = 2;
+  repeated string allowed_user_ids = 3;
+  google.protobuf.Timestamp updated_at = 4;
 }
 
 message KBChunk {

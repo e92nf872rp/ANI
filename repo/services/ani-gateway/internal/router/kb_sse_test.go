@@ -150,6 +150,9 @@ func (f *fakeKBRetrieveClient) DeleteSession(context.Context, string, string, st
 func (f *fakeKBRetrieveClient) UpdateKBPermissions(context.Context, string, string, string, *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error) {
 	return nil, nil
 }
+func (f *fakeKBRetrieveClient) GetKBPermissions(context.Context, string, string) (*kbv1.KBPermissions, error) {
+	return nil, nil
+}
 func (f *fakeKBRetrieveClient) ReparseDocument(context.Context, string, string, string, string) (*commonv1.AsyncTaskRef, error) {
 	return nil, nil
 }

@@ -63,6 +63,11 @@ type KBGRPCClient interface {
 	GetSessionMessages(ctx context.Context, tenantID string, kbID string, sessionID string, limit int32, cursor string) (*kbv1.GetSessionMessagesResponse, error)
 	DeleteSession(ctx context.Context, tenantID string, kbID string, sessionID string) (*emptypb.Empty, error)
 	UpdateKBPermissions(ctx context.Context, tenantID string, kbID string, idempotencyKey string, req *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error)
+	// GetKBPermissions reads the KB permissions row (SPEC §4.3 #19,
+	// kb-p1-plan §2.6): a KB with no permissions row surfaces defaults, not
+	// an error; a missing KB surfaces NOT_FOUND. Single-passthrough shape,
+	// aligned with GetKB.
+	GetKBPermissions(ctx context.Context, tenantID string, kbID string) (*kbv1.KBPermissions, error)
 	// ReparseDocument re-queues an already-ingested document for parsing
 	// (SPEC §5.1 reparse 事件流). It returns an AsyncTaskRef because reparse
 	// is asynchronous; the client polls the task via the tasks API.
@@ -345,6 +350,15 @@ func (c *kbGRPCClient) UpdateKBPermissions(ctx context.Context, tenantID, kbID, 
 	callCtx, cancel := c.callCtx(ctx)
 	defer cancel()
 	return c.client.UpdateKBPermissions(callCtx, req)
+}
+
+// GetKBPermissions reads the KB permissions row (SPEC §4.3 #19). The tenant id
+// comes from the Auth middleware; a missing permissions row surfaces the
+// default contract values from kb-service (not an error).
+func (c *kbGRPCClient) GetKBPermissions(ctx context.Context, tenantID, kbID string) (*kbv1.KBPermissions, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.GetKBPermissions(callCtx, &kbv1.GetKBPermissionsRequest{TenantId: tenantID, KbId: kbID})
 }
 
 // ReparseDocument re-queues an already-ingested document for parsing
