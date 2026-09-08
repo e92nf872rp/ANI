@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>239</dd></div>
-          <div><dt>Schemas</dt><dd>323</dd></div>
+          <div><dt>Operations</dt><dd>243</dd></div>
+          <div><dt>Schemas</dt><dd>330</dd></div>
         </dl>
       </section>
 
@@ -1673,6 +1673,38 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/components</code></td>
+          <td><code>getPlatformComponents</code></td>
+          <td>查询平台组件运行状态</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/components/{component_name}/logs</code></td>
+          <td><code>listPlatformComponentLogs</code></td>
+          <td>查询单个平台组件日志列表</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/components/{component_name}/logs/stream</code></td>
+          <td><code>streamPlatformComponentLogs</code></td>
+          <td>平台组件日志 SSE 流式输出</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/components/{component_name}/metrics</code></td>
+          <td><code>getPlatformComponentMetrics</code></td>
+          <td>查询单个平台组件资源指标快照</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/platform/services/health</code></td>
           <td><code>getPlatformServiceHealth</code></td>
           <td>查询 ANI 服务监控可达性</td>
@@ -2234,6 +2266,13 @@
         <li><code>PlanBoundTenantCountList</code></li>
         <li><code>PlatformCapacityResponse</code></li>
         <li><code>PlatformCapacitySummary</code></li>
+        <li><code>PlatformComponent</code></li>
+        <li><code>PlatformComponentGroup</code></li>
+        <li><code>PlatformComponentLogEntry</code></li>
+        <li><code>PlatformComponentLogListResponse</code></li>
+        <li><code>PlatformComponentMetrics</code></li>
+        <li><code>PlatformComponentRef</code></li>
+        <li><code>PlatformComponentStatusResponse</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
         <li><code>PlatformRegion</code></li>
         <li><code>PlatformRegionCapacity</code></li>

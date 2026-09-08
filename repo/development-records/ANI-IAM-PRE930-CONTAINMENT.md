@@ -2,7 +2,7 @@
 
 日期：2026-09-08
 
-状态：实现完成，GitHub PR exact-SHA 验证待执行
+状态：已吸收用户接受的 Observability main，GitHub PR exact-SHA 复验待执行
 
 ## 目的
 
@@ -12,11 +12,12 @@ ANI 正在为 2026-09-30 的 v1.0.0 补齐功能。为避免 ani-iam Direct P2 �
 
 ## 固定基线
 
-- ANI base：`caa2a5e72fad98215a5ea26696e453e5c2ef6523`
-- base tree：`839d673535f828f446d3fb8129b5874da24df00d`
+- 初始 ANI base：`caa2a5e72fad98215a5ea26696e453e5c2ef6523`
+- 用户接受的 reconciliation base：`804db51a5f93605f9bbd4ac407f0489ecb1d187c`
+- reconciliation base tree：`28eb0508c93aab28e86e044a88ada9e19bf16830`
 - PR #145 merge：`50f7b422707c2ab78462bd9bb8186bae018a14fe`
 - PR #145 parent：`e895af8cdfd5431804b64e1f571b3c6803278cc5`
-- 必须保留的后续提交：`9bfedfd`、`98b881d`、`caa2a5e`
+- 必须保留的后续提交：`9bfedfd`、`98b881d`、`caa2a5e`、`804db51`
 
 ## 恢复内容
 
@@ -31,6 +32,7 @@ ANI 正在为 2026-09-30 的 v1.0.0 补齐功能。为避免 ani-iam Direct P2 �
 - PR #149 的 VM status 修复保持不变。
 - PR #144 的 Tenant API、handler、migration、SDK 与 policy 保持在当前契约中。
 - PR #150 的 KB API 与实现保持不变。
+- PR #148 的平台组件状态/诊断 OpenAPI、ports/adapters、Gateway handlers 和 current Core policy 保持不变。
 - 不为新增 Tenant operations 提前决定未来 Direct P2 handler/owner/classification；目标 registry 在冻结后由候选轨道重新生成。
 
 ## 验证边界

@@ -13,11 +13,17 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 平台组件状态与组件诊断（2026-09，分支 feat/component-status）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-COMPONENT-STATUS-A | BOSS 平台健康组件状态只读能力：OpenAPI 契约优先新增 4 端点——`GET /platform/components`（22 组件静态注册表按 service/dependency/platform 三组聚合，K8s REST 逐对象读状态/副本/版本，service 组融合 Prometheus `up`+`target_info` 身份契约 scrape_status，任一组件失败不阻塞 200，15s TTL 缓存）与组件诊断三接口 metrics（cAdvisor 资源快照，单源失败字段 null）/logs（Loki backward 倒序 + cursor 翻页）/logs/stream（SSE 完全复刻实例日志流语义）；ports + real/local 双 adapter + env 装配（COMPONENT_STATUS_PROVIDER / COMPONENT_DIAGNOSTICS_PROVIDER）+ gateway 路由与错误映射 + authz/Core SDK 生成物；新增单测 35 个全 PASS，门禁全绿；K8s 测试环境实测（镜像 dev-20260905-compdiag）列表/metrics/logs/SSE/401/404 全通过；2026-09-07 补充产品决策：原型 P99/错误率/依赖检查三列裁剪不做（契约 description 同步为产品边界声明），并完成镜像被覆盖后的恢复与回归实测（services/health 503 定位为并行会话重部署服务缺 target_info 埋点的环境漂移，与本批次无关） | platform-component-status-a.md |
+
 ### ANI IAM 9 月 30 日前隔离（2026-09）
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
-| ANI-IAM-PRE930-CONTAINMENT | 基于 `caa2a5e` 外科式移除 PR #145 提前进入当前发布轨道的 Direct P2 目标契约与 Gateway 集成，保留后续 VM/Tenant/KB 功能；恢复现行 Core v1 compatibility 和 Gateway authz 门禁，并纳入 required Actions。未部署、未切流；测试以 PR exact SHA 的 GitHub Actions 为准 | ANI-IAM-PRE930-CONTAINMENT.md |
+| ANI-IAM-PRE930-CONTAINMENT | 基于 `804db51` 外科式移除 PR #145 提前进入当前发布轨道的 Direct P2 目标契约与 Gateway 集成，保留后续 VM/Tenant/KB/Observability 功能；恢复现行 Core v1 compatibility 和 Gateway authz 门禁，并纳入 required Actions。未部署、未切流；测试以 PR exact SHA 的 GitHub Actions 为准 | ANI-IAM-PRE930-CONTAINMENT.md |
 
 ### 仓库范围清理（2026-09）
 
