@@ -34,8 +34,8 @@ func TestTargetRegistryDecisionAndObligationCompleteness(t *testing.T) {
 	if len(registry.byRoute) == 0 || len(registry.byRoute) != len(registry.byOperation) {
 		t.Fatalf("registry counts routes=%d operations=%d", len(registry.byRoute), len(registry.byOperation))
 	}
-	if got := len(registry.byRoute); got != 298 {
-		t.Fatalf("frozen operation count = %d, want 298", got)
+	if got := len(registry.byRoute); got != 302 {
+		t.Fatalf("frozen operation count = %d, want 302", got)
 	}
 	classifications := map[TargetAuthClassification]int{}
 	owners := map[TargetBackendOwner]int{}
@@ -50,16 +50,16 @@ func TestTargetRegistryDecisionAndObligationCompleteness(t *testing.T) {
 		decisionCalls[policy.IAMDecisionCalls]++
 		decisions[policy.IAMDecision]++
 	}
-	if classifications[TargetAuthClassificationPublic] != 11 || classifications[TargetAuthClassificationAuthenticated] != 9 || classifications[TargetAuthClassificationAuthorized] != 278 {
+	if classifications[TargetAuthClassificationPublic] != 11 || classifications[TargetAuthClassificationAuthenticated] != 9 || classifications[TargetAuthClassificationAuthorized] != 282 {
 		t.Fatalf("frozen auth classification counts = %#v", classifications)
 	}
-	if owners[TargetOwnerGateway] != 3 || owners[TargetOwnerCoreControl] != 208 || owners[TargetOwnerIAM] != 87 {
+	if owners[TargetOwnerGateway] != 3 || owners[TargetOwnerCoreControl] != 212 || owners[TargetOwnerIAM] != 87 {
 		t.Fatalf("frozen owner counts = %#v", owners)
 	}
-	if decisionCalls[0] != 11 || decisionCalls[1] != 287 || len(decisionCalls) != 2 {
+	if decisionCalls[0] != 11 || decisionCalls[1] != 291 || len(decisionCalls) != 2 {
 		t.Fatalf("frozen IAM decision-call counts = %#v", decisionCalls)
 	}
-	if decisions[TargetIAMDecisionNone] != 11 || decisions[TargetIAMDecisionValidatePrincipal] != 9 || decisions[TargetIAMDecisionCheckPermission] != 278 || len(decisions) != 3 {
+	if decisions[TargetIAMDecisionNone] != 11 || decisions[TargetIAMDecisionValidatePrincipal] != 9 || decisions[TargetIAMDecisionCheckPermission] != 282 || len(decisions) != 3 {
 		t.Fatalf("frozen IAM decision kinds = %#v", decisions)
 	}
 }

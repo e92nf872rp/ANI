@@ -631,32 +631,6 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.createEmailRecipient",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "POST",
-      "obligations": [],
-      "operation_id": "createEmailRecipient",
-      "path": "/notifications/email/recipients",
-      "permission": {
-        "actions": [
-          "create"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -1766,6 +1740,32 @@
           "human"
         ]
       },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.createTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "POST",
+      "obligations": [],
+      "operation_id": "createTenant",
+      "path": "/admin/tenants",
+      "permission": {
+        "actions": [
+          "create"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
       "backend_owner": "iam",
       "gateway_handler": "gateway.createTenantIAMInvitation",
       "iam_decision": "check_permission",
@@ -1929,32 +1929,6 @@
         ],
         "resource": "object-store",
         "scope": "tenant"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.deleteEmailRecipient",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "DELETE",
-      "obligations": [],
-      "operation_id": "deleteEmailRecipient",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "permission": {
-        "actions": [
-          "delete"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
       }
     },
     {
@@ -2932,6 +2906,32 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.disableTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "POST",
+      "obligations": [],
+      "operation_id": "disableTenant",
+      "path": "/admin/tenants/{tenant_id}/disable",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -3112,6 +3112,32 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.freezeTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "POST",
+      "obligations": [],
+      "operation_id": "freezeTenant",
+      "path": "/admin/tenants/{tenant_id}/freeze",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -3151,32 +3177,6 @@
       "method": "GET",
       "operation_id": "getBranding",
       "path": "/branding"
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.getEmailSmtpConfig",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "GET",
-      "obligations": [],
-      "operation_id": "getEmailSmtpConfig",
-      "path": "/notifications/email/smtp",
-      "permission": {
-        "actions": [
-          "read"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
     },
     {
       "auth_classification": "authorized",
@@ -3917,6 +3917,64 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
+          "access_token",
+          "api_key",
+          "service_token"
+        ],
+        "principal_kinds": [
+          "human",
+          "service"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.getPlatformComponentMetrics",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "getPlatformComponentMetrics",
+      "path": "/platform/components/{component_name}/metrics",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "observability",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token",
+          "api_key",
+          "service_token"
+        ],
+        "principal_kinds": [
+          "human",
+          "service"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.getPlatformComponents",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "getPlatformComponents",
+      "path": "/platform/components",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "observability",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
           "access_token"
         ],
         "principal_kinds": [
@@ -4570,6 +4628,32 @@
           "human"
         ]
       },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.getTenantAuth",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "getTenantAuth",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
       "backend_owner": "iam",
       "gateway_handler": "gateway.getTenantIAMInvitation",
       "iam_decision": "check_permission",
@@ -4957,58 +5041,6 @@
         ],
         "resource": "object-store",
         "scope": "tenant"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.listEmailRecipients",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "GET",
-      "obligations": [],
-      "operation_id": "listEmailRecipients",
-      "path": "/notifications/email/recipients",
-      "permission": {
-        "actions": [
-          "read"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.listEmailSubscriptions",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "GET",
-      "obligations": [],
-      "operation_id": "listEmailSubscriptions",
-      "path": "/notifications/email/subscriptions",
-      "permission": {
-        "actions": [
-          "read"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
       }
     },
     {
@@ -5831,6 +5863,35 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
+          "access_token",
+          "api_key",
+          "service_token"
+        ],
+        "principal_kinds": [
+          "human",
+          "service"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.listPlatformComponentLogs",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "listPlatformComponentLogs",
+      "path": "/platform/components/{component_name}/logs",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "observability",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
           "access_token"
         ],
         "principal_kinds": [
@@ -6577,6 +6638,32 @@
           "human"
         ]
       },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.listTenantLifecycle",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "listTenantLifecycle",
+      "path": "/admin/tenants/{tenant_id}/lifecycle",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
       "backend_owner": "iam",
       "gateway_handler": "gateway.listTenantUsers",
       "iam_decision": "check_permission",
@@ -6590,6 +6677,32 @@
           "read"
         ],
         "resource": "iam.memberships",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.listTenants",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "listTenants",
+      "path": "/admin/tenants",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "tenants",
         "scope": "platform"
       }
     },
@@ -6856,58 +6969,6 @@
           "execute"
         ],
         "resource": "k8s-clusters",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.putEmailSmtpConfig",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "PUT",
-      "obligations": [],
-      "operation_id": "putEmailSmtpConfig",
-      "path": "/notifications/email/smtp",
-      "permission": {
-        "actions": [
-          "update"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.putEmailSubscriptions",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "PUT",
-      "obligations": [],
-      "operation_id": "putEmailSubscriptions",
-      "path": "/notifications/email/subscriptions",
-      "permission": {
-        "actions": [
-          "update"
-        ],
-        "resource": "notifications",
         "scope": "platform"
       }
     },
@@ -7561,32 +7622,6 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.sendTestEmail",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "POST",
-      "obligations": [],
-      "operation_id": "sendTestEmail",
-      "path": "/notifications/email/test",
-      "permission": {
-        "actions": [
-          "execute"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -7822,6 +7857,35 @@
       }
     },
     {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token",
+          "api_key",
+          "service_token"
+        ],
+        "principal_kinds": [
+          "human",
+          "service"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.streamPlatformComponentLogs",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "streamPlatformComponentLogs",
+      "path": "/platform/components/{component_name}/logs/stream",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "observability",
+        "scope": "platform"
+      }
+    },
+    {
       "auth_classification": "authenticated",
       "authn": {
         "credential_kinds": [
@@ -7896,6 +7960,32 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.unfreezeTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "POST",
+      "obligations": [],
+      "operation_id": "unfreezeTenant",
+      "path": "/admin/tenants/{tenant_id}/unfreeze",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -7958,32 +8048,6 @@
         ],
         "resource": "volumes",
         "scope": "tenant"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.updateEmailRecipient",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "PATCH",
-      "obligations": [],
-      "operation_id": "updateEmailRecipient",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "permission": {
-        "actions": [
-          "update"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
       }
     },
     {
@@ -8277,6 +8341,32 @@
           "human"
         ]
       },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.updateTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "PUT",
+      "obligations": [],
+      "operation_id": "updateTenant",
+      "path": "/admin/tenants/{tenant_id}",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
       "backend_owner": "iam",
       "gateway_handler": "gateway.updateTenantAccess",
       "iam_decision": "check_permission",
@@ -8290,6 +8380,32 @@
           "update"
         ],
         "resource": "iam.tenant-access",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.updateTenantAuth",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "PUT",
+      "obligations": [],
+      "operation_id": "updateTenantAuth",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
         "scope": "platform"
       }
     },
@@ -8599,7 +8715,7 @@
       }
     }
   ],
-  "policy_revision": "sha256:13fbb8844963f5fc3256fb33e4539abbee5e2d4e73aba9b17eb9d43db9d68b19",
+  "policy_revision": "sha256:e7195aff87e6b92a331d96f39a4002f0791f89950046e027d1da754833dc8c16",
   "schema_version": "ani.operation-policy/v1",
   "trusted_context": {
     "inject_headers": [

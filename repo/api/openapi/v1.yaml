@@ -953,6 +953,146 @@ components:
           maxItems: 7
           items: { $ref: '#/components/schemas/PlatformServiceHealthComponent' }
 
+    PlatformComponentStatusResponse:
+      type: object
+      description: 平台组件运行状态聚合；只读，按静态注册表固定分组返回，组件集合不随集群实际对象动态增减。
+      required: [observed_at, groups, dev_profile]
+      properties:
+        observed_at: { type: string, format: date-time }
+        groups:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: '#/components/schemas/PlatformComponentGroup' }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformComponentGroup:
+      type: object
+      description: 组件分组；service 为七个 ANI 自研服务，dependency 为平台基础依赖，platform 为其他平台组件。
+      required: [name, components]
+      properties:
+        name: { type: string, enum: [service, dependency, platform] }
+        components:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformComponent' }
+
+    PlatformComponent:
+      type: object
+      description: 单个组件运行状态；K8s 对象缺失或读取失败时 status=unknown + reason，不阻塞整体 200。
+      required: [name, kind, namespace, group, status]
+      properties:
+        name:
+          type: string
+          description: "K8s 工作负载对象名（注册表固定）"
+        kind:
+          type: string
+          enum: [Deployment, StatefulSet, DaemonSet]
+        namespace:
+          type: string
+        group:
+          type: string
+          enum: [service, dependency, platform]
+        status:
+          type: string
+          enum: [running, degraded, stopped, unknown]
+          description: "running=全副本 Ready 且 Available；degraded=部分副本 Ready 或 Available=False；stopped=期望副本为 0；unknown=对象缺失/读取失败"
+        desired_replicas:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: "期望副本数；Deployment/StatefulSet 取 spec.replicas，DaemonSet 取 desiredNumberScheduled，不可得时为 null"
+        ready_replicas:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: "Ready 副本数；不可得时为 null"
+        version:
+          type: string
+          nullable: true
+          description: "首个容器镜像 tag（镜像名最后一个 ':' 之后段）；不可得时为 null"
+        scrape_status:
+          type: string
+          enum: [reachable, unreachable, unknown]
+          nullable: true
+          description: "仅 service 组融合 Prometheus 抓取可达性；其余组恒为 null。reachable 不表示业务健康"
+        reason:
+          type: string
+          nullable: true
+          description: "降级/unknown 原因；正常时为 null"
+
+    PlatformComponentMetrics:
+      type: object
+      description: 单个平台组件资源指标快照；Prometheus cAdvisor 聚合口径，单源失败字段为 null（不伪造 0）。
+      required: [component, timestamp, dev_profile]
+      properties:
+        component:
+          $ref: '#/components/schemas/PlatformComponentRef'
+        timestamp:
+          type: string
+          format: date-time
+        cpu_cores:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(rate(container_cpu_usage_seconds_total[5m]))，业务容器聚合"
+        memory_used_mb:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(container_memory_working_set_bytes) / 1048576"
+        memory_total_mb:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(container_spec_memory_limit_bytes) / 1048576；未设 limits 时为 null"
+        network_rx_bytes_per_sec:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(rate(container_network_receive_bytes_total[5m]))"
+        network_tx_bytes_per_sec:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(rate(container_network_transmit_bytes_total[5m]))"
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformComponentRef:
+      type: object
+      description: 组件引用（注册表固定信息）。
+      required: [name, namespace, group]
+      properties:
+        name: { type: string }
+        namespace: { type: string }
+        group: { type: string, enum: [service, dependency, platform] }
+
+    PlatformComponentLogEntry:
+      type: object
+      description: 单条组件日志；非 JSON 行回退为纯文本语义（message=整行，level 推断）。
+      required: [timestamp, level, message]
+      properties:
+        timestamp: { type: string, format: date-time }
+        level: { type: string }
+        message: { type: string }
+        pod: { type: string }
+        container: { type: string }
+        stream: { type: string }
+
+    PlatformComponentLogListResponse:
+      type: object
+      description: 组件日志列表（backward 倒序）；cursor 为最早一条 timestamp，供往前翻页。
+      required: [items, total, dev_profile]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformComponentLogEntry' }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
     CoreDevProfileInfo:
       type: object
       description: "Core dev/local profile 标记；用于区分本地联调成功与真实 provider 执行成功。"
@@ -12335,6 +12475,182 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
+  /platform/components:
+    get:
+      operationId: getPlatformComponents
+      x-ani-handler: gateway.getPlatformComponents
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human, service]
+        credential_kinds: [access_token, api_key, service_token]
+      x-ani-authz:
+        version: v1
+        resource: observability
+        actions: [read]
+        scope: platform
+        obligations: []
+      summary: 查询平台组件运行状态
+      description: |
+        按静态注册表返回平台组件的只读运行状态，分组为 service / dependency / platform。
+        组件部署状态读取 Kubernetes 工作负载对象（Deployment/StatefulSet/DaemonSet 的副本与 conditions）；
+        service 组额外融合 Prometheus 抓取可达性（scrape_status，语义同 /platform/services/health，
+        不表示业务健康）。单源失败不阻塞 200：缺失数据降级为 unknown 并在 reason 说明。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: 平台组件运行状态聚合
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformComponentStatusResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /platform/components/{component_name}/metrics:
+    get:
+      operationId: getPlatformComponentMetrics
+      x-ani-handler: gateway.getPlatformComponentMetrics
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human, service]
+        credential_kinds: [access_token, api_key, service_token]
+      x-ani-authz:
+        version: v1
+        resource: observability
+        actions: [read]
+        scope: platform
+        obligations: []
+      summary: 查询单个平台组件资源指标快照
+      description: |
+        按组件对象名（静态注册表）返回资源指标快照：CPU 核数（5m rate）、
+        内存用量/上限（MiB）、网络收发速率（B/s），Prometheus cAdvisor 指标按
+        namespace + pod 前缀正则聚合。单源失败不阻塞 200：缺失字段为 null。
+        组件级 P99/错误率/QPS 等业务指标不在本接口返回（产品决策 2026-09-07：
+        组件状态仅提供资源口径与日志下钻，业务指标列不做）。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: component_name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 组件资源指标快照
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformComponentMetrics' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404":
+          description: 组件不在平台注册表中
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: 指标 provider 未配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /platform/components/{component_name}/logs:
+    get:
+      operationId: listPlatformComponentLogs
+      x-ani-handler: gateway.listPlatformComponentLogs
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human, service]
+        credential_kinds: [access_token, api_key, service_token]
+      x-ani-authz:
+        version: v1
+        resource: observability
+        actions: [read]
+        scope: platform
+        obligations: []
+      summary: 查询单个平台组件日志列表
+      description: |
+        按组件对象名查询 Loki 持久化日志（namespace + pod 前缀正则过滤），
+        backward 方向返回最近 limit 条（时间倒序），cursor 往前翻页。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: component_name, in: path, required: true, schema: { type: string } }
+        - { name: limit,  in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: level,  in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+      responses:
+        "200":
+          description: 组件日志列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformComponentLogListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404":
+          description: 组件不在平台注册表中
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: 日志 provider 未配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /platform/components/{component_name}/logs/stream:
+    get:
+      operationId: streamPlatformComponentLogs
+      x-ani-handler: gateway.streamPlatformComponentLogs
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human, service]
+        credential_kinds: [access_token, api_key, service_token]
+      x-ani-authz:
+        version: v1
+        resource: observability
+        actions: [read]
+        scope: platform
+        obligations: []
+      summary: 平台组件日志 SSE 流式输出
+      description: |
+        SSE 流式输出平台组件日志：首屏回放最近 limit 条历史日志（时间正序），
+        然后持续增量推送新日志。event: log / error / done 帧语义与
+        /instances/{instance_id}/logs/stream 一致。连接时长上限 10 分钟。
+        预流错误（401/403/404/400）返回普通 JSON，不进入 SSE 流。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: component_name, in: path, required: true, schema: { type: string } }
+        - { name: level,             in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+        - { name: limit,             in: query, schema: { type: integer, default: 1000, minimum: 1, maximum: 1000 } }
+        - { name: interval_seconds,  in: query, schema: { type: integer, default: 2, minimum: 1, maximum: 30 } }
+      responses:
+        "200":
+          description: SSE 日志流
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404":
+          description: 组件不在平台注册表中
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: 日志流未配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /observability/query:
     get:
       operationId: queryObservability
@@ -14605,6 +14921,18 @@ paths:
   /admin/tenants:
     post:
       operationId: createTenant
+      x-ani-handler: gateway.createTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [create]
+        scope: platform
+        obligations: []
       summary: 创建租户
       description: |
         事务内 INSERT tenants(status='active') + tenant_auth(默认值) + users + user_roles(tenant-admin)
@@ -14629,6 +14957,18 @@ paths:
         "409": { $ref: '#/components/responses/Conflict', description: "TENANT_NAME_CONFLICT" }
     get:
       operationId: listTenants
+      x-ani-handler: gateway.listTenants
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 租户列表
       description: |
         游标分页（created_at DESC, id DESC）；支持 status / search（name 或 display_name ILIKE）过滤。
@@ -14684,6 +15024,18 @@ paths:
         "404": { $ref: '#/components/responses/TenantNotFound' }
     put:
       operationId: updateTenant
+      x-ani-handler: gateway.updateTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 更新租户基本信息
       description: |
         部分更新 display_name / contact_email；不可改 name / status。
@@ -14711,6 +15063,18 @@ paths:
   /admin/tenants/{tenant_id}/freeze:
     post:
       operationId: freezeTenant
+      x-ani-handler: gateway.freezeTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 冻结租户
       description: |
         active → frozen；设置 frozen_at 并写入 tenant_lifecycle('freeze')。
@@ -14733,6 +15097,18 @@ paths:
   /admin/tenants/{tenant_id}/unfreeze:
     post:
       operationId: unfreezeTenant
+      x-ani-handler: gateway.unfreezeTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 解冻租户
       description: |
         frozen → active；清空 frozen_at 并写入 tenant_lifecycle('unfreeze')。
@@ -14755,6 +15131,18 @@ paths:
   /admin/tenants/{tenant_id}/disable:
     post:
       operationId: disableTenant
+      x-ani-handler: gateway.disableTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 禁用租户
       description: |
         active/frozen → disabled（终态）；设置 disabled_at 并写入 tenant_lifecycle('disable')。
@@ -14777,6 +15165,18 @@ paths:
   /admin/tenants/{tenant_id}/auth:
     get:
       operationId: getTenantAuth
+      x-ani-handler: gateway.getTenantAuth
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 查询租户认证配置
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:read"
@@ -14793,6 +15193,18 @@ paths:
         "404": { $ref: '#/components/responses/TenantNotFound' }
     put:
       operationId: updateTenantAuth
+      x-ani-handler: gateway.updateTenantAuth
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 更新租户认证配置
       description: |
         部分更新 sso_enabled / provider / mfa_required。Services 层 SSO/MFA 两个 PUT 均映射到此端点。
@@ -14822,6 +15234,18 @@ paths:
   /admin/tenants/{tenant_id}/lifecycle:
     get:
       operationId: listTenantLifecycle
+      x-ani-handler: gateway.listTenantLifecycle
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 查询租户生命周期记录
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:read"

@@ -350,6 +350,16 @@ func main() {
 		logger.Error("failed to configure platform capacity provider runtime", "err", err)
 		os.Exit(1)
 	}
+	componentStatusService, err := newGatewayComponentStatusService(kubernetesRESTClient, platformServiceHealthReader)
+	if err != nil {
+		logger.Error("failed to configure component status provider runtime", "err", err)
+		os.Exit(1)
+	}
+	componentMetricsReader, componentLogReader, err := newGatewayComponentDiagnosticsService()
+	if err != nil {
+		logger.Error("failed to configure component diagnostics provider runtime", "err", err)
+		os.Exit(1)
+	}
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -397,6 +407,9 @@ func main() {
 		QuotaStoreService:                     quotaStoreService,
 		MeteringService:                       meteringService,
 		PlatformCapacityService:               platformCapacityService,
+		ComponentStatusService:                componentStatusService,
+		ComponentMetricsReader:                componentMetricsReader,
+		ComponentLogReader:                    componentLogReader,
 	})
 	runtimeAdmin, err := startGatewayRuntimeAdmin(logger)
 	if err != nil {

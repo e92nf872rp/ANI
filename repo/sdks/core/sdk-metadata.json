@@ -1505,6 +1505,30 @@
       "scope": "scope:capacity:read"
     },
     {
+      "operationId": "getPlatformComponents",
+      "method": "GET",
+      "path": "/platform/components",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "listPlatformComponentLogs",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/logs",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "streamPlatformComponentLogs",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/logs/stream",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "getPlatformComponentMetrics",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/metrics",
+      "scope": "scope:observability:read"
+    },
+    {
       "operationId": "getPlatformServiceHealth",
       "method": "GET",
       "path": "/platform/services/health",
@@ -2007,6 +2031,13 @@
     "PlanBoundTenantCountList",
     "PlatformCapacityResponse",
     "PlatformCapacitySummary",
+    "PlatformComponent",
+    "PlatformComponentGroup",
+    "PlatformComponentLogEntry",
+    "PlatformComponentLogListResponse",
+    "PlatformComponentMetrics",
+    "PlatformComponentRef",
+    "PlatformComponentStatusResponse",
     "PlatformPasswordLoginRequest",
     "PlatformRegion",
     "PlatformRegionCapacity",
@@ -2281,6 +2312,7 @@
     "listStorageObjects",
     "listObservabilityAlertRules",
     "getPlatformWorkloadLogs",
+    "listPlatformComponentLogs",
     "listQuotas",
     "listRegistryImages",
     "listRegistryProjects",
