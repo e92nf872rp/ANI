@@ -198,10 +198,6 @@ func (s *listingAuditStore) ListUserAuditLogs(_ context.Context, userID uuid.UUI
 		return matched[i].CreatedAt.After(matched[j].CreatedAt)
 	})
 	total := len(matched)
-	if cursor := strings.TrimSpace(filter.Cursor); cursor != "" {
-		// 单测简化：不支持非法 cursor 路径（postgres 层另有测试）
-	}
-	start := 0
 	if len(matched) > limit {
 		matched = matched[:limit]
 	}
@@ -210,7 +206,6 @@ func (s *listingAuditStore) ListUserAuditLogs(_ context.Context, userID uuid.UUI
 		last := matched[len(matched)-1]
 		nextCursor = last.ID.String()
 	}
-	_ = start
 	return ports.AuditLogListResult{
 		Items:      matched,
 		Total:      total,

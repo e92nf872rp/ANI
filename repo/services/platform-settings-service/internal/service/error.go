@@ -10,10 +10,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func unimplemented() error {
-	return status.Error(codes.Unimplemented, ports.ErrNotImplemented.Error())
-}
-
 // mapDomainError 将哨兵错误映射为「CODE: detail」形式的 gRPC status。
 func mapDomainError(err error) error {
 	if err == nil {
