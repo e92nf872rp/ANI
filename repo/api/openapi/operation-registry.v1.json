@@ -631,32 +631,6 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.createEmailRecipient",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "POST",
-      "obligations": [],
-      "operation_id": "createEmailRecipient",
-      "path": "/notifications/email/recipients",
-      "permission": {
-        "actions": [
-          "create"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -1935,32 +1909,6 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.deleteEmailRecipient",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "DELETE",
-      "obligations": [],
-      "operation_id": "deleteEmailRecipient",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "permission": {
-        "actions": [
-          "delete"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -3156,32 +3104,6 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.getEmailSmtpConfig",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "GET",
-      "obligations": [],
-      "operation_id": "getEmailSmtpConfig",
-      "path": "/notifications/email/smtp",
-      "permission": {
-        "actions": [
-          "read"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -3910,6 +3832,64 @@
           "get"
         ],
         "resource": "capacity",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token",
+          "api_key",
+          "service_token"
+        ],
+        "principal_kinds": [
+          "human",
+          "service"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.getPlatformComponentMetrics",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "getPlatformComponentMetrics",
+      "path": "/platform/components/{component_name}/metrics",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "observability",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token",
+          "api_key",
+          "service_token"
+        ],
+        "principal_kinds": [
+          "human",
+          "service"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.getPlatformComponents",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "getPlatformComponents",
+      "path": "/platform/components",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "observability",
         "scope": "platform"
       }
     },
@@ -4963,58 +4943,6 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.listEmailRecipients",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "GET",
-      "obligations": [],
-      "operation_id": "listEmailRecipients",
-      "path": "/notifications/email/recipients",
-      "permission": {
-        "actions": [
-          "read"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.listEmailSubscriptions",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "GET",
-      "obligations": [],
-      "operation_id": "listEmailSubscriptions",
-      "path": "/notifications/email/subscriptions",
-      "permission": {
-        "actions": [
-          "read"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -5824,6 +5752,35 @@
           "read"
         ],
         "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token",
+          "api_key",
+          "service_token"
+        ],
+        "principal_kinds": [
+          "human",
+          "service"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.listPlatformComponentLogs",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "listPlatformComponentLogs",
+      "path": "/platform/components/{component_name}/logs",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "observability",
         "scope": "platform"
       }
     },
@@ -6870,58 +6827,6 @@
         ]
       },
       "backend_owner": "core-control",
-      "gateway_handler": "gateway.putEmailSmtpConfig",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "PUT",
-      "obligations": [],
-      "operation_id": "putEmailSmtpConfig",
-      "path": "/notifications/email/smtp",
-      "permission": {
-        "actions": [
-          "update"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.putEmailSubscriptions",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "PUT",
-      "obligations": [],
-      "operation_id": "putEmailSubscriptions",
-      "path": "/notifications/email/subscriptions",
-      "permission": {
-        "actions": [
-          "update"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
       "gateway_handler": "gateway.putTenantReservations",
       "iam_decision": "check_permission",
       "iam_decision_calls": 1,
@@ -7561,32 +7466,6 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.sendTestEmail",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "POST",
-      "obligations": [],
-      "operation_id": "sendTestEmail",
-      "path": "/notifications/email/test",
-      "permission": {
-        "actions": [
-          "execute"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -7822,6 +7701,35 @@
       }
     },
     {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token",
+          "api_key",
+          "service_token"
+        ],
+        "principal_kinds": [
+          "human",
+          "service"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.streamPlatformComponentLogs",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "streamPlatformComponentLogs",
+      "path": "/platform/components/{component_name}/logs/stream",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "observability",
+        "scope": "platform"
+      }
+    },
+    {
       "auth_classification": "authenticated",
       "authn": {
         "credential_kinds": [
@@ -7958,32 +7866,6 @@
         ],
         "resource": "volumes",
         "scope": "tenant"
-      }
-    },
-    {
-      "auth_classification": "authorized",
-      "authn": {
-        "credential_kinds": [
-          "access_token"
-        ],
-        "principal_kinds": [
-          "human"
-        ]
-      },
-      "backend_owner": "core-control",
-      "gateway_handler": "gateway.updateEmailRecipient",
-      "iam_decision": "check_permission",
-      "iam_decision_calls": 1,
-      "method": "PATCH",
-      "obligations": [],
-      "operation_id": "updateEmailRecipient",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "permission": {
-        "actions": [
-          "update"
-        ],
-        "resource": "notifications",
-        "scope": "platform"
       }
     },
     {
@@ -8599,7 +8481,7 @@
       }
     }
   ],
-  "policy_revision": "sha256:13fbb8844963f5fc3256fb33e4539abbee5e2d4e73aba9b17eb9d43db9d68b19",
+  "policy_revision": "sha256:3e8292df863c8740236ac0c46a16e839ff366a6adc8454473f934e47a1bcea1b",
   "schema_version": "ani.operation-policy/v1",
   "trusted_context": {
     "inject_headers": [

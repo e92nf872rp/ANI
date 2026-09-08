@@ -12344,6 +12344,18 @@ paths:
   /platform/components:
     get:
       operationId: getPlatformComponents
+      x-ani-handler: gateway.getPlatformComponents
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human, service]
+        credential_kinds: [access_token, api_key, service_token]
+      x-ani-authz:
+        version: v1
+        resource: observability
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 查询平台组件运行状态
       description: |
         按静态注册表返回平台组件的只读运行状态，分组为 service / dependency / platform。
@@ -12352,12 +12364,6 @@ paths:
         不表示业务健康）。单源失败不阻塞 200：缺失数据降级为 unknown 并在 reason 说明。
       tags: [Observability]
       x-ani-rbac-scope: "scope:observability:read"
-      x-ani-authz:
-        version: v1
-        resource: observability
-        action: read
-        boundary: platform
-        principal_kinds: [user, service]
       security: [{ BearerAuth: [] }]
       responses:
         "200":
@@ -12371,6 +12377,18 @@ paths:
   /platform/components/{component_name}/metrics:
     get:
       operationId: getPlatformComponentMetrics
+      x-ani-handler: gateway.getPlatformComponentMetrics
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human, service]
+        credential_kinds: [access_token, api_key, service_token]
+      x-ani-authz:
+        version: v1
+        resource: observability
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 查询单个平台组件资源指标快照
       description: |
         按组件对象名（静态注册表）返回资源指标快照：CPU 核数（5m rate）、
@@ -12380,12 +12398,6 @@ paths:
         组件状态仅提供资源口径与日志下钻，业务指标列不做）。
       tags: [Observability]
       x-ani-rbac-scope: "scope:observability:read"
-      x-ani-authz:
-        version: v1
-        resource: observability
-        action: read
-        boundary: platform
-        principal_kinds: [user, service]
       security: [{ BearerAuth: [] }]
       parameters:
         - { name: component_name, in: path, required: true, schema: { type: string } }
@@ -12412,18 +12424,24 @@ paths:
   /platform/components/{component_name}/logs:
     get:
       operationId: listPlatformComponentLogs
+      x-ani-handler: gateway.listPlatformComponentLogs
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human, service]
+        credential_kinds: [access_token, api_key, service_token]
+      x-ani-authz:
+        version: v1
+        resource: observability
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 查询单个平台组件日志列表
       description: |
         按组件对象名查询 Loki 持久化日志（namespace + pod 前缀正则过滤），
         backward 方向返回最近 limit 条（时间倒序），cursor 往前翻页。
       tags: [Observability]
       x-ani-rbac-scope: "scope:observability:read"
-      x-ani-authz:
-        version: v1
-        resource: observability
-        action: read
-        boundary: platform
-        principal_kinds: [user, service]
       security: [{ BearerAuth: [] }]
       parameters:
         - { name: component_name, in: path, required: true, schema: { type: string } }
@@ -12453,6 +12471,18 @@ paths:
   /platform/components/{component_name}/logs/stream:
     get:
       operationId: streamPlatformComponentLogs
+      x-ani-handler: gateway.streamPlatformComponentLogs
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human, service]
+        credential_kinds: [access_token, api_key, service_token]
+      x-ani-authz:
+        version: v1
+        resource: observability
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 平台组件日志 SSE 流式输出
       description: |
         SSE 流式输出平台组件日志：首屏回放最近 limit 条历史日志（时间正序），
@@ -12461,12 +12491,6 @@ paths:
         预流错误（401/403/404/400）返回普通 JSON，不进入 SSE 流。
       tags: [Observability]
       x-ani-rbac-scope: "scope:observability:read"
-      x-ani-authz:
-        version: v1
-        resource: observability
-        action: read
-        boundary: platform
-        principal_kinds: [user, service]
       security: [{ BearerAuth: [] }]
       parameters:
         - { name: component_name, in: path, required: true, schema: { type: string } }
