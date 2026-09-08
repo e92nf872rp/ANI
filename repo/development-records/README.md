@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 租户计费操作历史（2026-09，分支 feat/tenant-billing）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-BILLING-B | 在 TENANT-BILLING-A 基础上追加第 6 个只读端点 `GET /api/v1/svc/billing/operations`（抽屉「操作历史」Tab 数据源，tenant_id/limit/offset，created_at 倒序）：新表 `billing_operation_logs` 迁移落表，生成/结清/冲抵/调账 4 个写点与业务写**同事务**落流水（回滚不落、幂等重放与 409 冲突不落流水）；operator 透传 token user_id；契约先行 + pb/SDK/docs 重生成幂等零漂移；修复 `services/v1.yaml` 裸 `no` 被 YAML 1.1 解析为 False 的契约缺陷（加引号）；单测 svc +4 / gateway +2 全 PASS，混合联调 13 用例（e30–e43，本地进程 × 环境 PG/Redis/auth-service，含真实 401、operator 环境库复核、overview/CSV 全接口冒烟）全部通过；已合并 main #148/#150/#152 并全量回归。未部署 K8s，不标 live/runtime ready | TENANT-BILLING-B.md |
+
 ### 租户计费结算接口（2026-09，分支 feat/tenant-billing）
 
 | 批次 | 内容摘要 | 文件 |
