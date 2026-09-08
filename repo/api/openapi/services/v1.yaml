@@ -4458,6 +4458,13 @@ paths:
       operationId: getPlatformAdminPermissions
       summary: 查询平台运营账号当前角色权限（需 platform-admin / platform-ops / platform-readonly）
       tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: platform_admin
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
