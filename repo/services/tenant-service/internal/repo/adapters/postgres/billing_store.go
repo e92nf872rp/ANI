@@ -122,7 +122,7 @@ func (s *PostgresBillingStore) CreateInvoice(ctx context.Context, in ports.Creat
 	if err != nil {
 		return nil, fmt.Errorf("begin billing invoice transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // 已 Commit 时为 no-op
+	defer func() { _ = tx.Rollback(ctx) }() // 已 Commit 时为 no-op
 
 	inv, err := queryBillingInvoice(ctx, tx, insertBillingInvoiceSQL,
 		in.TenantID, in.Period, in.No, in.AmountUSD, ports.BillingInvoiceIssued,
@@ -169,7 +169,7 @@ func (s *PostgresBillingStore) UpdateInvoiceStatus(ctx context.Context, id uuid.
 	if err != nil {
 		return nil, fmt.Errorf("begin billing invoice action transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // 已 Commit 时为 no-op
+	defer func() { _ = tx.Rollback(ctx) }() // 已 Commit 时为 no-op
 
 	inv, err := queryBillingInvoice(ctx, tx, casUpdateBillingInvoiceSQL,
 		id, status, settledAt, creditedAt, ports.BillingInvoiceIssued)
@@ -237,7 +237,7 @@ func (s *PostgresBillingStore) SoftDeleteInvoice(ctx context.Context, id uuid.UU
 	if err != nil {
 		return nil, fmt.Errorf("begin billing invoice delete transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // 已 Commit 时为 no-op
+	defer func() { _ = tx.Rollback(ctx) }() // 已 Commit 时为 no-op
 
 	inv, err := softDeleteBillingInvoice(ctx, tx, id, at)
 	if err != nil {
@@ -346,7 +346,7 @@ func (s *PostgresBillingStore) CreateAdjustment(ctx context.Context, in ports.Cr
 	if err != nil {
 		return nil, fmt.Errorf("begin billing adjustment transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // 已 Commit 时为 no-op
+	defer func() { _ = tx.Rollback(ctx) }() // 已 Commit 时为 no-op
 
 	adj, err := insertBillingAdjustment(ctx, tx, in)
 	if err != nil {
