@@ -223,10 +223,7 @@ jobs:
           # PYSEC-2026-3740 (nltk pathsec model-artifact 漏洞): nltk 3.10.3 已是最新版且无修复版本
           # (GHSA-8mgp-746c-j5xp last_affected=3.10.3, Not yet patched); rag-engine 仅将 nltk 作为
           # llama-index-core 传递依赖, 不调用受影响的 TransitionParser/AveragedPerceptron 等 API。
-          # CVE-2026-69112 (accelerate weight_map 路径穿越/named-pipe DoS, 影响 <=1.14.0):
-          # 官方尚无修复版本; rag-engine 仅将 accelerate 作为 llama-index-core 传递依赖,
-          # 不调用受影响的 load_checkpoint_in_model/load_checkpoint_and_dispatch API。
-          pip-audit -r ai/rag-engine/requirements.txt --ignore-vuln PYSEC-2026-3740 --ignore-vuln GHSA-8mgp-746c-j5xp --ignore-vuln CVE-2026-69112
+          pip-audit -r ai/rag-engine/requirements.txt --ignore-vuln PYSEC-2026-3740 --ignore-vuln GHSA-8mgp-746c-j5xp
 
   # ── OpenAPI Spec 校验 ────────────────────────────────────────────────────────
   api-spec-lint:
