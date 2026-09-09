@@ -51,6 +51,12 @@
 |---|---|---|
 | GATEWAY-GPU-V1-ROLLBACK-A | 生产 gateway 镜像回退致 BOSS GPU 接口 403 复现，且 main（PR #145）已将 v1.yaml 全量 V2 化、GPU 路径标单域 `scope: platform`，部署后 Console（tenant）将 403。V2 boundary 域互斥无法表达 GPU 双域共享，经产品确认**暂时回退 V1 链路**：v1.yaml 13 个 GPU 操作删除 `x-ani-authz` 且 classification `authorized→authenticated`（交叉校验要求两者一致），operation-registry.v1.json / zz_generated_target_operation_registry.go / zz_generated_core_policies.go 全链同步重生成（GPU 全部 `PolicySourceLegacy`），冻结计数 authenticated 9→22、authorized 278→265；`/quotas`+`/quotas/me` V2 定义与 V1 行为一致故保留；运行时 middleware 零改动（rebase 后已含双放行与 /quotas platform-only）。同期 `hotfix/network-store-read` rebase 到 origin/main（core-schema.d.ts 接受删除、auth.go/auth_test.go 保留 main V2 结构+完整双放行逻辑、修复 rebase 遗留冲突标记）。live 验证（ani-test2 隔离环境 10.10.1.66:30083，镜像 `test2-20260908-b`）：platform token GPU 三端点+/quotas 200、/quotas/me 403；tenant token GPU 三端点+/quotas/me+/instances 200、/quotas 403（泄露封堵保持）；tenant-a/admin Console 登录+核心接口 200。同期 `hotfix/network-store-read` rebase 到含 ANI-IAM-PRE930-CONTAINMENT 的最新 main：V2 target registry 基建（operation-registry.v1.json 等）与 GPU 接口 V2 注解已由 main 整体移除、回退终态由 main 承载，分支残余 delta 为批次记录与 auth-service runtimeadmin replace 构建修复；上述 main 既有红门禁已随隔离批次恢复绿，rebase 文档回归（README 租户列表小节/core.html 旧态）已修复；rebase 后 authz drift/路由覆盖/架构守卫/build/test 复验全绿。后续项：GPU 迁回 V2 前置 boundary 模型双域扩展（cluster） | gateway-gpu-v1-rollback-a.md |
 
+### 集群 GPU 等分切分（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GPU-PARTITION-A~D | BOSS 专属集群 GPU 等分切分：`POST /api/v1/gpu-inventory/gpu-partitions`（platform scope，幂等，2/4/8）对集群内全部空闲整卡节点统一切分；异步任务自动完成节点级 volcano-vgpu-node-config devicesplitcount 更新、重启 device plugin pod 触发 vGPU 重新注册、按各节点实际显存打 vGPU 标签并清除整卡 gpu-spec 标签；忙碌节点（持 GPU Pod）整体跳过记入 result；0 个可切节点 422。lazy-resume 防 gateway 重启悬挂（running 超阈值幂等重入）。不创建 GPUSpec，切分后由 POST /gpu-specs 单独建规格。**live gate passed（2026-09-09，ani-test2 10.10.1.66:30083，镜像 `test2-20260909-e`）**：202→completed/100、CM/relabel/注册证据齐、忙碌节点 node_busy 跳过、tenant 403；执行期间修复 apply goroutine 租户上下文 panic（`detachedTaskContext`）+ GET /tasks 两 op 转 legacy 双域；evidence `live-evidence/gpu-cluster-partition-live.json` | gpu-partition-cluster-split.md |
+
 ### 实例列表孤儿 GPU 过滤（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |

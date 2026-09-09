@@ -100,6 +100,13 @@ func (api *taskAPI) get(ctx context.Context, c *app.RequestContext) {
 			log.Printf("[TASK-SYNC] lazy sync degraded: task_id=%s err=%v", task.ID, syncErr)
 		}
 	}
+	// gpu_partition tasks are executed by an in-process goroutine (no
+	// observable instance). A running task older than the apply timeout is
+	// orphaned (gateway restart mid-apply); re-enter the idempotent apply
+	// sequence once instead of reporting a task that can never converge.
+	if task.TaskType == gpuPartitionTaskType && task.Status == "running" && gpuPartitionResumeHook != nil {
+		task = gpuPartitionResumeHook(ctx, tenantID, task)
+	}
 	c.JSON(http.StatusOK, taskResponseFromRecord(task))
 }
 

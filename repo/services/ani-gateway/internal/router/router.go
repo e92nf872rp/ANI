@@ -54,6 +54,10 @@ type RegisterOptions struct {
 	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
 	// in gpu_spec_resources.go). When nil those handlers return 503.
 	GPUSpecStore ports.GPUSpecStore
+	// GPUPartitionPlanner backs POST /gpu-inventory/gpu-partitions (BOSS
+	// cluster GPU split, gpu_partition_resources.go). When nil the handler
+	// returns 503; the kubernetes_rest inventory adapter implements it.
+	GPUPartitionPlanner ports.GPUPartitionPlanner
 	// MetadataStore enables platform-scoped (RLS-bypass) queries for the
 	// cross-tenant GPUSpecInUse check in gpu_spec_resources.go. When nil
 	// the check falls back to a tenant-scoped instanceStore.List.
@@ -136,6 +140,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	// GPU spec directory CRUD (POST/DELETE) + reservation management +
 	// tenant self-query endpoints (SPEC §4.3).
 	registerGPUSpecResources(v1, options.GPUSpecStore, options.GPUInventory, options.GPUInstanceStore, options.MetadataStore)
+	// BOSS cluster GPU split (GPU-PARTITION-C): async task accepted + in-process apply.
+	registerGPUPartitionResources(v1, options.GPUPartitionPlanner, options.AsyncTaskStore)
 	registerReservationResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 
 	svc := h.Group("/api/v1/svc")
