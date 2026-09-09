@@ -132,3 +132,72 @@ func TestInstancePodNamesResolverMatcherNoDoubleEscaping(t *testing.T) {
 		t.Fatalf("Matcher() = %q, want anchored alternation", got)
 	}
 }
+
+// TestInstancePodNamesResolverMatcherExcludesVMHostPods 验证：同一实例名下 sandbox pod 与
+// KubeVirt VM 宿主 pod（virt-launcher-*）并存时，Matcher 排除 VM 宿主 pod，避免 cAdvisor
+// 聚合把 VM 宿主指标 sum 进业务实例（2026-09-09 实测 Name=test 场景的回归防护）。
+func TestInstancePodNamesResolverMatcherExcludesVMHostPods(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "sandbox pod coexists with VM host pod",
+			body: `{"items":[
+				{"metadata":{"name":"sandbox-test-abc12"}},
+				{"metadata":{"name":"virt-launcher-test-tcjlv"}}
+			]}`,
+			want: `^(sandbox-test-abc12)$`,
+		},
+		{
+			name: "only VM host pod under this instance label",
+			body: `{"items":[{"metadata":{"name":"virt-launcher-test-tcjlv"}}]}`,
+			// 过滤后无业务 pod：返回永不匹配占位符，绝不降级前缀正则（否则会再次命中宿主 pod）。
+			want: podNamesNonePlaceholder,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver, err := NewInstancePodNamesResolver(KubernetesRESTClientConfig{
+				Host: "https://kubernetes.example.test",
+				HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					return jsonResponse(http.StatusOK, tc.body), nil
+				})},
+			})
+			if err != nil {
+				t.Fatalf("NewInstancePodNamesResolver() error = %v", err)
+			}
+			got := resolver.Matcher(context.Background(), "tenant-a", "sandbox-test")
+			if got != tc.want {
+				t.Fatalf("Matcher() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFilterOutVMHostPods 验证纯过滤函数对 VM 宿主 pod 前缀的剔除。
+func TestFilterOutVMHostPods(t *testing.T) {
+	cases := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{"keeps business pods and drops vm hosts", []string{"virt-launcher-a-abc", "sandbox-a-xyz", "virt-launcher-b-123", "job-a-9kf5"}, []string{"sandbox-a-xyz", "job-a-9kf5"}},
+		{"all vm hosts -> empty", []string{"virt-launcher-a-abc"}, nil},
+		{"empty input", nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := filterOutVMHostPods(tc.input)
+			if len(got) != len(tc.want) {
+				t.Fatalf("filterOutVMHostPods(%v) = %v, want %v", tc.input, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("filterOutVMHostPods(%v) = %v, want %v", tc.input, got, tc.want)
+				}
+			}
+		})
+	}
+}
