@@ -3788,6 +3788,7 @@ components:
         gpu_spec:            { type: string, nullable: true, description: "整卡规格标签值，从 ani.kubercloud.io/gpu-spec 读取" }
         gpu_sharing_spec:    { type: string, nullable: true, description: "vGPU 共享规格标签值，从 ani.kubercloud.io/gpu-sharing-spec 读取" }
         gpu_sharing_policy:  { type: string, nullable: true, description: "vGPU 共享策略标签值，从 ani.kubercloud.io/gpu-sharing-policy 读取" }
+        shares:              { type: integer, minimum: 1, description: "该记录所属物理卡的切分份数；1 表示整卡，vgpu 卡为切分份数（2/4/8）。数据源为 volcano.sh/node-vgpu-register 注解（回退用 volcano.sh/vgpu-number allocatable 推导）" }
 
     GPUInventoryListResponse:
       type: object

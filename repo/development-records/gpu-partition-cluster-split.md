@@ -63,3 +63,13 @@
 - 设计与取舍（不采用 lazy-sync、节点级忙闲判定、幂等重入）见 `.trae/documents/gpu-partition-cluster-split-plan.md`。
 - live gate 已通过并回填上文；证据在 `development-records/live-evidence/gpu-cluster-partition-live.json`。当前切分状态为 dev-phys-02 已 4 等分（vgpu），如需还原整卡需反向操作（另行批次）。
 - 已知无关失败：pkg/adapters/runtime 沙箱文件脚本 symlink 测试在 Windows 本地挂（TestSandboxFileScriptsRejectSymlinks 等），与 GPU-PARTITION 无关。
+
+## 追加：inventory `shares` 字段（2026-09-09，test2-20260909-f 实测）
+
+BOSS 前端需要展示"每张卡切成几份"，但 inventory 原有字段只有语义化的 `gpu_sharing_policy`（half/quarter/eighth）。新增显式数值字段：
+
+- 契约：`GPUInventoryRecord` 新增可选 `shares`（integer ≥1；整卡=1，vgpu=2/4/8）
+- 取数链路：`ports.GPUDeviceClass` 加 `Shares`；K8s adapter 三条路径填充 — ① `volcano.sh/node-vgpu-register` 注解逐卡解析（新增 `parseVolcanoVGPUCardCounts`，与 sum 解析器保持"每卡之和=总数"不变量）；② 无注解回退：`volcano.sh/vgpu-number ÷ nvidia.com/gpu.count` 推导；③ 整卡=1。handler 侧 `Shares<=0` 防御性归 1（local profile 等实现无需改动）
+- 语义口径：`shares` 是**每张物理卡**的份数；vgpu 节点按切片返回多条记录（卡数×份数条，每条携带所属卡的份数）
+- 实测（ani-test2，platform token GET /gpu-inventory）：dev-phys-02（单卡4等分）→ 4 条 shares=4；dev-phys-03、kubercloud（双卡各4等分）→ 各 8 条 shares=4。附：kubercloud 因其上的推理 Pod 在 06:51~07:59 间被删除，07:59 前端切分任务 268a2ca9 将其与 dev-phys-02 一并切分（集群级"全部空闲整卡节点"语义，符合设计）
+- 验证：新增 `TestParseVolcanoVGPUCardCounts` + `TestInventoryDeviceSharesFromAnnotation` + 整卡 Shares=1 断言；SDK/docs 生成物经重生成比对无内容变化（schema 字段不入产物）
