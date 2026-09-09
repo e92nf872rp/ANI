@@ -72,6 +72,14 @@ func (s *meteringCollectionService) StartCollection(ctx context.Context, spec po
 	s.everCollected[ref] = false
 	s.mu.Unlock()
 
+	s.safeLog(func(l *slog.Logger) {
+		l.InfoContext(ctx, "collection started",
+			"resource_ref", ref,
+			"tenant_id", spec.TenantID,
+			"workload_kind", spec.WorkloadKind,
+			"interval_sec", interval,
+		)
+	})
 	go s.runCollectionLoop(spec, ticker, stopCh)
 	return nil
 }
@@ -136,6 +144,14 @@ func (s *meteringCollectionService) StopCollection(ctx context.Context, resource
 	delete(s.specs, resourceRef)
 	s.mu.Unlock()
 
+	s.safeLog(func(l *slog.Logger) {
+		attrs := []any{"resource_ref", resourceRef}
+		if spec != nil {
+			attrs = append(attrs, "tenant_id", spec.TenantID, "workload_kind", spec.WorkloadKind)
+		}
+		l.InfoContext(ctx, "collection stopped", attrs...)
+	})
+
 	// 锁外保底采集：该实例从未产出周期记录时，补采一次全周期量。
 	if !ever && spec != nil {
 		records, err := s.collectFullLifetime(ctx, *spec)
@@ -153,6 +169,39 @@ func (s *meteringCollectionService) StopCollection(ctx context.Context, resource
 			}
 		}
 	}
+	return nil
+}
+
+// StopStale 停止进程内 ticker 集合中不在 activeRefs（DB 当前 running 实例集合）的采集。
+// 逐个幂等 StopCollection，单实例失败记 Error 日志不阻塞其余实例。
+// 由周期 Reconciler 调用，兜底事件驱动停止链路的事件缺失/丢失场景。
+func (s *meteringCollectionService) StopStale(ctx context.Context, activeRefs map[string]bool) error {
+	s.mu.Lock()
+	refs := make([]string, 0, len(s.tickers))
+	for ref := range s.tickers {
+		refs = append(refs, ref)
+	}
+	s.mu.Unlock()
+
+	var stopped int
+	for _, ref := range refs {
+		if activeRefs[ref] {
+			continue
+		}
+		if err := s.StopCollection(ctx, ref); err != nil {
+			s.safeLog(func(l *slog.Logger) {
+				l.ErrorContext(ctx, "StopStale: StopCollection failed", "resource_ref", ref, "err", err)
+			})
+			continue
+		}
+		stopped++
+	}
+	s.safeLog(func(l *slog.Logger) {
+		l.InfoContext(ctx, "stop stale done",
+			"active_instances", len(activeRefs),
+			"stale_stopped", stopped,
+		)
+	})
 	return nil
 }
 
