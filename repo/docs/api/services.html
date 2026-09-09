@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>140</dd></div>
-          <div><dt>Schemas</dt><dd>150</dd></div>
+          <div><dt>Operations</dt><dd>147</dd></div>
+          <div><dt>Schemas</dt><dd>161</dd></div>
         </dl>
       </section>
 
@@ -159,6 +159,62 @@
             </tr>
           </thead>
           <tbody>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/billing/adjustments</code></td>
+          <td><code>createBillingAdjustment</code></td>
+          <td>调账（±金额 + 原因；需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/billing/invoices/generate</code></td>
+          <td><code>generateBillingInvoice</code></td>
+          <td>生成账单（生成即出账 status=issued；需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/billing/invoices/{invoiceId}</code></td>
+          <td><code>deleteBillingInvoice</code></td>
+          <td>删除账单（软删除；需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/billing/invoices/{invoiceId}/actions</code></td>
+          <td><code>invoiceBillingAction</code></td>
+          <td>账单状态动作（settle 标记结清 / credit 授信冲抵；需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/billing/operations</code></td>
+          <td><code>listBillingOperations</code></td>
+          <td>查询租户计费操作流水（抽屉「操作历史」Tab 数据源；需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/billing/overview</code></td>
+          <td><code>getBillingOverview</code></td>
+          <td>查询租户账务总览（表格 9 列 + 抽屉内嵌子数据；需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/billing/overview/export</code></td>
+          <td><code>exportBillingOverview</code></td>
+          <td>导出账务对账 CSV（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 502, 504</td>
+        </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/gpu-containers</code></td>
@@ -1295,6 +1351,16 @@
         <li><code>AvailableTenantListResponse</code></li>
         <li><code>AvailableTenantPlan</code></li>
         <li><code>AvailableTenantPlanListResponse</code></li>
+        <li><code>BillingAdjustment</code></li>
+        <li><code>BillingAdjustmentCreateRequest</code></li>
+        <li><code>BillingInvoiceActionRequest</code></li>
+        <li><code>BillingInvoiceGenerateRequest</code></li>
+        <li><code>BillingInvoiceSummary</code></li>
+        <li><code>BillingOperationLog</code></li>
+        <li><code>BillingOperationsResponse</code></li>
+        <li><code>BillingOverviewItem</code></li>
+        <li><code>BillingOverviewResponse</code></li>
+        <li><code>BillingUsageBreakdownItem</code></li>
         <li><code>BindPlanRequest</code></li>
         <li><code>BoundTenant</code></li>
         <li><code>BoundTenantsResponse</code></li>
@@ -1311,6 +1377,7 @@
         <li><code>CreateTenantRequest</code></li>
         <li><code>CreateWebhookRequest</code></li>
         <li><code>CursorPage</code></li>
+        <li><code>DevProfileInfo</code></li>
         <li><code>ErrorResponse</code></li>
         <li><code>ExtendSandboxRequest</code></li>
         <li><code>GetDocumentUploadURLRequest</code></li>

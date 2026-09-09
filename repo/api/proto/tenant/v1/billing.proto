@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package tenant.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1;tenantv1";
+
+// BillingService manages the BOSS tenant billing & usage domain (Services layer).
+// Data sources: usage via Core API (GET /metering/usage/platform, never direct DB),
+// pricing/invoices/adjustments/credit from tenant-service own DB (billing_* tables).
+// The gateway (BOSS API) handles auth/scope (boundary=platform) and forwards here.
+service BillingService {
+  // GetBillingOverview returns the billing overview rows (table 9 columns +
+  // drawer-embedded sub arrays). overdue is computed at read time (issued and
+  // now > due_date); stored status stays issued.
+  rpc GetBillingOverview(GetBillingOverviewRequest) returns (GetBillingOverviewResponse);
+  // ExportBillingOverview renders the overview as a reconciliation CSV document.
+  rpc ExportBillingOverview(ExportBillingOverviewRequest) returns (ExportBillingOverviewResponse);
+  // GenerateInvoice creates a bill (generation = issued, no draft state).
+  // (tenant_id, period) is unique: same idempotency_key replays the original
+  // invoice; a different key returns BILLING_INVOICE_EXISTS.
+  rpc GenerateInvoice(GenerateInvoiceRequest) returns (BillingInvoice);
+  // InvoiceAction applies settle/credit to an issued invoice (terminal states;
+  // repeated actions return BILLING_STATE_CONFLICT).
+  rpc InvoiceAction(InvoiceActionRequest) returns (BillingInvoice);
+  // CreateAdjustment writes a (possibly negative) adjustment record for a
+  // tenant/period; amount must not be zero.
+  rpc CreateAdjustment(CreateAdjustmentRequest) returns (BillingAdjustment);
+  // DeleteInvoice soft-deletes an issued invoice (status stays issued, the row
+  // is kept for audit via deleted_at). settled/credited invoices are rejected
+  // with BILLING_STATE_CONFLICT; unknown or already-deleted ids return
+  // BILLING_INVOICE_NOT_FOUND. The invoice.deleted operation log is written in
+  // the same transaction; a failed delete writes no log. No idempotency key:
+  // replaying a delete on the same id simply returns 404 again.
+  rpc DeleteInvoice(DeleteInvoiceRequest) returns (BillingInvoice);
+  // ListBillingOperations returns the tenant's billing operation log (the
+  // drawer "操作历史" tab). Logs are written in the same DB transaction as the
+  // business write; idempotent replays and 409 conflicts produce no log.
+  rpc ListBillingOperations(ListBillingOperationsRequest) returns (ListBillingOperationsResponse);
+}
+
+// ── Billing RPC request / response ───────────────────────────────────────────
+
+message GetBillingOverviewRequest {
+  string period = 1;    // YYYY-MM; empty = current month (UTC)
+  string tenant_id = 2; // optional single-tenant drill-down filter
+  string status = 3;    // optional row status filter: current | overdue | settled | credited
+}
+
+message GetBillingOverviewResponse {
+  repeated BillingOverviewItem items = 1;
+  int64 total = 2;
+}
+
+message ExportBillingOverviewRequest {
+  string period = 1;
+  string tenant_id = 2;
+  string status = 3;
+}
+
+message ExportBillingOverviewResponse {
+  string csv = 1;       // full CSV document (UTF-8), header row included
+  string filename = 2;  // attachment filename, e.g. billing-overview-2026-09.csv
+}
+
+message GenerateInvoiceRequest {
+  string tenant_id = 1;
+  string period = 2;          // YYYY-MM
+  string idempotency_key = 3; // required
+  string operator = 4;        // gateway-provided user_id for audit/operator fields
+}
+
+message InvoiceActionRequest {
+  string invoice_id = 1;
+  string action = 2;          // settle | credit
+  string idempotency_key = 3; // required
+  string operator = 4;
+}
+
+message DeleteInvoiceRequest {
+  string invoice_id = 1; // required
+  string operator = 2;   // gateway-provided user_id for audit/operator fields
+}
+
+message CreateAdjustmentRequest {
+  string tenant_id = 1;
+  string period = 2;        // YYYY-MM
+  double amount_usd = 3;    // may be negative; must not be 0
+  string reason = 4;
+  string idempotency_key = 5;
+  string operator = 6;
+}
+
+message ListBillingOperationsRequest {
+  string tenant_id = 1; // required
+  int32 limit = 2;      // page size; default 50, max 200
+  int32 offset = 3;     // page offset; default 0
+}
+
+message ListBillingOperationsResponse {
+  repeated BillingOperationLog items = 1;
+  int64 total = 2; // total matching rows (pagination)
+}
+
+// ── Billing entities ─────────────────────────────────────────────────────────
+
+message BillingUsageBreakdown {
+  string metric = 1;            // gpu_hours | cpu_hours | memory_gb_hours | tokens | storage_gi | kb_queries
+  optional double amount = 2;   // display-unit usage; null when data_source=unavailable
+  optional double unit_cost = 3; // USD per display unit (from billing_pricing table)
+  optional double cost = 4;     // amount × unit_cost; null when unavailable
+  string data_source = 5;       // metered | unavailable
+}
+
+message BillingInvoice {
+  string id = 1;
+  string no = 2;               // INV-{YYMM}-{seq}
+  string period = 3;           // YYYY-MM
+  double amount_usd = 4;
+  string status = 5;           // issued | settled | credited
+  string due_date = 6;         // YYYY-MM-DD (issued_at + 30 days)
+  google.protobuf.Timestamp issued_at = 7;
+  google.protobuf.Timestamp settled_at = 8;
+  google.protobuf.Timestamp credited_at = 9;
+}
+
+message BillingAdjustment {
+  string id = 1;
+  string tenant_id = 2;
+  string period = 3;        // YYYY-MM
+  double amount_usd = 4;    // may be negative
+  string reason = 5;
+  string operator = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message BillingOperationLog {
+  string id = 1;
+  string tenant_id = 2;
+  optional string period = 3;  // YYYY-MM; null reserved for non-period actions
+  string action = 4;           // invoice.generated | invoice.settled | invoice.credited | adjustment.created
+  optional string ref_id = 5;  // related invoice_id / adjustment_id
+  string message = 6;          // human-readable summary (includes amount)
+  string operator = 7;         // gateway-provided user_id
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message BillingOverviewItem {
+  string tenant_id = 1;
+  string tenant_name = 2;
+  string period = 3;              // YYYY-MM
+  string status = 4;              // current | overdue | settled | credited (row display status)
+  optional double usage_cost_usd = 5;  // sum of metered breakdown costs; null when none
+  optional double credit_usd = 6;      // null when no credit account row
+  optional double balance_usd = 7;     // derived at read time (§6.3); null when no credit account
+  optional string invoice_no = 8;      // current-period invoice no; null when none
+  optional string due_date = 9;        // current-period due date; null when none
+  repeated BillingUsageBreakdown usage_breakdown = 10;
+  repeated BillingInvoice invoices = 11;      // all invoices of the tenant (desc)
+  repeated BillingAdjustment adjustments = 12; // adjustments of the requested period
+  google.protobuf.Timestamp updated_at = 13;
+}

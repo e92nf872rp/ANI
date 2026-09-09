@@ -25,7 +25,7 @@ if (typeof client.request !== "function") {
 if (operations.length === 0) {
   throw new Error("expected generated operations");
 }
-if (!client.hasOperation("listGpuContainers")) {
+if (!client.hasOperation("createBillingAdjustment")) {
   throw new Error("missing expected operation");
 }
 

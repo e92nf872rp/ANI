@@ -26,6 +26,13 @@ public final class ApiClient {
     public static final String VERSION = "1.0.0";
     public static final String SERVER_URL = "https://{host}/api/v1/svc";
     public static final List<String> OPERATIONS = Collections.unmodifiableList(Arrays.asList(
+        "createBillingAdjustment",
+        "generateBillingInvoice",
+        "deleteBillingInvoice",
+        "invoiceBillingAction",
+        "listBillingOperations",
+        "getBillingOverview",
+        "exportBillingOverview",
         "listGpuContainers",
         "createGpuContainer",
         "listAvailableGpus",
@@ -168,6 +175,13 @@ public final class ApiClient {
         "unfreezeTenant"
     ));
     public static final List<String> PATHS = Collections.unmodifiableList(Arrays.asList(
+        "POST /billing/adjustments",
+        "POST /billing/invoices/generate",
+        "DELETE /billing/invoices/{invoiceId}",
+        "POST /billing/invoices/{invoiceId}/actions",
+        "GET /billing/operations",
+        "GET /billing/overview",
+        "GET /billing/overview/export",
         "GET /gpu-containers",
         "POST /gpu-containers",
         "GET /gpu-containers/available-gpus",
@@ -319,6 +333,16 @@ public final class ApiClient {
         "AvailableTenantListResponse",
         "AvailableTenantPlan",
         "AvailableTenantPlanListResponse",
+        "BillingAdjustment",
+        "BillingAdjustmentCreateRequest",
+        "BillingInvoiceActionRequest",
+        "BillingInvoiceGenerateRequest",
+        "BillingInvoiceSummary",
+        "BillingOperationLog",
+        "BillingOperationsResponse",
+        "BillingOverviewItem",
+        "BillingOverviewResponse",
+        "BillingUsageBreakdownItem",
         "BindPlanRequest",
         "BoundTenant",
         "BoundTenantsResponse",
@@ -335,6 +359,7 @@ public final class ApiClient {
         "CreateTenantRequest",
         "CreateWebhookRequest",
         "CursorPage",
+        "DevProfileInfo",
         "ErrorResponse",
         "ExtendSandboxRequest",
         "GetDocumentUploadURLRequest",
@@ -462,6 +487,9 @@ public final class ApiClient {
         "WebhookDeliveryListResponse"
     ));
     public static final List<String> IDEMPOTENCY_OPERATIONS = Collections.unmodifiableList(Arrays.asList(
+        "createBillingAdjustment",
+        "generateBillingInvoice",
+        "invoiceBillingAction",
         "createGpuContainer",
         "patchGpuContainer",
         "createInferenceAccessPolicy",

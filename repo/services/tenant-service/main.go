@@ -20,16 +20,20 @@ func main() {
 	coreTenants := core.NewTenantSvcClient()
 	coreTenantPlans := core.NewTenantPlanSvcClient()
 	coreTenantAdmins := core.NewTenantAdminSvcClient()
+	coreMetering := core.NewMeteringClient()
 	tenantAdmin := postgres.NewPostgresTenantAdminStore(deps.DB)
+	billing := postgres.NewPostgresBillingStore(deps.DB)
 	tenantStore := postgres.NewPostgresTenantStore(deps.DB)
 
 	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenantPlans)
 	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, tenantStore, audit, coreTenantAdmins, nil, nil, tenantAdmin)
 	tenantAdminSvc := service.NewTenantAdminService(coreTenantAdmins, coreTenants, tenantAdmin, audit)
+	billingSvc := service.NewBillingService(billing, coreMetering, coreTenants)
 
 	bootstrap.RunGRPC(cfg.GRPCPort, func(s *grpc.Server) {
 		tenantPlanSvc.Register(s)
 		tenantSvc.Register(s)
 		tenantAdminSvc.Register(s)
+		billingSvc.Register(s)
 	}, deps)
 }

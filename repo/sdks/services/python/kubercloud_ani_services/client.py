@@ -8,6 +8,13 @@ TITLE = "KuberCloud ANI Services API"
 VERSION = "1.0.0"
 SERVER_URL = "https://{host}/api/v1/svc"
 OPERATIONS = [
+    "createBillingAdjustment",
+    "generateBillingInvoice",
+    "deleteBillingInvoice",
+    "invoiceBillingAction",
+    "listBillingOperations",
+    "getBillingOverview",
+    "exportBillingOverview",
     "listGpuContainers",
     "createGpuContainer",
     "listAvailableGpus",
@@ -150,6 +157,13 @@ OPERATIONS = [
     "unfreezeTenant"
 ]
 PATHS = [
+    "POST /billing/adjustments",
+    "POST /billing/invoices/generate",
+    "DELETE /billing/invoices/{invoiceId}",
+    "POST /billing/invoices/{invoiceId}/actions",
+    "GET /billing/operations",
+    "GET /billing/overview",
+    "GET /billing/overview/export",
     "GET /gpu-containers",
     "POST /gpu-containers",
     "GET /gpu-containers/available-gpus",
@@ -301,6 +315,16 @@ SCHEMAS = [
     "AvailableTenantListResponse",
     "AvailableTenantPlan",
     "AvailableTenantPlanListResponse",
+    "BillingAdjustment",
+    "BillingAdjustmentCreateRequest",
+    "BillingInvoiceActionRequest",
+    "BillingInvoiceGenerateRequest",
+    "BillingInvoiceSummary",
+    "BillingOperationLog",
+    "BillingOperationsResponse",
+    "BillingOverviewItem",
+    "BillingOverviewResponse",
+    "BillingUsageBreakdownItem",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",
@@ -317,6 +341,7 @@ SCHEMAS = [
     "CreateTenantRequest",
     "CreateWebhookRequest",
     "CursorPage",
+    "DevProfileInfo",
     "ErrorResponse",
     "ExtendSandboxRequest",
     "GetDocumentUploadURLRequest",
@@ -444,6 +469,9 @@ SCHEMAS = [
     "WebhookDeliveryListResponse"
 ]
 IDEMPOTENCY_OPERATIONS = [
+    "createBillingAdjustment",
+    "generateBillingInvoice",
+    "invoiceBillingAction",
     "createGpuContainer",
     "patchGpuContainer",
     "createInferenceAccessPolicy",

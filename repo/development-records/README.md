@@ -13,6 +13,18 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 租户计费操作历史（2026-09，分支 feat/tenant-billing）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-BILLING-B | 在 TENANT-BILLING-A 基础上追加第 6 个只读端点 `GET /api/v1/svc/billing/operations`（抽屉「操作历史」Tab 数据源，tenant_id/limit/offset，created_at 倒序）：新表 `billing_operation_logs` 迁移落表，生成/结清/冲抵/调账 4 个写点与业务写**同事务**落流水（回滚不落、幂等重放与 409 冲突不落流水）；operator 透传 token user_id；契约先行 + pb/SDK/docs 重生成幂等零漂移；修复 `services/v1.yaml` 裸 `no` 被 YAML 1.1 解析为 False 的契约缺陷（加引号）；单测 svc +4 / gateway +2 全 PASS，混合联调 13 用例（e30–e43，本地进程 × 环境 PG/Redis/auth-service，含真实 401、operator 环境库复核、overview/CSV 全接口冒烟）全部通过；已合并 main #148/#150/#152 并全量回归。**同批次追加账单软删除 `DELETE /billing/invoices/{invoiceId}`（第 7 端点）**：迁移 `20260908_002` 已应用环境 PG（软删列 + 部分唯一索引 + action 枚举扩展），仅 issued 可删（终态 409/重复删除 404）、唯一键释放可重新出账、删除与 invoice.deleted 流水同事务；顺带修复软删行对 settle/credit CAS 可见的边界缺陷；单测全 PASS，混合联调 6/6（e44–e48）。未部署 K8s，不标 live/runtime ready | TENANT-BILLING-B.md |
+
+### 租户计费结算接口（2026-09，分支 feat/tenant-billing）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-BILLING-A | Services 层新增 BOSS 租户计费结算 5 端点 `/api/v1/svc/billing/*`（总览/CSV 导出/生成账单/账单动作 settle·credit/调账）：契约 `services/v1.yaml` + x-ani-authz（boundary=platform），实现 tenant-service gRPC + 网关 mixed handler；生成即出账（无 draft）、一期一单 `(tenant_id,period)` 唯一 + `idempotency_key` 幂等重放、overdue 读取时动态计算不落库、余额读取推导、单价只读 `billing_pricing`（6 行种子随迁移 ON CONFLICT DO NOTHING，代码零价格字面量）、用量仅经 Core SDK 调 `/metering/usage/platform` 不直查 Core 库、仅 token_total 计费其余 `data_source=unavailable`。本地集成实测 21 用例通过（测试环境占用未部署 K8s，不标 live/runtime ready）；`make validate-services`/`make validate-architecture` EXIT:0；`make test` 中 validate-gateway-authz 漂移为 main 既有问题 | TENANT-BILLING-A.md |
+
 ### 平台组件状态与组件诊断（2026-09，分支 feat/component-status）
 
 | 批次 | 内容摘要 | 文件 |

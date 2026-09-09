@@ -5,6 +5,48 @@
   "serverURL": "https://{host}/api/v1/svc",
   "operations": [
     {
+      "operationId": "createBillingAdjustment",
+      "method": "POST",
+      "path": "/billing/adjustments",
+      "scope": ""
+    },
+    {
+      "operationId": "generateBillingInvoice",
+      "method": "POST",
+      "path": "/billing/invoices/generate",
+      "scope": ""
+    },
+    {
+      "operationId": "deleteBillingInvoice",
+      "method": "DELETE",
+      "path": "/billing/invoices/{invoiceId}",
+      "scope": ""
+    },
+    {
+      "operationId": "invoiceBillingAction",
+      "method": "POST",
+      "path": "/billing/invoices/{invoiceId}/actions",
+      "scope": ""
+    },
+    {
+      "operationId": "listBillingOperations",
+      "method": "GET",
+      "path": "/billing/operations",
+      "scope": ""
+    },
+    {
+      "operationId": "getBillingOverview",
+      "method": "GET",
+      "path": "/billing/overview",
+      "scope": ""
+    },
+    {
+      "operationId": "exportBillingOverview",
+      "method": "GET",
+      "path": "/billing/overview/export",
+      "scope": ""
+    },
+    {
       "operationId": "listGpuContainers",
       "method": "GET",
       "path": "/gpu-containers",
@@ -855,6 +897,16 @@
     "AvailableTenantListResponse",
     "AvailableTenantPlan",
     "AvailableTenantPlanListResponse",
+    "BillingAdjustment",
+    "BillingAdjustmentCreateRequest",
+    "BillingInvoiceActionRequest",
+    "BillingInvoiceGenerateRequest",
+    "BillingInvoiceSummary",
+    "BillingOperationLog",
+    "BillingOperationsResponse",
+    "BillingOverviewItem",
+    "BillingOverviewResponse",
+    "BillingUsageBreakdownItem",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",
@@ -871,6 +923,7 @@
     "CreateTenantRequest",
     "CreateWebhookRequest",
     "CursorPage",
+    "DevProfileInfo",
     "ErrorResponse",
     "ExtendSandboxRequest",
     "GetDocumentUploadURLRequest",
@@ -998,6 +1051,9 @@
     "WebhookDeliveryListResponse"
   ],
   "idempotencyOperations": [
+    "createBillingAdjustment",
+    "generateBillingInvoice",
+    "invoiceBillingAction",
     "createGpuContainer",
     "patchGpuContainer",
     "createInferenceAccessPolicy",
