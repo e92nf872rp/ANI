@@ -4140,6 +4140,9 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/QuotaItem' }
+        gpu_reservation:
+          $ref: '#/components/schemas/ReservationView'
+          description: "GPU 预留视图（仅查询类端点返回）；未设置预留时 allocated_gpu_count=0，available 可能为负"
 
     QuotaItem:
       type: object
@@ -4150,6 +4153,7 @@ components:
         total:         { type: integer, format: int64, description: "配额上限" }
         used:          { type: integer, format: int64, description: "已实扣（已 Confirm）" }
         reserved:      { type: integer, format: int64, description: "已预占（已 Try 未 Confirm/Cancel）" }
+        available:     { type: integer, format: int64, description: "可创建 = total - used - reserved" }
         tightened:     { type: boolean, description: "PUT 缩容自动收紧标记（请求 total<used+reserved 时收紧为 used+reserved，置 true）；GET 响应中为零值 false" }
         unit:          { type: string, description: "单位（来自 resource_quota_meta，GET 时返回）" }
         display_name:  { type: string, description: "展示名称（来自 resource_quota_meta，GET 时返回）" }
