@@ -39,8 +39,6 @@ func (s *BillingService) Register(server *grpc.Server) {
 // GetBillingOverview 返回账务总览行（表格 9 列 + 抽屉内嵌子数据）。
 // 行集合 = billing 足迹租户 ∪ 当期有用量租户；overdue 读取时动态计算（不落库）。
 func (s *BillingService) GetBillingOverview(ctx context.Context, req *tenantv1.GetBillingOverviewRequest) (*tenantv1.GetBillingOverviewResponse, error) {
-	const action = "billing.get_overview"
-
 	// 步骤 1：解析 period（空 → 当月 UTC）/ status 过滤 / tenant 过滤
 	period, err := resolveBillingPeriod(req.GetPeriod())
 	if err != nil {
@@ -210,8 +208,6 @@ func (s *BillingService) GenerateInvoice(ctx context.Context, req *tenantv1.Gene
 
 // InvoiceAction 账单状态动作（settle 结清 / credit 授信冲抵；终态重复动作 → 409）。
 func (s *BillingService) InvoiceAction(ctx context.Context, req *tenantv1.InvoiceActionRequest) (*tenantv1.BillingInvoice, error) {
-	const action = "billing.invoice_action"
-
 	// 步骤 1：校验 invoice_id / action / idempotency_key
 	invoiceID, err := parseBillingUUID(req.GetInvoiceId(), "invoice_id")
 	if err != nil {
