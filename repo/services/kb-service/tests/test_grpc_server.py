@@ -2,8 +2,10 @@
 
 US-009 changes: the 10 P0 RPCs are now wired. When the servicer is constructed
 without a DB pool (skeleton/test mode), DB-backed RPCs return
-FAILED_PRECONDITION instead of UNIMPLEMENTED. The 3 P1 RPCs remain
-UNIMPLEMENTED. Input validation (INVALID_ARGUMENT) is also tested.
+FAILED_PRECONDITION instead of UNIMPLEMENTED. The permissions pair
+(UpdateKBPermissions/GetKBPermissions) is implemented (B4); the remaining
+P1 RPCs stay UNIMPLEMENTED until their batches land. Input validation
+(INVALID_ARGUMENT) is also tested.
 """
 import os
 import sys
@@ -41,6 +43,7 @@ P1_RPCS = [
     "ListKBCitations",
     "ListKBSessions",
     "UpdateKBPermissions",
+    "GetKBPermissions",
 ]
 
 
@@ -218,7 +221,7 @@ def test_query_no_pool_returns_unavailable_or_precondition(stub):
     assert exc.value.code() == grpc.StatusCode.NOT_FOUND
 
 
-# ── P1 RPCs: UpdateKBPermissions still UNIMPLEMENTED; B2 RPCs wired ──────────
+# ── P1 RPCs: B2 RPCs wired; permissions pair wired in B4 ─────────────────────
 
 def test_list_kb_citations_b2_wired_not_unimplemented(stub):
     # B2 (issue-045): without a pool the servicer returns FAILED_PRECONDITION —
@@ -260,11 +263,39 @@ def test_delete_session_no_pool_failed_precondition(stub):
     assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
-def test_update_kb_permissions_p1_unimplemented(stub):
+def test_update_kb_permissions_b4_wired_not_unimplemented(stub):
+    # B4: without a pool the servicer returns FAILED_PRECONDITION — never
+    # UNIMPLEMENTED (the P1 stub no longer shadows it).
     with pytest.raises(grpc.RpcError) as exc:
         stub.UpdateKBPermissions(
             kb_pb.UpdateKBPermissionsRequest(
                 tenant_id="t", kb_id=str(uuid.uuid4()), idempotency_key=str(uuid.uuid4()),
             )
         )
-    assert exc.value.code() == grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_get_kb_permissions_b4_wired_not_unimplemented(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetKBPermissions(kb_pb.GetKBPermissionsRequest(tenant_id="t", kb_id=str(uuid.uuid4())))
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_get_kb_permissions_missing_tenant_invalid_argument(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetKBPermissions(kb_pb.GetKBPermissionsRequest(tenant_id="", kb_id=str(uuid.uuid4())))
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_update_kb_permissions_bad_allowed_user_id_invalid_argument(stub):
+    # allowed_user_ids items must be UUIDs; non-UUID → INVALID_ARGUMENT.
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.UpdateKBPermissions(
+            kb_pb.UpdateKBPermissionsRequest(
+                tenant_id="t", kb_id=str(uuid.uuid4()), idempotency_key=str(uuid.uuid4()),
+                allowed_user_ids=["not-a-uuid"],
+            )
+        )
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT

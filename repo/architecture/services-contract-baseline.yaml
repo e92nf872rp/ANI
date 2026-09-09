@@ -56,6 +56,9 @@ exceptions:
   - operation_id: updateKnowledgeBasePermissions
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getKnowledgeBasePermissions
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: reparseKnowledgeBaseDocument
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。

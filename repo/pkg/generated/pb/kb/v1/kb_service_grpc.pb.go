@@ -36,6 +36,7 @@ const (
 	KBService_ListKBCitations_FullMethodName        = "/kb.v1.KBService/ListKBCitations"
 	KBService_ListKBSessions_FullMethodName         = "/kb.v1.KBService/ListKBSessions"
 	KBService_UpdateKBPermissions_FullMethodName    = "/kb.v1.KBService/UpdateKBPermissions"
+	KBService_GetKBPermissions_FullMethodName       = "/kb.v1.KBService/GetKBPermissions"
 	KBService_ListDocumentChunks_FullMethodName     = "/kb.v1.KBService/ListDocumentChunks"
 	KBService_GetSessionMessages_FullMethodName     = "/kb.v1.KBService/GetSessionMessages"
 	KBService_DeleteSession_FullMethodName          = "/kb.v1.KBService/DeleteSession"
@@ -81,6 +82,9 @@ type KBServiceClient interface {
 	ListKBSessions(ctx context.Context, in *ListKBSessionsRequest, opts ...grpc.CallOption) (*ListKBSessionsResponse, error)
 	// UpdateKBPermissions updates KB access permissions (P1).
 	UpdateKBPermissions(ctx context.Context, in *UpdateKBPermissionsRequest, opts ...grpc.CallOption) (*KnowledgeBase, error)
+	// GetKBPermissions returns the access permissions of a KB (P1).
+	// No kb_permissions row → returns defaults (public_read=false, empty list).
+	GetKBPermissions(ctx context.Context, in *GetKBPermissionsRequest, opts ...grpc.CallOption) (*KBPermissions, error)
 	// ListDocumentChunks returns the chunk details of a document (P1).
 	ListDocumentChunks(ctx context.Context, in *ListDocumentChunksRequest, opts ...grpc.CallOption) (*ListDocumentChunksResponse, error)
 	// GetSessionMessages returns the message history of a chat session (P1).
@@ -260,6 +264,15 @@ func (c *kBServiceClient) UpdateKBPermissions(ctx context.Context, in *UpdateKBP
 	return out, nil
 }
 
+func (c *kBServiceClient) GetKBPermissions(ctx context.Context, in *GetKBPermissionsRequest, opts ...grpc.CallOption) (*KBPermissions, error) {
+	out := new(KBPermissions)
+	err := c.cc.Invoke(ctx, KBService_GetKBPermissions_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *kBServiceClient) ListDocumentChunks(ctx context.Context, in *ListDocumentChunksRequest, opts ...grpc.CallOption) (*ListDocumentChunksResponse, error) {
 	out := new(ListDocumentChunksResponse)
 	err := c.cc.Invoke(ctx, KBService_ListDocumentChunks_FullMethodName, in, out, opts...)
@@ -335,6 +348,9 @@ type KBServiceServer interface {
 	ListKBSessions(context.Context, *ListKBSessionsRequest) (*ListKBSessionsResponse, error)
 	// UpdateKBPermissions updates KB access permissions (P1).
 	UpdateKBPermissions(context.Context, *UpdateKBPermissionsRequest) (*KnowledgeBase, error)
+	// GetKBPermissions returns the access permissions of a KB (P1).
+	// No kb_permissions row → returns defaults (public_read=false, empty list).
+	GetKBPermissions(context.Context, *GetKBPermissionsRequest) (*KBPermissions, error)
 	// ListDocumentChunks returns the chunk details of a document (P1).
 	ListDocumentChunks(context.Context, *ListDocumentChunksRequest) (*ListDocumentChunksResponse, error)
 	// GetSessionMessages returns the message history of a chat session (P1).
@@ -397,6 +413,9 @@ func (UnimplementedKBServiceServer) ListKBSessions(context.Context, *ListKBSessi
 }
 func (UnimplementedKBServiceServer) UpdateKBPermissions(context.Context, *UpdateKBPermissionsRequest) (*KnowledgeBase, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateKBPermissions not implemented")
+}
+func (UnimplementedKBServiceServer) GetKBPermissions(context.Context, *GetKBPermissionsRequest) (*KBPermissions, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetKBPermissions not implemented")
 }
 func (UnimplementedKBServiceServer) ListDocumentChunks(context.Context, *ListDocumentChunksRequest) (*ListDocumentChunksResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListDocumentChunks not implemented")
@@ -696,6 +715,24 @@ func _KBService_UpdateKBPermissions_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KBService_GetKBPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetKBPermissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).GetKBPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_GetKBPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).GetKBPermissions(ctx, req.(*GetKBPermissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KBService_ListDocumentChunks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListDocumentChunksRequest)
 	if err := dec(in); err != nil {
@@ -830,6 +867,10 @@ var KBService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateKBPermissions",
 			Handler:    _KBService_UpdateKBPermissions_Handler,
+		},
+		{
+			MethodName: "GetKBPermissions",
+			Handler:    _KBService_GetKBPermissions_Handler,
 		},
 		{
 			MethodName: "ListDocumentChunks",

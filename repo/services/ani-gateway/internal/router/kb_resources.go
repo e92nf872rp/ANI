@@ -63,6 +63,9 @@ func registerKnowledgeBasesWithClient(svc *route.RouterGroup, client KBGRPCClien
 	svc.GET("/knowledge-bases/:kb_id/citations", api.listKnowledgeBaseCitations)
 	svc.GET("/knowledge-bases/:kb_id/sessions", api.listKnowledgeBaseSessions)
 	svc.PUT("/knowledge-bases/:kb_id/permissions", api.updateKnowledgeBasePermissions)
+	// B4 endpoint (SPEC §4.3 #19, kb-p1-plan §2.6): read the permissions row
+	// (defaults surface when no row exists — kb-service contract, not 404).
+	svc.GET("/knowledge-bases/:kb_id/permissions", api.getKnowledgeBasePermissions)
 	// B2 endpoints (SPEC §4.3 #11/#17/#18): document chunk listing, session
 	// message listing and session deletion, all gRPC passthrough.
 	svc.GET("/knowledge-bases/:kb_id/documents/:doc_id/chunks", api.listKnowledgeBaseDocumentChunks)
@@ -495,7 +498,7 @@ func (a *kbAPI) listKnowledgeBaseSessions(ctx context.Context, c *app.RequestCon
 
 func (a *kbAPI) updateKnowledgeBasePermissions(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeInstanceError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "kb-service P1 RPC UpdateKBPermissions not implemented")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
 	var req updateKBPermissionsRequest
@@ -520,6 +523,25 @@ func (a *kbAPI) updateKnowledgeBasePermissions(ctx context.Context, c *app.Reque
 		return
 	}
 	c.JSON(http.StatusOK, kbToJSON(kb))
+}
+
+// getKnowledgeBasePermissions handles GET
+// /knowledge-bases/{kb_id}/permissions (SPEC §4.3 #19, kb-p1-plan §2.6):
+// reads the KB permissions row. A KB with no permissions row surfaces the
+// default contract values (public_read=false, allowed_user_ids=[]) from
+// kb-service, not 404; only a missing KB yields 404 (NOT_FOUND via
+// writeKBError).
+func (a *kbAPI) getKnowledgeBasePermissions(ctx context.Context, c *app.RequestContext) {
+	if a.client == nil {
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		return
+	}
+	perm, err := a.client.GetKBPermissions(ctx, instanceTenantID(c), c.Param("kb_id"))
+	if err != nil {
+		writeKBError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, kbPermissionsToJSON(perm))
 }
 
 // ── B2 handlers (SPEC §4.3 #11/#17/#18) ─────────────────────────────────────
@@ -728,6 +750,17 @@ type kbSessionJSON struct {
 	LastActiveAt string `json:"last_active_at,omitempty"`
 }
 
+// kbPermissionsJSON mirrors the KBPermissions schema in services/v1.yaml
+// (SPEC §4.3 #19, kb-p1-plan §2.6): the read side of the permissions pair.
+// updated_at is optional/nullable in the contract; omitempty keeps the proto
+// zero value from surfacing as 1970-01-01T00:00:00Z.
+type kbPermissionsJSON struct {
+	KbID           string   `json:"kb_id"`
+	PublicRead     bool     `json:"public_read"`
+	AllowedUserIDs []string `json:"allowed_user_ids"`
+	UpdatedAt      string   `json:"updated_at,omitempty"`
+}
+
 // kbChunkJSON mirrors the KBChunk schema in services/v1.yaml (SPEC §3.2):
 // nullable DB columns surface as omitempty so proto zero values ("" / 0) do
 // not leak into responses; custom_metadata is an object, not a JSONB string.
@@ -845,6 +878,24 @@ func kbSessionToJSON(s *kbv1.KBSession) kbSessionJSON {
 		LastQuery:    s.GetLastQuery(),
 		CreatedAt:    protoTimestampToRFC3339(s.GetCreatedAt()),
 		LastActiveAt: protoTimestampToRFC3339(s.GetLastActiveAt()),
+	}
+}
+
+func kbPermissionsToJSON(p *kbv1.KBPermissions) kbPermissionsJSON {
+	if p == nil {
+		return kbPermissionsJSON{
+			AllowedUserIDs: []string{},
+		}
+	}
+	allowed := p.GetAllowedUserIds()
+	if allowed == nil {
+		allowed = []string{}
+	}
+	return kbPermissionsJSON{
+		KbID:           p.GetKbId(),
+		PublicRead:     p.GetPublicRead(),
+		AllowedUserIDs: allowed,
+		UpdatedAt:      protoTimestampToRFC3339(p.GetUpdatedAt()),
 	}
 }
 

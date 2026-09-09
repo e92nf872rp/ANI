@@ -94,6 +94,18 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		}, nil
 	}
 
+	if request.Action == ports.WorkloadLifecycleAttachVolume || request.Action == ports.WorkloadLifecycleDetachVolume {
+		if err := e.applyKubeVirtVolume(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "volume change accepted by KubeVirt lifecycle executor",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
 	resource, err := resourceFromRecord(record)
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
@@ -107,6 +119,75 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		Reason:    "accepted by Kubernetes lifecycle executor",
 		CheckedAt: e.now().UTC(),
 	}, nil
+}
+
+func (e *KubernetesLifecycleExecutor) applyKubeVirtVolume(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	if record.Kind != ports.WorkloadKindVM {
+		return fmt.Errorf("%w: Kubernetes volume lifecycle execution is only supported for vm instances", ports.ErrUnsupported)
+	}
+	resource, err := kubeVirtVMResourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	volumeID := strings.TrimSpace(request.VolumeID)
+	if volumeID == "" {
+		return fmt.Errorf("%w: volume_id is required for KubeVirt volume lifecycle execution", ports.ErrInvalid)
+	}
+	volumeName := kubeVirtVolumeName(record, volumeID)
+	var body []byte
+	switch request.Action {
+	case ports.WorkloadLifecycleAttachVolume:
+		body, err = json.Marshal(map[string]any{
+			"name": volumeName,
+			"disk": map[string]any{
+				"disk": map[string]any{"bus": "virtio"},
+			},
+			"volumeSource": map[string]any{
+				"persistentVolumeClaim": map[string]any{
+					"claimName": storageProviderName("vol", volumeID),
+					"readOnly":  request.ReadOnly != nil && *request.ReadOnly,
+				},
+			},
+		})
+	case ports.WorkloadLifecycleDetachVolume:
+		body, err = json.Marshal(map[string]any{"name": volumeName})
+	default:
+		return fmt.Errorf("%w: unsupported KubeVirt volume lifecycle action %q", ports.ErrUnsupported, request.Action)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: marshal KubeVirt volume request: %v", ports.ErrInvalid, err)
+	}
+	subresource := "addvolume"
+	if request.Action == ports.WorkloadLifecycleDetachVolume {
+		subresource = "removevolume"
+	}
+	_, err = e.client.do(ctx, http.MethodPut, e.client.host+kubeVirtVMSubresourcePath(resource.Namespace, resource.Name, subresource), "application/json", body)
+	return err
+}
+
+func kubeVirtVMResourceFromRecord(record ports.WorkloadInstanceRecord) (kubernetesResource, error) {
+	namespace := tenantNamespace(record.TenantID)
+	for _, ref := range record.ResourceRefs {
+		resource, err := resourceFromRef("", namespace, ref)
+		if err != nil {
+			continue
+		}
+		if resource.Provider == "kubevirt" && resource.Kind == "VirtualMachine" && strings.TrimSpace(resource.Name) != "" {
+			return resource, nil
+		}
+	}
+	return kubernetesResource{}, fmt.Errorf("%w: KubeVirt VirtualMachine resource ref is required for volume lifecycle execution", ports.ErrInvalid)
+}
+
+func kubeVirtVolumeName(record ports.WorkloadInstanceRecord, volumeID string) string {
+	for _, attachments := range [][]ports.WorkloadStorageAttachment{record.Status.Storage, record.StorageAttachments} {
+		for _, attachment := range attachments {
+			if sameVolume(attachment, volumeID) && strings.TrimSpace(attachment.Name) != "" && strings.TrimSpace(attachment.Name) != strings.TrimSpace(volumeID) {
+				return strings.TrimSpace(attachment.Name)
+			}
+		}
+	}
+	return storageProviderName("volume", volumeID)
 }
 
 func (e *KubernetesLifecycleExecutor) deleteResources(ctx context.Context, record ports.WorkloadInstanceRecord) error {

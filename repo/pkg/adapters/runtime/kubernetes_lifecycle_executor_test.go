@@ -68,6 +68,93 @@ func TestKubernetesLifecycleExecutorUsesKubeVirtStartStopSubresources(t *testing
 	}
 }
 
+func TestKubernetesLifecycleExecutorHotplugsPVCIntoKubeVirtVM(t *testing.T) {
+	var gotPath string
+	var gotBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		gotPath = r.URL.Path
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		gotBody = string(body)
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("content type = %q, want application/json", r.Header.Get("Content-Type"))
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleAttachVolume)
+	req.VolumeID = "vol_eec81c75-9204-419f-a7c9-00602812959c"
+	req.ReadOnly = boolPointer(true)
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("AttachVolume Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	if gotPath != "/apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/addvolume" {
+		t.Fatalf("path = %q, want VM addvolume subresource", gotPath)
+	}
+	for _, want := range []string{
+		`"name":"volume-vol-eec81c75-9204-419f-a7c9-00602812959c"`,
+		`"disk":{"bus":"virtio"}`,
+		`"claimName":"vol-vol-eec81c75-9204-419f-a7c9-00602812959c"`,
+		`"readOnly":true`,
+	} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body = %s, want %s", gotBody, want)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorRemovesAttachedKubeVirtVMVolumeByAttachmentName(t *testing.T) {
+	var gotPath string
+	var gotBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		gotPath = r.URL.Path
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		gotBody = string(body)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	record.Status.Storage = []ports.WorkloadStorageAttachment{{
+		Name: "existing-data-disk", ResourceType: "volume", ResourceID: "vol_data_a",
+	}}
+	req := lifecycleRequest(ports.WorkloadLifecycleDetachVolume)
+	req.VolumeID = "vol_data_a"
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("DetachVolume Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	if gotPath != "/apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/removevolume" {
+		t.Fatalf("path = %q, want VM removevolume subresource", gotPath)
+	}
+	if gotBody != `{"name":"existing-data-disk"}` {
+		t.Fatalf("body = %s, want existing attachment name", gotBody)
+	}
+}
+
 func TestKubernetesLifecycleExecutorTreatsAlreadyRunningStartAsSuccess(t *testing.T) {
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		return &http.Response{

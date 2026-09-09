@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>146</dd></div>
-          <div><dt>Schemas</dt><dd>160</dd></div>
+          <div><dt>Operations</dt><dd>147</dd></div>
+          <div><dt>Schemas</dt><dd>161</dd></div>
         </dl>
       </section>
 
@@ -580,6 +580,14 @@
           <td><code>/knowledge-bases/{kb_id}/models</code></td>
           <td><code>listKnowledgeBaseModels</code></td>
           <td>可用嵌入/推理模型列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/permissions</code></td>
+          <td><code>getKnowledgeBasePermissions</code></td>
+          <td>读取知识库访问权限</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -1412,6 +1420,7 @@
         <li><code>KBCitationListResponse</code></li>
         <li><code>KBConfig</code></li>
         <li><code>KBDocument</code></li>
+        <li><code>KBPermissions</code></li>
         <li><code>KBQueryRequest</code></li>
         <li><code>KBQueryResponse</code></li>
         <li><code>KBSession</code></li>

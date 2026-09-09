@@ -23,7 +23,6 @@ import grpc
 from google.protobuf import empty_pb2
 from google.protobuf import timestamp_pb2
 
-from app.api import p1_rpcs
 import httpx
 from app.core_api.client import CoreAPIError, CoreClient
 from app.generated.common.v1 import common_pb2
@@ -35,6 +34,7 @@ from app.repositories import chunk as chunk_repo
 from app.repositories import document as document_repo
 from app.repositories import knowledge_base as kb_repo
 from app.repositories import message as message_repo
+from app.repositories import permission as permission_repo
 from app.repositories.cursor import InvalidCursorError
 from app.core.config import settings
 from app.services.contracts import QueryResult
@@ -2033,10 +2033,170 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         )
         return kb_pb.ListKBSessionsResponse(items=items, next_cursor=next_cursor)
 
-    # ── P1 RPC declaration (still UNIMPLEMENTED) ──────────────────────────────
+    # ── P1 RPC: permissions read/write pair (B4, plan §2.5) ────────────────────
+
+    def GetKBPermissions(self, request, context):
+        return _run_async(self._get_kb_permissions(request, context))
+
+    async def _get_kb_permissions(self, request, context) -> kb_pb.KBPermissions:
+        # 1. validate (read path: no idempotency)
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if not request.kb_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "kb_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        async with self._pool.acquire() as conn:
+            # 2. KB existence check (RLS query, same semantics as GetKB: a
+            # deleted KB is 404, not defaults)
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            # 3. read the permission row; no row → defaults (contract: not 404)
+            perm = await permission_repo.get_permissions(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+        # 4. updated_at falls back to kb.created_at when no permission row
+        # exists — avoids leaking the proto Timestamp zero value (1970).
+        updated_at = perm.get("updated_at") or kb_row.get("created_at")
+        return kb_pb.KBPermissions(
+            kb_id=request.kb_id,
+            public_read=bool(perm["public_read"]),
+            allowed_user_ids=perm["allowed_user_ids"],
+            updated_at=_ts(updated_at),
+        )
 
     def UpdateKBPermissions(self, request, context):
-        return p1_rpcs.update_kb_permissions(request, context)
+        return _run_async(self._update_kb_permissions(request, context))
+
+    async def _update_kb_permissions(self, request, context) -> kb_pb.KnowledgeBase:
+        # 1. validate idempotency_key / kb_id / tenant_id (align UpdateKB)
+        if not request.idempotency_key:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
+            )
+            return
+        if not request.kb_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "kb_id is required")
+            return
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        # allowed_user_ids: each must be a valid uuid; dedupe preserving order
+        allowed_user_ids: list[str] = []
+        seen_user_ids: set[str] = set()
+        for raw in request.allowed_user_ids:
+            uid = raw.strip()
+            try:
+                uuid.UUID(uid)
+            except ValueError:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    "allowed_user_ids entries must be uuids",
+                )
+                return
+            if uid not in seen_user_ids:
+                seen_user_ids.add(uid)
+                allowed_user_ids.append(uid)
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        tenant_id = request.tenant_id
+        idem_key = request.idempotency_key
+
+        # 2. single transaction: replay check, KB existence, permission
+        # upsert, and the idempotency record commit atomically (UpdateKB
+        # pattern; nested conn.transaction() degrades to SAVEPOINT)
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                # 2a. idempotency replay: return the recorded KB row
+                existing = await async_task_repo.find_by_idempotency_key(
+                    conn,
+                    tenant_id=tenant_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.perm.update",
+                )
+                if existing and existing.get("result"):
+                    result = existing["result"]
+                    if isinstance(result, str):
+                        result = json.loads(result)
+                    return _kb_row_to_pb(result)
+
+                # 2b. KB existence check (deleted KB → NOT_FOUND)
+                kb_row = await kb_repo.get_kb(
+                    conn, tenant_id=tenant_id, kb_id=request.kb_id
+                )
+                if kb_row is None:
+                    context.abort(
+                        grpc.StatusCode.NOT_FOUND, "knowledge base not found"
+                    )
+                    return
+
+                # 2c. UPSERT permission row
+                await permission_repo.upsert_permissions_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    kb_id=request.kb_id,
+                    public_read=request.public_read,
+                    allowed_user_ids=allowed_user_ids,
+                )
+
+                # 2d. reuse the KB snapshot from step 2b as the replay
+                # result — the permission upsert only touches
+                # kb_permissions, so the knowledge_bases row is unchanged
+                # within this transaction (no second SELECT needed)
+
+                # 2e. idempotency record (poison-key self-heal, align
+                # UpdateKB step 4)
+                try:
+                    async with conn.transaction():
+                        task_row = await async_task_repo.create_task_in_tx(
+                            conn,
+                            tenant_id=tenant_id,
+                            idempotency_key=idem_key,
+                            task_type="kb.perm.update",
+                            resource_type="knowledge_base",
+                            resource_id=request.kb_id,
+                            payload={
+                                "public_read": request.public_read,
+                                "allowed_user_ids": allowed_user_ids,
+                            },
+                            status="pending",
+                        )
+                except asyncpg.UniqueViolationError:
+                    existing = await async_task_repo.find_by_idempotency_key(
+                        conn,
+                        tenant_id=tenant_id,
+                        idempotency_key=idem_key,
+                        task_type="kb.perm.update",
+                    )
+                    if existing is None:
+                        raise
+                    task_row = existing
+                await async_task_repo.complete_task_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    task_id=str(task_row["id"]),
+                    result=kb_row,
+                )
+
+        # 3. return KB snapshot (contract returns KnowledgeBase)
+        return _kb_row_to_pb(kb_row)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

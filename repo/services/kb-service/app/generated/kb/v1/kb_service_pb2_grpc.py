@@ -112,6 +112,11 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
                 _registered_method=True)
+        self.GetKBPermissions = channel.unary_unary(
+                '/kb.v1.KBService/GetKBPermissions',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetKBPermissionsRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.KBPermissions.FromString,
+                _registered_method=True)
         self.ListDocumentChunks = channel.unary_unary(
                 '/kb.v1.KBService/ListDocumentChunks',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.SerializeToString,
@@ -248,6 +253,14 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetKBPermissions(self, request, context):
+        """GetKBPermissions returns the access permissions of a KB (P1).
+        No kb_permissions row → returns defaults (public_read=false, empty list).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListDocumentChunks(self, request, context):
         """ListDocumentChunks returns the chunk details of a document (P1).
         """
@@ -356,6 +369,11 @@ def add_KBServiceServicer_to_server(servicer, server):
                     servicer.UpdateKBPermissions,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.SerializeToString,
+            ),
+            'GetKBPermissions': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetKBPermissions,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetKBPermissionsRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.KBPermissions.SerializeToString,
             ),
             'ListDocumentChunks': grpc.unary_unary_rpc_method_handler(
                     servicer.ListDocumentChunks,
@@ -784,6 +802,33 @@ class KBService:
             '/kb.v1.KBService/UpdateKBPermissions',
             kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.SerializeToString,
             kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetKBPermissions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetKBPermissions',
+            kb_dot_v1_dot_kb__service__pb2.GetKBPermissionsRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.KBPermissions.FromString,
             options,
             channel_credentials,
             insecure,

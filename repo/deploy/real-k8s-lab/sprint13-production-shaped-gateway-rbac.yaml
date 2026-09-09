@@ -70,7 +70,7 @@ rules:
     resources: ["virtualmachineinstances"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["subresources.kubevirt.io"]
-    resources: ["virtualmachines/start", "virtualmachines/stop", "virtualmachines/restart"]
+    resources: ["virtualmachines/start", "virtualmachines/stop", "virtualmachines/restart", "virtualmachines/addvolume", "virtualmachines/removevolume"]
     verbs: ["update"]
   - apiGroups: ["ani.kubercloud.io"]
     resources: ["gpuspecs"]
