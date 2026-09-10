@@ -11,8 +11,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/google/uuid"
-	"google.golang.org/grpc/metadata"
 	kbv1 "github.com/kubercloud/ani/pkg/generated/pb/kb/v1"
+	"google.golang.org/grpc/metadata"
 )
 
 // kbInjectedClient / kbInjectedSSEConfig are the KB gRPC client and SSE wiring

@@ -233,16 +233,16 @@ func setupKBTestServer(client KBGRPCClient) *server.Hertz {
 // the test.
 func TestKBRoutes_AllEndpointsRegistered(t *testing.T) {
 	h := setupKBTestServer(&fakeKBClient{
-		listKbsResp:      &kbv1.ListKBsResponse{},
-		listDocsResp:     &kbv1.ListDocumentsResponse{},
-		getDocResp:       &kbv1.KBDocument{},
-		listChunksResp:   &kbv1.ListDocumentChunksResponse{},
-		sessionMsgsResp:  &kbv1.GetSessionMessagesResponse{},
-		reparseResp:      &commonv1.AsyncTaskRef{},
+		listKbsResp:       &kbv1.ListKBsResponse{},
+		listDocsResp:      &kbv1.ListDocumentsResponse{},
+		getDocResp:        &kbv1.KBDocument{},
+		listChunksResp:    &kbv1.ListDocumentChunksResponse{},
+		sessionMsgsResp:   &kbv1.GetSessionMessagesResponse{},
+		reparseResp:       &commonv1.AsyncTaskRef{},
 		listAuditLogsResp: &kbv1.ListKBAuditLogsResponse{},
-		citationsErr:     status.Error(codes.Unimplemented, "P1"),
-		sessionsErr:      status.Error(codes.Unimplemented, "P1"),
-		permissionsErr:   status.Error(codes.Unimplemented, "P1"),
+		citationsErr:      status.Error(codes.Unimplemented, "P1"),
+		sessionsErr:       status.Error(codes.Unimplemented, "P1"),
+		permissionsErr:    status.Error(codes.Unimplemented, "P1"),
 	})
 
 	routes := []struct {
