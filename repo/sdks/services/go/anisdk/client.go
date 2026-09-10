@@ -513,6 +513,7 @@ var IdempotencyOperations = []string{
 var CursorPaginationOperations = []string{
 	"listGpuContainers",
 	"listInferencePolicyEvents",
+	"listInferenceServices",
 	"getInferenceServiceLogs",
 	"listIntegrations",
 	"listKnowledgeBaseCitations",

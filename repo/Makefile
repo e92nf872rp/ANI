@@ -1382,6 +1382,7 @@ image-auth-service:
 image-model-service:
 	$(RUNTIME_IMAGE_BUILD) $(RUNTIME_IMAGE_BUILD_FLAGS) -t $(REGISTRY)/model-service:$(VERSION) \
 		-f services/model-service/Dockerfile \
+		--target runtime \
 		.
 
 image-task-service:

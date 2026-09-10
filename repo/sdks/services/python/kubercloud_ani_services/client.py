@@ -502,6 +502,7 @@ IDEMPOTENCY_OPERATIONS = [
 CURSOR_PAGINATION_OPERATIONS = [
     "listGpuContainers",
     "listInferencePolicyEvents",
+    "listInferenceServices",
     "getInferenceServiceLogs",
     "listIntegrations",
     "listKnowledgeBaseCitations",

@@ -484,7 +484,7 @@ func renderModelFetcherCertificate(tenantID string) ports.WorkloadManifest {
 		"metadata": map[string]any{"name": name, "namespace": namespace, "labels": map[string]string{"app.kubernetes.io/part-of": "ani-platform", "ani.dev/tenant-id": tenantID}},
 		"spec": map[string]any{
 			"secretName": name + "-tls", "commonName": "ani-model-fetcher",
-			"uris":      []string{"spiffe://ani.dev/ns/" + namespace + "/sa/ani-inference-fetcher"},
+			"uris": []string{"spiffe://ani.dev/ns/" + namespace + "/sa/ani-inference-fetcher"},
 			// This certificate is presented by the fetcher as a client to the
 			// model-service listener. Explicitly constrain the key usage so a
 			// cert-manager default cannot accidentally issue a server-only cert.
