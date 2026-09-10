@@ -26,6 +26,12 @@ type gatewayPlatformWorkloadRuntimeConfig struct {
 	KubernetesProviderFieldManager    string
 	KubernetesHTTPClient              *http.Client
 	KubernetesRequestTimeout          time.Duration
+	// Materialization runtime settings are non-secret routing/image metadata.
+	// Credentials and signed URLs are intentionally not part of this config.
+	ModelServiceGRPCAddr          string
+	ModelFetcherGRPCAddr          string
+	ModelFetcherImageRef          string
+	ModelFetcherAllowInsecureHTTP bool
 }
 
 func gatewayPlatformWorkloadRuntimeConfigFromEnv() gatewayPlatformWorkloadRuntimeConfig {
@@ -40,6 +46,10 @@ func gatewayPlatformWorkloadRuntimeConfigFromEnv() gatewayPlatformWorkloadRuntim
 		KubernetesServiceAccountCAFile:    os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"),
 		KubernetesProviderFieldManager:    firstGatewayEnv("PLATFORM_WORKLOAD_FIELD_MANAGER", "KUBERNETES_PROVIDER_FIELD_MANAGER"),
 		KubernetesRequestTimeout:          gatewayDurationFromEnv("KUBERNETES_REQUEST_TIMEOUT"),
+		ModelServiceGRPCAddr:              strings.TrimSpace(os.Getenv("MODEL_SERVICE_GRPC_ADDR")),
+		ModelFetcherGRPCAddr:              strings.TrimSpace(os.Getenv("MODEL_FETCHER_GRPC_ADDR")),
+		ModelFetcherImageRef:              strings.TrimSpace(os.Getenv("MODEL_FETCHER_IMAGE_REF")),
+		ModelFetcherAllowInsecureHTTP:     gatewayBoolFromEnv("MODEL_FETCHER_ALLOW_INSECURE_HTTP"),
 	}
 }
 
@@ -67,7 +77,7 @@ func newGatewayPlatformWorkloadService(ctx context.Context, cfg gatewayPlatformW
 		if err != nil {
 			return nil, closeStore, fmt.Errorf("platform workload kubernetes provider: %w", err)
 		}
-		runtime := runtimeadapter.NewKubernetesPlatformWorkloadRuntime(client)
+		runtime := runtimeadapter.NewKubernetesPlatformWorkloadRuntimeWithFetcherHTTPConfig(client, cfg.ModelServiceGRPCAddr, cfg.ModelFetcherGRPCAddr, cfg.ModelFetcherImageRef, cfg.ModelFetcherAllowInsecureHTTP)
 		if cfg.MetadataStore != nil {
 			return runtimeadapter.NewKubernetesPlatformWorkloadServiceWithStore(
 				runtime,

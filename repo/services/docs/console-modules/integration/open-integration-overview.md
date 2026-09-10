@@ -179,7 +179,7 @@
 
 ### 待补能力边界
 
-- OpenAI 兼容 API 正式接入页 — 详文 `openai-compatible-api.md` <!-- ADDED-TO-YAML: Gateway POST /v1/chat/completions (Phase 2 2026-06-17) -->
+- OpenAI 兼容 API（独立 Envoy AI Gateway 数据面）— 详文 `openai-compatible-api.md`；`ani-gateway` 不承载 `/v1` chat 代理
 - Go / Python / TypeScript Client / Java SDK 独立交付页
 - Webhook — 详文 `integration-webhook-overview.md` <!-- ADDED-TO-YAML: 部分见 Services /api/v1/svc/tenant/webhooks (Phase 2 2026-06-17) -->
 - 企业微信 / 钉钉 Bot — 详文 `integration-bot.md` <!-- ADDED-TO-YAML: POST /api/v1/svc/integrations/bots (Services v1.yaml, Phase 2 2026-06-17) -->

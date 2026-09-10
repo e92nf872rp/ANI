@@ -705,6 +705,7 @@ var Schemas = []string{
 	"PlatformWorkloadLogEntry",
 	"PlatformWorkloadLogListResponse",
 	"PlatformWorkloadMetadata",
+	"PlatformWorkloadModelMaterialization",
 	"PlatformWorkloadNetwork",
 	"PlatformWorkloadPort",
 	"PlatformWorkloadResources",

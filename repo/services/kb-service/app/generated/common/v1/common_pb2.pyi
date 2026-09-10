@@ -28,16 +28,18 @@ RESOURCE_TYPE_OUTPUT_TOKENS: ResourceType
 RESOURCE_TYPE_KB_QUERIES: ResourceType
 
 class TenantContext(_message.Message):
-    __slots__ = ("tenant_id", "user_id", "roles", "scope")
+    __slots__ = ("tenant_id", "user_id", "roles", "scope", "api_key_id")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     ROLES_FIELD_NUMBER: _ClassVar[int]
     SCOPE_FIELD_NUMBER: _ClassVar[int]
+    API_KEY_ID_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     user_id: str
     roles: _containers.RepeatedScalarFieldContainer[str]
     scope: str
-    def __init__(self, tenant_id: _Optional[str] = ..., user_id: _Optional[str] = ..., roles: _Optional[_Iterable[str]] = ..., scope: _Optional[str] = ...) -> None: ...
+    api_key_id: str
+    def __init__(self, tenant_id: _Optional[str] = ..., user_id: _Optional[str] = ..., roles: _Optional[_Iterable[str]] = ..., scope: _Optional[str] = ..., api_key_id: _Optional[str] = ...) -> None: ...
 
 class CursorPageRequest(_message.Message):
     __slots__ = ("limit", "cursor")
@@ -54,6 +56,14 @@ class CursorPageMeta(_message.Message):
     total: int
     next_cursor: str
     def __init__(self, total: _Optional[int] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class IdempotentResult(_message.Message):
+    __slots__ = ("id", "message")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    message: str
+    def __init__(self, id: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
 
 class AsyncTaskRef(_message.Message):
     __slots__ = ("task_id", "task_type", "status", "location_url")

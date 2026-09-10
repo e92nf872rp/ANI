@@ -25,6 +25,10 @@ type KubernetesPlatformWorkloadService struct {
 	now     func() time.Time
 }
 
+type platformWorkloadMaterializationConfigurer interface {
+	ConfigureModelMaterialization(*ports.PlatformWorkloadCreateSpec)
+}
+
 func NewKubernetesPlatformWorkloadService(runtime platformWorkloadRuntime) *KubernetesPlatformWorkloadService {
 	return NewKubernetesPlatformWorkloadServiceWithStore(runtime, newMemoryPlatformWorkloadStore())
 }
@@ -48,7 +52,10 @@ func (s *KubernetesPlatformWorkloadService) Capabilities(ctx context.Context) (p
 }
 
 func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID string, spec ports.PlatformWorkloadCreateSpec) (ports.PlatformWorkloadRecord, error) {
-	if err := validatePlatformWorkloadCreate(spec); err != nil {
+	if configurer, ok := s.runtime.(platformWorkloadMaterializationConfigurer); ok {
+		configurer.ConfigureModelMaterialization(&spec)
+	}
+	if err := validatePlatformWorkloadCreate(spec, tenantID); err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	caps, err := s.Capabilities(ctx)
@@ -193,6 +200,9 @@ func (s *KubernetesPlatformWorkloadService) UpdateReplicas(ctx context.Context, 
 		if getErr != nil {
 			return ports.PlatformWorkloadRecord{}, getErr
 		}
+		if item.spec.ModelMaterialization != nil && replicas != 1 {
+			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: object materialization requires exactly one replica", ports.ErrFailedPrecondition)
+		}
 		if !ok || existing.fingerprint != fingerprint || existing.workloadID != workloadID {
 			return ports.PlatformWorkloadRecord{}, platformWorkloadIntentConflict()
 		}
@@ -211,6 +221,10 @@ func (s *KubernetesPlatformWorkloadService) UpdateReplicas(ctx context.Context, 
 		if item.spec.Topology.Mode != "single_node" {
 			s.mu.Unlock()
 			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: only single_node replicas can be updated", ports.ErrFailedPrecondition)
+		}
+		if item.spec.ModelMaterialization != nil && replicas != 1 {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: object materialization requires exactly one replica", ports.ErrFailedPrecondition)
 		}
 		item.spec.Replicas = replicas
 		item.record.DesiredReplicas = replicas

@@ -72,6 +72,10 @@ type KBGRPCClient interface {
 	// (SPEC §5.1 reparse 事件流). It returns an AsyncTaskRef because reparse
 	// is asynchronous; the client polls the task via the tasks API.
 	ReparseDocument(ctx context.Context, tenantID string, kbID string, docID string, idempotencyKey string) (*commonv1.AsyncTaskRef, error)
+	// ListKBAuditLogs reads the KB management-plane audit trail (SPEC §4.1 #21,
+	// kb-p1-plan §6.4): cursor-paginated entries ordered created_at DESC,
+	// id DESC. Flat items+next_cursor shape, aligned with ListKBCitations.
+	ListKBAuditLogs(ctx context.Context, tenantID string, kbID string, limit int32, cursor string) (*kbv1.ListKBAuditLogsResponse, error)
 }
 
 // kbGRPCClient is the production implementation backed by a gRPC ClientConn.
@@ -373,6 +377,19 @@ func (c *kbGRPCClient) ReparseDocument(ctx context.Context, tenantID, kbID, docI
 		KbId:           kbID,
 		DocId:          docID,
 		IdempotencyKey: idempotencyKey,
+	})
+}
+
+// ListKBAuditLogs reads the KB management-plane audit trail (SPEC §4.1 #21).
+// The tenant id comes from the Auth middleware; kb-service enforces the
+// keyset pagination (created_at DESC, id DESC) and the cursor shape.
+func (c *kbGRPCClient) ListKBAuditLogs(ctx context.Context, tenantID, kbID string, limit int32, cursor string) (*kbv1.ListKBAuditLogsResponse, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ListKBAuditLogs(callCtx, &kbv1.ListKBAuditLogsRequest{
+		TenantId: tenantID,
+		KbId:     kbID,
+		Page:     &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor},
 	})
 }
 

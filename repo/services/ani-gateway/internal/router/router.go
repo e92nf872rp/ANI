@@ -172,7 +172,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerTenantList(svc)
 	registerTenantAdmins(svc)
 
-	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
-	h.Group("/v1").POST("/chat/completions", inferenceProxy)
-	h.Group("/v1").GET("/inference/stream", inferenceProxy)
+	// OpenAI-compatible chat traffic is served by the independent Envoy AI
+	// Gateway data plane, not by this control-plane gateway. Keep the legacy
+	// stream placeholder isolated until its ownership is decided separately.
+	h.Group("/v1").GET("/inference/stream", legacyInferenceStream)
 }

@@ -10,10 +10,10 @@ DECLARE
 BEGIN
     SELECT EXISTS (
         SELECT 1
-        FROM pg_constraint AS constraint
-        WHERE constraint.conrelid = 'inference_access_policy_api_keys'::regclass
-          AND constraint.contype = 'p'
-          AND pg_get_constraintdef(constraint.oid) = 'PRIMARY KEY (policy_id, api_key_id)'
+        FROM pg_constraint AS c
+        WHERE c.conrelid = 'inference_access_policy_api_keys'::regclass
+          AND c.contype = 'p'
+          AND pg_get_constraintdef(c.oid) = 'PRIMARY KEY (policy_id, api_key_id)'
     )
     INTO legacy_two_column_primary_key;
 

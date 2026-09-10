@@ -30,6 +30,7 @@ from app.generated.kb.v1 import kb_service_pb2 as kb_pb
 from app.generated.kb.v1 import kb_service_pb2_grpc as pb_grpc
 from app.rag_engine.client import RagEngineError
 from app.repositories import async_task as async_task_repo
+from app.repositories import audit as audit_repo
 from app.repositories import chunk as chunk_repo
 from app.repositories import document as document_repo
 from app.repositories import knowledge_base as kb_repo
@@ -227,22 +228,38 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             # No SAVEPOINT needed: create_kb runs in its own transaction, so
             # the connection is clean when the exception is caught.
             try:
-                kb_row = await kb_repo.create_kb(
-                    conn,
-                    tenant_id=tenant_id,
-                    name=request.name,
-                    description=request.description,
-                    embedding_model=request.embedding_model or "bge-m3",
-                    chunk_size=request.chunk_size or 1024,
-                    top_k=request.top_k or 5,
-                    # 未显式传入时落库存 0（表示未设置；运行时由 rag-engine 的
-                    # DEFAULT_SCORE_THRESHOLD 兜底），而不是硬编码 0.3。
-                    score_threshold=request.score_threshold or 0.0,
-                    retrieval_mode=request.retrieval_mode or "hybrid",
-                )
+                async with conn.transaction():
+                    kb_row = await kb_repo.create_kb(
+                        conn,
+                        tenant_id=tenant_id,
+                        name=request.name,
+                        description=request.description,
+                        embedding_model=request.embedding_model or "bge-m3",
+                        chunk_size=request.chunk_size or 1024,
+                        top_k=request.top_k or 5,
+                        # 未显式传入时落库存 0（表示未设置；运行时由 rag-engine 的
+                        # DEFAULT_SCORE_THRESHOLD 兜底），而不是硬编码 0.3。
+                        score_threshold=request.score_threshold or 0.0,
+                        retrieval_mode=request.retrieval_mode or "hybrid",
+                    )
+                    # audit kb.create (plan §6.3) — same transaction as the kb
+                    # INSERT, so the audit row exists iff the KB does.
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=str(kb_row["id"]),
+                        action="kb.create",
+                        actor_user_id=_actor_user_id(context),
+                        before_state=None,
+                        after_state=_kb_audit_snapshot(kb_row),
+                    )
             except asyncpg.UniqueViolationError:
                 # UNIQUE(tenant_id, name) hit — mirrors the mapping in
-                # _update_kb (Gateway maps to HTTP 409).
+                # _update_kb (Gateway maps to HTTP 409). No failure audit:
+                # the kb INSERT failed, so no knowledge_bases row exists
+                # to satisfy kb_audit_log.kb_id (NOT NULL FK) — a create-
+                # failure audit row is structurally impossible (deviation
+                # logged in the P1 plan, B8 §6.3).
                 context.abort(
                     grpc.StatusCode.ALREADY_EXISTS,
                     "knowledge base name already exists in this tenant",
@@ -272,6 +289,22 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                             tenant_id=tenant_id,
                             kb_id=kb_id,
                             vector_store_id=vector_store_id,
+                        )
+                    # Best-effort VS→KB link (Core link 表)：失败不阻断 KB 创建
+                    # （KB→VS 方向已落库），仅记录日志，list 接口的
+                    # knowledge_base_ref 可能缺失。
+                    try:
+                        await core.set_knowledge_base_link(
+                            vector_store_id=vector_store_id,
+                            kb_id=kb_id,
+                            kb_name=request.name or _vector_store_name(kb_id),
+                            idempotency_key=f"{idem_key}:kblink",
+                        )
+                    except CoreAPIError as link_err:
+                        logger.warning(
+                            "CreateKB: vector store %s knowledge base link failed: %s",
+                            vector_store_id,
+                            link_err,
                         )
         except CoreAPIError as e:
             # Best-effort cleanup: soft-delete the KB row so retries can
@@ -401,83 +434,125 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # which inside this outer transaction degrades to a SAVEPOINT
         # (asyncpg nested-tx semantics); create_task_in_tx /
         # complete_task_in_tx are plain. Nothing commits until the outer
-        # transaction commits.
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                # 2. idempotency replay: return the recorded result row
-                existing = await async_task_repo.find_by_idempotency_key(
-                    conn,
-                    tenant_id=tenant_id,
-                    idempotency_key=idem_key,
-                    task_type="kb.update",
-                )
-                if existing and existing.get("result"):
-                    result = existing["result"]
-                    if isinstance(result, str):
-                        result = json.loads(result)
-                    return _kb_row_to_pb(result)
-
-                # 3. UPDATE (empty name/description keep current values)
-                try:
-                    kb_row = await kb_repo.update_kb(
-                        conn,
-                        tenant_id=tenant_id,
-                        kb_id=request.kb_id,
-                        name=request.name,
-                        description=request.description,
-                    )
-                except asyncpg.UniqueViolationError:
-                    # UNIQUE(tenant_id, name) hit: name collides with another KB
-                    # in the same tenant → ALREADY_EXISTS (Gateway maps to 409).
-                    context.abort(
-                        grpc.StatusCode.ALREADY_EXISTS,
-                        "knowledge base name already exists in this tenant",
-                    )
-                    return
-                if kb_row is None:
-                    context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
-                    return
-
-                # 4. write async_tasks idempotency record (result = updated row)
-                # Poison-key self-heal: a prior attempt that crashed between
-                # create_task and complete_task leaves a pending row with
-                # result=NULL; the replay check above skips it, so the INSERT
-                # here hits UNIQUE(tenant_id, idempotency_key). Reuse that
-                # pending row and complete it — the retry becomes a replay.
-                # The nested transaction (SAVEPOINT) keeps the outer tx usable
-                # after the violated constraint aborts the inner one. Note:
-                # distinct from the name-collision 23505 above, which is a
-                # genuine ALREADY_EXISTS.
-                try:
-                    async with conn.transaction():
-                        task_row = await async_task_repo.create_task_in_tx(
-                            conn,
-                            tenant_id=tenant_id,
-                            idempotency_key=idem_key,
-                            task_type="kb.update",
-                            resource_type="knowledge_base",
-                            resource_id=request.kb_id,
-                            payload={"kb_id": request.kb_id, "name": request.name},
-                            status="pending",
-                        )
-                except asyncpg.UniqueViolationError:
+        # transaction commits. Audit (kb.update) writes in the same tx.
+        actor = _actor_user_id(context)
+        intent = {"name": request.name, "description": request.description}
+        try:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    # 2. idempotency replay: return the recorded result row
                     existing = await async_task_repo.find_by_idempotency_key(
                         conn,
                         tenant_id=tenant_id,
                         idempotency_key=idem_key,
                         task_type="kb.update",
                     )
-                    if existing is None:
-                        # RLS raced the row away between INSERT and SELECT;
-                        # surface as UNKNOWN rather than masking it.
-                        raise
-                    task_row = existing
-                await async_task_repo.complete_task_in_tx(
-                    conn,
+                    if existing and existing.get("result"):
+                        result = existing["result"]
+                        if isinstance(result, str):
+                            result = json.loads(result)
+                        return _kb_row_to_pb(result)
+
+                    # audit before_state: the row as it stands pre-UPDATE
+                    # (None when RLS hides the KB → the 404 abort below).
+                    before_row = await kb_repo.get_kb(
+                        conn, tenant_id=tenant_id, kb_id=request.kb_id
+                    )
+
+                    # 3. UPDATE (empty name/description keep current values)
+                    try:
+                        kb_row = await kb_repo.update_kb(
+                            conn,
+                            tenant_id=tenant_id,
+                            kb_id=request.kb_id,
+                            name=request.name,
+                            description=request.description,
+                        )
+                    except asyncpg.UniqueViolationError:
+                        # UNIQUE(tenant_id, name) hit: name collides with
+                        # another KB in the same tenant → ALREADY_EXISTS
+                        # (Gateway maps to 409).
+                        context.abort(
+                            grpc.StatusCode.ALREADY_EXISTS,
+                            "knowledge base name already exists in this tenant",
+                        )
+                        return
+                    if kb_row is None:
+                        context.abort(
+                            grpc.StatusCode.NOT_FOUND, "knowledge base not found"
+                        )
+                        return
+
+                    # audit kb.update (plan §6.3) — same transaction as the
+                    # UPDATE itself.
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=request.kb_id,
+                        action="kb.update",
+                        actor_user_id=actor,
+                        before_state=_kb_audit_snapshot(before_row),
+                        after_state=_kb_audit_snapshot(kb_row),
+                    )
+
+                    # 4. write async_tasks idempotency record (result = updated row)
+                    # Poison-key self-heal: a prior attempt that crashed between
+                    # create_task and complete_task leaves a pending row with
+                    # result=NULL; the replay check above skips it, so the INSERT
+                    # here hits UNIQUE(tenant_id, idempotency_key). Reuse that
+                    # pending row and complete it — the retry becomes a replay.
+                    # The nested transaction (SAVEPOINT) keeps the outer tx usable
+                    # after the violated constraint aborts the inner one. Note:
+                    # distinct from the name-collision 23505 above, which is a
+                    # genuine ALREADY_EXISTS.
+                    try:
+                        async with conn.transaction():
+                            task_row = await async_task_repo.create_task_in_tx(
+                                conn,
+                                tenant_id=tenant_id,
+                                idempotency_key=idem_key,
+                                task_type="kb.update",
+                                resource_type="knowledge_base",
+                                resource_id=request.kb_id,
+                                payload={"kb_id": request.kb_id, "name": request.name},
+                                status="pending",
+                            )
+                    except asyncpg.UniqueViolationError:
+                        existing = await async_task_repo.find_by_idempotency_key(
+                            conn,
+                            tenant_id=tenant_id,
+                            idempotency_key=idem_key,
+                            task_type="kb.update",
+                        )
+                        if existing is None:
+                            # RLS raced the row away between INSERT and SELECT;
+                            # surface as UNKNOWN rather than masking it.
+                            raise
+                        task_row = existing
+                    await async_task_repo.complete_task_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        task_id=str(task_row["id"]),
+                        result=kb_row,
+                    )
+        except Exception:
+            # failure audit kb.update (plan §6.3): 404/409 business
+            # rejections are recorded; INVALID_ARGUMENT never reaches here
+            # (validated before the acquire block). The business tx has
+            # already rolled back, so the audit lands in its own tx.
+            info = _audit_failure_info(context)
+            if info is not None:
+                await _record_failure_audit(
+                    self._pool,
                     tenant_id=tenant_id,
-                    task_id=str(task_row["id"]),
-                    result=kb_row,
+                    kb_id=request.kb_id,
+                    action="kb.update",
+                    intent=intent,
+                    error_code=info[0],
+                    error_msg=info[1],
+                    actor_user_id=actor,
                 )
+            raise
 
         # 5. return updated row
         return _kb_row_to_pb(kb_row)
@@ -491,18 +566,34 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             return
         tenant_id = request.tenant_id
         kb_id = request.kb_id
+        actor = _actor_user_id(context)
 
-        # 1. soft-delete KB + fetch persisted vector_store_id for Core cleanup
+        # 1. soft-delete KB + fetch persisted vector_store_id for Core cleanup.
+        #    audit kb.delete (plan §6.3): before = the KB row being removed,
+        #    after = NULL; written in the same transaction as the soft-delete.
+        #    404 failure audit: skipped — a missing KB row cannot satisfy the
+        #    kb_audit_log.kb_id FK, and there is no meaningful before_state to
+        #    record (deviation logged in the P1 plan, B8 §6.3).
         async with self._pool.acquire() as conn:
-            kb_row = await kb_repo.get_kb(
-                conn, tenant_id=tenant_id, kb_id=kb_id
-            )
-            if not kb_row:
-                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
-                return
-            deleted = await kb_repo.soft_delete_kb(
-                conn, tenant_id=tenant_id, kb_id=kb_id
-            )
+            async with conn.transaction():
+                kb_row = await kb_repo.get_kb(
+                    conn, tenant_id=tenant_id, kb_id=kb_id
+                )
+                if not kb_row:
+                    context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                    return
+                await audit_repo.insert_audit_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    action="kb.delete",
+                    actor_user_id=actor,
+                    before_state=_kb_audit_snapshot(kb_row),
+                    after_state=None,
+                )
+                deleted = await kb_repo.soft_delete_kb(
+                    conn, tenant_id=tenant_id, kb_id=kb_id
+                )
         if not deleted:
             context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
             return
@@ -564,58 +655,94 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # 0. verify the KB exists BEFORE resolving an upload URL / reserving a
         # kb_documents row. Otherwise a non-existent kb_id trips the
         # kb_documents.kb_id FK constraint (→ 500) instead of a clean 404.
-        async with self._pool.acquire() as conn:
-            kb_row = await kb_repo.get_kb(
-                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
-            )
-        if kb_row is None:
-            context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
-            return
-
-        doc_id = str(uuid.uuid4())
-        storage_path = f"kb-docs/{request.kb_id}/{doc_id}/{request.file_name}"
-
-        # 1. Core POST /objects/upload — get presigned PUT URL
+        # Failure audit doc.create (plan §6.3): NOT_FOUND / FAILED_PRECONDITION
+        # are business failures recorded with the request intent; the KB row
+        # exists on those paths, so the kb_audit_log.kb_id FK is satisfiable.
+        # UNAVAILABLE (Core down) is deliberately NOT audited (not a business
+        # rule rejection). INVALID_ARGUMENT validated above — never here.
+        actor = _actor_user_id(context)
+        intent: dict[str, Any] | None = None
         try:
-            async with self._core_client_factory(request.tenant_id) as core:
-                # The Core object-store keys buckets by UUID, but kb-service
-                # uses the bucket name "kb-docs" as a convention. Look up the
-                # UUID by name first.
-                bucket_id = await core.get_bucket_id_by_name(name="kb-docs")
-                if bucket_id is None:
-                    context.abort(
-                        grpc.StatusCode.FAILED_PRECONDITION,
-                        "kb-docs bucket not found — create it via POST /buckets first",
-                    )
-                    return
-                upload = await core.request_upload_url(
-                    bucket_id=bucket_id,
-                    key=storage_path,
-                    content_type=None,
-                    idempotency_key=request.idempotency_key,
+            async with self._pool.acquire() as conn:
+                kb_row = await kb_repo.get_kb(
+                    conn, tenant_id=request.tenant_id, kb_id=request.kb_id
                 )
-        except CoreAPIError as e:
-            context.abort(grpc.StatusCode.UNAVAILABLE, f"Core upload URL failed: {e}")
-            return
+            if kb_row is None:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
 
-        upload_url = upload.get("upload_url", "")
-        object_id = upload.get("object_id", doc_id)
+            doc_id = str(uuid.uuid4())
+            storage_path = f"kb-docs/{request.kb_id}/{doc_id}/{request.file_name}"
+            intent = _doc_intent_snapshot(request, storage_path=storage_path)
+            # 1. Core POST /objects/upload — get presigned PUT URL
+            try:
+                async with self._core_client_factory(request.tenant_id) as core:
+                    # The Core object-store keys buckets by UUID, but kb-service
+                    # uses the bucket name "kb-docs" as a convention. Look up the
+                    # UUID by name first.
+                    bucket_id = await core.get_bucket_id_by_name(name="kb-docs")
+                    if bucket_id is None:
+                        context.abort(
+                            grpc.StatusCode.FAILED_PRECONDITION,
+                            "kb-docs bucket not found — create it via POST /buckets first",
+                        )
+                        return
+                    upload = await core.request_upload_url(
+                        bucket_id=bucket_id,
+                        key=storage_path,
+                        content_type=None,
+                        idempotency_key=request.idempotency_key,
+                    )
+            except CoreAPIError as e:
+                context.abort(
+                    grpc.StatusCode.UNAVAILABLE, f"Core upload URL failed: {e}"
+                )
+                return
 
-        # 2. write kb_documents (parse_status=pending) (SPEC §6.1)
-        async with self._pool.acquire() as conn:
-            await document_repo.create_document(
-                conn,
-                tenant_id=request.tenant_id,
-                kb_id=request.kb_id,
-                file_name=request.file_name,
-                file_type=request.file_type,
-                file_size_bytes=request.file_size_bytes,
-                storage_path=storage_path,
-                checksum_sha256=request.checksum_sha256,
-                custom_metadata=_parse_metadata(request.custom_metadata),
-                doc_id=doc_id,
-                object_id=object_id,
-            )
+            upload_url = upload.get("upload_url", "")
+            object_id = upload.get("object_id", doc_id)
+
+            # 2. write kb_documents (parse_status=pending) (SPEC §6.1) + audit
+            #    doc.create (plan §6.3) in the same transaction — after_state is
+            #    the document intent (file identity + storage).
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    await document_repo.create_document(
+                        conn,
+                        tenant_id=request.tenant_id,
+                        kb_id=request.kb_id,
+                        file_name=request.file_name,
+                        file_type=request.file_type,
+                        file_size_bytes=request.file_size_bytes,
+                        storage_path=storage_path,
+                        checksum_sha256=request.checksum_sha256,
+                        custom_metadata=_parse_metadata(request.custom_metadata),
+                        doc_id=doc_id,
+                        object_id=object_id,
+                    )
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=request.tenant_id,
+                        kb_id=request.kb_id,
+                        action="doc.create",
+                        actor_user_id=actor,
+                        before_state=None,
+                        after_state=intent,
+                    )
+        except Exception:
+            info = _audit_failure_info(context)
+            if info is not None:
+                await _record_failure_audit(
+                    self._pool,
+                    tenant_id=request.tenant_id,
+                    kb_id=request.kb_id,
+                    action="doc.create",
+                    intent=intent,
+                    error_code=info[0],
+                    error_msg=info[1],
+                    actor_user_id=actor,
+                )
+            raise
 
         return kb_pb.GetDocumentUploadURLResponse(
             doc_id=doc_id,
@@ -654,145 +781,199 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # safe and return the same AsyncTaskRef.
         idem_key = f"kb.parse:{tenant_id}:{kb_id}:{doc_id}"
 
-        async with self._pool.acquire() as conn:
-            # 1. idempotency replay: if a prior notify for this doc completed,
-            #    return the same AsyncTaskRef (SPEC §6.4 idempotent replay).
-            existing = await async_task_repo.find_by_idempotency_key(
-                conn,
-                tenant_id=tenant_id,
-                idempotency_key=idem_key,
-                task_type="kb.parse",
-            )
-            if existing and existing.get("status") in ("pending", "completed"):
-                # Return the recorded task id + status.
-                return common_pb2.AsyncTaskRef(
-                    task_id=str(existing["id"]),
-                    task_type=existing.get("task_type") or "kb.parse",
-                    status=existing.get("status") or "pending",
-                    location_url="",
-                )
-
-            # 2. atomic write: kb_documents + async_tasks + outbox_events.
-            #    outbox.insert_event and create_task_in_tx / update_parse_status_in_tx
-            #    do NOT open their own transactions; they run inside this one.
-            async with conn.transaction():
-                # a. mark the document parse_status=pending (idempotent update).
-                updated = await document_repo.update_parse_status_in_tx(
+        # audit doc.parse (plan §6.3): intent for the failure path (what was
+        # notified); UNAVAILABLE-style pool failures never abort with an
+        # audited code, and INVALID_ARGUMENT is rejected above before this
+        # point, so only the document-not-found business rejection is
+        # recorded. If the KB row itself is gone the FK rejects the audit
+        # row — best-effort, swallowed by _record_failure_audit (debug).
+        actor = _actor_user_id(context)
+        intent: dict[str, Any] = {"doc_id": doc_id, "kb_id": kb_id}
+        try:
+            async with self._pool.acquire() as conn:
+                # 1. idempotency replay: if a prior notify for this doc completed,
+                #    return the same AsyncTaskRef (SPEC §6.4 idempotent replay).
+                existing = await async_task_repo.find_by_idempotency_key(
                     conn,
                     tenant_id=tenant_id,
-                    doc_id=doc_id,
-                    parse_status="pending",
-                    error_message=None,
+                    idempotency_key=idem_key,
+                    task_type="kb.parse",
                 )
-                if not updated:
-                    # document not found → abort before writing outbox/async_task
-                    context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
-                    return  # unreachable; for type checkers
+                if existing and existing.get("status") in ("pending", "completed"):
+                    # Return the recorded task id + status.
+                    return common_pb2.AsyncTaskRef(
+                        task_id=str(existing["id"]),
+                        task_type=existing.get("task_type") or "kb.parse",
+                        status=existing.get("status") or "pending",
+                        location_url="",
+                    )
 
-                # b. insert async_tasks row for idempotent replay + status tracking.
-                doc_row = await document_repo.get_document(
-                    conn, tenant_id=tenant_id, kb_id=kb_id, doc_id=doc_id
-                )
-                object_id = (doc_row or {}).get("object_id") or ""
+                # 2. atomic write: kb_documents + async_tasks + outbox_events.
+                #    outbox.insert_event and create_task_in_tx / update_parse_status_in_tx
+                #    do NOT open their own transactions; they run inside this one.
+                async with conn.transaction():
+                    # a. read the doc row BEFORE the update: the audit
+                    #    before_state is the row as it stood pre-notify.
+                    doc_row = await document_repo.get_document(
+                        conn, tenant_id=tenant_id, kb_id=kb_id, doc_id=doc_id
+                    )
+                    object_id = (doc_row or {}).get("object_id") or ""
 
-                # UNIQUE race self-heal (same pattern as _update_kb): the
-                # replay check above runs outside this transaction, so a
-                # concurrent notify with the same (tenant, kb, doc) key can
-                # win the INSERT between the check and here. The nested
-                # transaction (SAVEPOINT) keeps the outer tx usable after
-                # the violated constraint aborts the inner one; re-lookup
-                # then replays the winner's task instead of surfacing a
-                # gRPC UNKNOWN. A failed row is revived to pending: notify
-                # synthesizes the idempotency key, so the client cannot
-                # pick a fresh one — re-upload-and-retry is the only path.
-                publish_event = True
-                task_id = ""
-                task_type = "kb.parse"
-                task_status = "pending"
-                try:
-                    async with conn.transaction():
-                        task_row = await async_task_repo.create_task_in_tx(
+                    # b. mark the document parse_status=pending (idempotent update).
+                    updated = await document_repo.update_parse_status_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        doc_id=doc_id,
+                        parse_status="pending",
+                        error_message=None,
+                    )
+                    if not updated:
+                        # document not found → abort before writing outbox/async_task
+                        context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                        return  # unreachable; for type checkers
+
+                    # audit doc.parse (plan §6.3) — same transaction as the
+                    # parse_status update. before = the row pre-notify; after
+                    # = the row with the notified parse lifecycle (status
+                    # pending, error cleared — mirrors update above).
+                    # doc_row None + updated True means the doc exists under a
+                    # different kb_id than requested (update only keys on
+                    # doc_id): skip the audit row rather than risk an FK
+                    # violation on the requested kb_id rolling the business
+                    # write back into an UNKNOWN.
+                    if doc_row is not None:
+                        after_row = dict(doc_row)
+                        after_row["parse_status"] = "pending"
+                        after_row["error_message"] = None
+                        await audit_repo.insert_audit_in_tx(
+                            conn,
+                            tenant_id=tenant_id,
+                            kb_id=kb_id,
+                            action="doc.parse",
+                            actor_user_id=actor,
+                            before_state=_doc_audit_snapshot(doc_row),
+                            after_state=_doc_audit_snapshot(after_row),
+                        )
+
+                    # c. insert async_tasks row for idempotent replay + status
+                    #    tracking, with UNIQUE race self-heal (same pattern as
+                    #    _update_kb): the replay check above runs outside this
+                    #    transaction, so a concurrent notify with the same
+                    #    (tenant, kb, doc) key can win the INSERT between the
+                    #    check and here. The nested transaction (SAVEPOINT)
+                    #    keeps the outer tx usable after the violated
+                    #    constraint aborts the inner one; re-lookup then
+                    #    replays the winner's task instead of surfacing a
+                    #    gRPC UNKNOWN. A failed row is revived to pending:
+                    #    notify synthesizes the idempotency key, so the client
+                    #    cannot pick a fresh one — re-upload-and-retry is the
+                    #    only path.
+                    publish_event = True
+                    task_id = ""
+                    task_type = "kb.parse"
+                    task_status = "pending"
+                    try:
+                        async with conn.transaction():
+                            task_row = await async_task_repo.create_task_in_tx(
+                                conn,
+                                tenant_id=tenant_id,
+                                idempotency_key=idem_key,
+                                task_type="kb.parse",
+                                resource_type="kb_document",
+                                resource_id=doc_id,
+                                payload={
+                                    "doc_id": doc_id,
+                                    "kb_id": kb_id,
+                                    "object_id": object_id,
+                                },
+                                status="pending",
+                            )
+                        task_id = str(task_row["id"])
+                    except asyncpg.UniqueViolationError:
+                        existing = await async_task_repo.find_by_idempotency_key(
                             conn,
                             tenant_id=tenant_id,
                             idempotency_key=idem_key,
                             task_type="kb.parse",
-                            resource_type="kb_document",
-                            resource_id=doc_id,
+                        )
+                        if existing is None:
+                            # RLS raced the row away between INSERT and SELECT;
+                            # surface as UNKNOWN rather than masking it.
+                            raise
+                        task_id = str(existing["id"])
+                        task_type = existing.get("task_type") or "kb.parse"
+                        task_status = existing.get("status") or "pending"
+                        if task_status == "failed":
+                            # Revive the failed row so this retry becomes the
+                            # live task; the new outbox event below re-runs the
+                            # parse and the consumer closes the revived row.
+                            revived = await async_task_repo.revive_task_in_tx(
+                                conn,
+                                tenant_id=tenant_id,
+                                task_id=task_id,
+                            )
+                            if revived is not None:
+                                task_status = "pending"
+                            else:
+                                # Raced out of 'failed' between lookup and
+                                # revive — another writer owns the row; replay
+                                # its state, publish nothing.
+                                publish_event = False
+                        else:
+                            # pending/completed: the concurrent winner's tx
+                            # already published the outbox event — replay it,
+                            # do not publish a second one.
+                            publish_event = False
+
+                    # d. insert outbox_events row; dispatcher publishes to NATS.
+                    from app.repositories import outbox as outbox_repo
+                    from app.repositories import knowledge_base as kb_repo
+
+                    if publish_event:
+                        # Carry the KB's chunk_size through to the parse_worker so each
+                        # task chunks with the KB's configured size (default 1024 when
+                        # the KB row is missing or has no chunk_size set).
+                        kb_row = await kb_repo.get_kb(conn, tenant_id=tenant_id, kb_id=kb_id)
+                        kb_chunk_size = (kb_row or {}).get("chunk_size") or 1024
+
+                        await outbox_repo.insert_event(
+                            conn,
+                            tenant_id=tenant_id,
+                            aggregate_type="kb_documents",
+                            aggregate_id=doc_id,
+                            event_type="kb.parse",
                             payload={
                                 "doc_id": doc_id,
                                 "kb_id": kb_id,
+                                "storage_path": request.storage_path,
+                                "tenant_id": tenant_id,
+                                "file_name": "",
                                 "object_id": object_id,
+                                "chunk_size": kb_chunk_size,
+                                # Lets the parse consumer close this async_tasks
+                                # row when the doc reaches a terminal parse_status
+                                # (prevents tasks stuck pending forever).
+                                "task_id": task_id,
                             },
-                            status="pending",
                         )
-                    task_id = str(task_row["id"])
-                except asyncpg.UniqueViolationError:
-                    existing = await async_task_repo.find_by_idempotency_key(
-                        conn,
-                        tenant_id=tenant_id,
-                        idempotency_key=idem_key,
-                        task_type="kb.parse",
-                    )
-                    if existing is None:
-                        # RLS raced the row away between INSERT and SELECT;
-                        # surface as UNKNOWN rather than masking it.
-                        raise
-                    task_id = str(existing["id"])
-                    task_type = existing.get("task_type") or "kb.parse"
-                    task_status = existing.get("status") or "pending"
-                    if task_status == "failed":
-                        # Revive the failed row so this retry becomes the
-                        # live task; the new outbox event below re-runs the
-                        # parse and the consumer closes the revived row.
-                        revived = await async_task_repo.revive_task_in_tx(
-                            conn,
-                            tenant_id=tenant_id,
-                            task_id=task_id,
-                        )
-                        if revived is not None:
-                            task_status = "pending"
-                        else:
-                            # Raced out of 'failed' between lookup and
-                            # revive — another writer owns the row; replay
-                            # its state, publish nothing.
-                            publish_event = False
-                    else:
-                        # pending/completed: the concurrent winner's tx
-                        # already published the outbox event — replay it,
-                        # do not publish a second one.
-                        publish_event = False
-
-                # c. insert outbox_events row; dispatcher publishes to NATS.
-                from app.repositories import outbox as outbox_repo
-                from app.repositories import knowledge_base as kb_repo
-
-                if publish_event:
-                    # Carry the KB's chunk_size through to the parse_worker so each
-                    # task chunks with the KB's configured size (default 1024 when
-                    # the KB row is missing or has no chunk_size set).
-                    kb_row = await kb_repo.get_kb(conn, tenant_id=tenant_id, kb_id=kb_id)
-                    kb_chunk_size = (kb_row or {}).get("chunk_size") or 1024
-
-                    await outbox_repo.insert_event(
-                        conn,
-                        tenant_id=tenant_id,
-                        aggregate_type="kb_documents",
-                        aggregate_id=doc_id,
-                        event_type="kb.parse",
-                        payload={
-                            "doc_id": doc_id,
-                            "kb_id": kb_id,
-                            "storage_path": request.storage_path,
-                            "tenant_id": tenant_id,
-                            "file_name": "",
-                            "object_id": object_id,
-                            "chunk_size": kb_chunk_size,
-                            # Lets the parse consumer close this async_tasks
-                            # row when the doc reaches a terminal parse_status
-                            # (prevents tasks stuck pending forever).
-                            "task_id": task_id,
-                        },
-                    )
+        except Exception:
+            # failure audit doc.parse (plan §6.3): the document-not-found
+            # business rejection is recorded; the replay branch returns
+            # (not an exception) and INVALID_ARGUMENT aborts above, before
+            # this try block, so neither reaches here.
+            info = _audit_failure_info(context)
+            if info is not None:
+                await _record_failure_audit(
+                    self._pool,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    action="doc.parse",
+                    intent=intent,
+                    error_code=info[0],
+                    error_msg=info[1],
+                    actor_user_id=actor,
+                )
+            raise
 
         return common_pb2.AsyncTaskRef(
             task_id=task_id,
@@ -861,28 +1042,76 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
         # 1. soft-delete document + delete chunks + fetch persisted vector_store_id
-        async with self._pool.acquire() as conn:
-            kb_row = await kb_repo.get_kb(
-                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
-            )
-            if not kb_row:
-                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
-                return
-            deleted = await document_repo.soft_delete_document(
-                conn,
-                tenant_id=request.tenant_id,
-                kb_id=request.kb_id,
-                doc_id=request.doc_id,
-            )
-            if not deleted:
-                context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
-                return
-            await chunk_repo.delete_chunks_by_doc(
-                conn,
-                tenant_id=request.tenant_id,
-                kb_id=request.kb_id,
-                doc_id=request.doc_id,
-            )
+        #    audit doc.delete (plan §6.3): before = the document row being
+        #    removed, after = NULL; written in the same transaction as the
+        #    soft-delete and chunk cleanup. Failure audits are best-effort:
+        #    the kb-404 abort cannot satisfy the kb_audit_log.kb_id FK (no
+        #    KB row) and is swallowed by _record_failure_audit (debug); the
+        #    doc-404 abort records normally (the KB gate passed, so the KB
+        #    row exists).
+        actor = _actor_user_id(context)
+        intent: dict[str, Any] = {"doc_id": request.doc_id}
+        try:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    kb_row = await kb_repo.get_kb(
+                        conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+                    )
+                    if not kb_row:
+                        context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                        return
+                    # before snapshot: the row as it stands pre-delete. None
+                    # when the doc is already soft-deleted (get_document
+                    # filters the 'deleted' marker) — a repeated delete
+                    # records with before=NULL, mirroring the no-row case.
+                    doc_row = await document_repo.get_document(
+                        conn,
+                        tenant_id=request.tenant_id,
+                        kb_id=request.kb_id,
+                        doc_id=request.doc_id,
+                    )
+                    deleted = await document_repo.soft_delete_document(
+                        conn,
+                        tenant_id=request.tenant_id,
+                        kb_id=request.kb_id,
+                        doc_id=request.doc_id,
+                    )
+                    if not deleted:
+                        context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                        return
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=request.tenant_id,
+                        kb_id=request.kb_id,
+                        action="doc.delete",
+                        actor_user_id=actor,
+                        before_state=_doc_audit_snapshot(doc_row),
+                        after_state=None,
+                    )
+                    await chunk_repo.delete_chunks_by_doc(
+                        conn,
+                        tenant_id=request.tenant_id,
+                        kb_id=request.kb_id,
+                        doc_id=request.doc_id,
+                    )
+        except Exception:
+            # failure audit doc.delete (plan §6.3): 404 business rejections
+            # are recorded; INVALID_ARGUMENT never reaches here (validated
+            # by the proto/route layer). The business tx has already rolled
+            # back, so the audit lands in its own fresh transaction.
+            info = _audit_failure_info(context)
+            if info is not None:
+                await _record_failure_audit(
+                    self._pool,
+                    tenant_id=request.tenant_id,
+                    kb_id=request.kb_id,
+                    action="doc.delete",
+                    intent=intent,
+                    error_code=info[0],
+                    error_msg=info[1],
+                    actor_user_id=actor,
+                )
+            raise
         # 2. Core DELETE /vector-stores/{id}/documents?filter=doc_id=="..." — best-effort.
         # Use the persisted vector_store_id (Core UUID), not the derived name.
         vector_store_id = str(kb_row.get("vector_store_id") or "")
@@ -1715,149 +1944,195 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             return
         idem_key = request.idempotency_key
 
-        async with self._pool.acquire() as conn:
-            # 1. idempotent replay: pending/completed task with the same key
-            #    → return the same AsyncTaskRef (a failed task is NOT
-            #    replayed — the client must submit a fresh key, SPEC §5.4).
-            existing = await async_task_repo.find_by_idempotency_key(
-                conn,
-                tenant_id=tenant_id,
-                idempotency_key=idem_key,
-                task_type="kb.reparse",
-            )
-            if existing and existing.get("status") in ("pending", "completed"):
-                return common_pb2.AsyncTaskRef(
-                    task_id=str(existing["id"]),
-                    task_type=existing.get("task_type") or "kb.reparse",
-                    status=existing.get("status") or "pending",
-                    location_url="",
-                )
-
-            # 2. KB gate: missing (or RLS-hidden) → NOT_FOUND; rebuilding →
-            #    FAILED_PRECONDITION (mutually exclusive with a PUT config
-            #    triggered rebuild).
-            kb_row = await kb_repo.get_kb(
-                conn, tenant_id=tenant_id, kb_id=kb_id
-            )
-            if not kb_row:
-                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
-                return
-            if kb_row.get("status") == "rebuilding":
-                context.abort(
-                    grpc.StatusCode.FAILED_PRECONDITION,
-                    "knowledge base is rebuilding",
-                )
-                return
-
-            # 3. document gate: missing/soft-deleted → NOT_FOUND; ready →
-            #    FAILED_PRECONDITION (guard against accidental re-parse of a
-            #    healthy doc; no force field in the contract — YAGNI).
-            doc_row = await document_repo.get_document(
-                conn, tenant_id=tenant_id, kb_id=kb_id, doc_id=doc_id
-            )
-            if not doc_row:
-                context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
-                return
-            if doc_row.get("parse_status") == "ready":
-                context.abort(
-                    grpc.StatusCode.FAILED_PRECONDITION,
-                    "document is ready; reparse is for failed documents",
-                )
-                return
-
-            # 4. single transaction: reset doc row + async_tasks + outbox_events
-            #    (same atomic shape as NotifyDocumentUploaded; repo helpers
-            #    here do not open their own transactions).
-            from app.repositories import outbox as outbox_repo
-
-            async with conn.transaction():
-                updated = await document_repo.reset_for_reparse_in_tx(
+        # audit doc.reparse (plan §6.3): intent for the failure path; 404 /
+        # FAILED_PRECONDITION business rejections (KB missing/rebuilding,
+        # doc missing/ready, failed-task-key) are recorded — the KB gate
+        # passing means the kb_audit_log.kb_id FK is satisfiable, and the
+        # KB-missing abort is swallowed by _record_failure_audit (no KB
+        # row). INVALID_ARGUMENT aborts above, before this try block.
+        actor = _actor_user_id(context)
+        intent: dict[str, Any] = {"doc_id": doc_id, "kb_id": kb_id}
+        try:
+            async with self._pool.acquire() as conn:
+                # 1. idempotent replay: pending/completed task with the same key
+                #    → return the same AsyncTaskRef (a failed task is NOT
+                #    replayed — the client must submit a fresh key, SPEC §5.4).
+                existing = await async_task_repo.find_by_idempotency_key(
                     conn,
                     tenant_id=tenant_id,
-                    kb_id=kb_id,
-                    doc_id=doc_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.reparse",
                 )
-                if not updated:
-                    context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
-                    return  # unreachable; for type checkers
+                if existing and existing.get("status") in ("pending", "completed"):
+                    return common_pb2.AsyncTaskRef(
+                        task_id=str(existing["id"]),
+                        task_type=existing.get("task_type") or "kb.reparse",
+                        status=existing.get("status") or "pending",
+                        location_url="",
+                    )
 
-                # UNIQUE race self-heal (same pattern as _update_kb /
-                # NotifyDocumentUploaded): a concurrent reparse with the
-                # same idempotency key can win the INSERT between the
-                # replay check above and here. The nested transaction
-                # (SAVEPOINT) keeps the outer tx usable after the violated
-                # constraint aborts the inner one; re-lookup then either
-                # replays the winner's task or rejects the retry.
-                publish_event = True
-                task_id = ""
-                try:
-                    async with conn.transaction():
-                        task_row = await async_task_repo.create_task_in_tx(
+                # 2. KB gate: missing (or RLS-hidden) → NOT_FOUND; rebuilding →
+                #    FAILED_PRECONDITION (mutually exclusive with a PUT config
+                #    triggered rebuild).
+                kb_row = await kb_repo.get_kb(
+                    conn, tenant_id=tenant_id, kb_id=kb_id
+                )
+                if not kb_row:
+                    context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                    return
+                if kb_row.get("status") == "rebuilding":
+                    context.abort(
+                        grpc.StatusCode.FAILED_PRECONDITION,
+                        "knowledge base is rebuilding",
+                    )
+                    return
+
+                # 3. document gate: missing/soft-deleted → NOT_FOUND; ready →
+                #    FAILED_PRECONDITION (guard against accidental re-parse of a
+                #    healthy doc; no force field in the contract — YAGNI).
+                doc_row = await document_repo.get_document(
+                    conn, tenant_id=tenant_id, kb_id=kb_id, doc_id=doc_id
+                )
+                if not doc_row:
+                    context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                    return
+                if doc_row.get("parse_status") == "ready":
+                    context.abort(
+                        grpc.StatusCode.FAILED_PRECONDITION,
+                        "document is ready; reparse is for failed documents",
+                    )
+                    return
+
+                # 4. single transaction: reset doc row + async_tasks + outbox_events
+                #    (same atomic shape as NotifyDocumentUploaded; repo helpers
+                #    here do not open their own transactions).
+                from app.repositories import outbox as outbox_repo
+
+                async with conn.transaction():
+                    updated = await document_repo.reset_for_reparse_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        doc_id=doc_id,
+                    )
+                    if not updated:
+                        context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                        return  # unreachable; for type checkers
+
+                    # audit doc.reparse (plan §6.3) — same transaction as the
+                    # reset. before = the row as it stood (the failed state
+                    # the gate validated); after = the row with the reset
+                    # parse lifecycle (pending, error/parsed_at cleared,
+                    # chunk_count 0 — mirrors reset_for_reparse_in_tx).
+                    after_row = dict(doc_row)
+                    after_row["parse_status"] = "pending"
+                    after_row["error_message"] = None
+                    after_row["chunk_count"] = 0
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        action="doc.reparse",
+                        actor_user_id=actor,
+                        before_state=_doc_audit_snapshot(doc_row),
+                        after_state=_doc_audit_snapshot(after_row),
+                    )
+
+                    # UNIQUE race self-heal (same pattern as _update_kb /
+                    # NotifyDocumentUploaded): a concurrent reparse with the
+                    # same idempotency key can win the INSERT between the
+                    # replay check above and here. The nested transaction
+                    # (SAVEPOINT) keeps the outer tx usable after the violated
+                    # constraint aborts the inner one; re-lookup then either
+                    # replays the winner's task or rejects the retry.
+                    publish_event = True
+                    task_id = ""
+                    try:
+                        async with conn.transaction():
+                            task_row = await async_task_repo.create_task_in_tx(
+                                conn,
+                                tenant_id=tenant_id,
+                                idempotency_key=idem_key,
+                                task_type="kb.reparse",
+                                resource_type="kb_document",
+                                resource_id=doc_id,
+                                payload={
+                                    "doc_id": doc_id,
+                                    "kb_id": kb_id,
+                                    "object_id": doc_row.get("object_id") or "",
+                                },
+                                status="pending",
+                            )
+                        task_id = str(task_row["id"])
+                    except asyncpg.UniqueViolationError:
+                        existing = await async_task_repo.find_by_idempotency_key(
                             conn,
                             tenant_id=tenant_id,
                             idempotency_key=idem_key,
                             task_type="kb.reparse",
-                            resource_type="kb_document",
-                            resource_id=doc_id,
+                        )
+                        if existing is None:
+                            # RLS raced the row away between INSERT and SELECT;
+                            # surface as UNKNOWN rather than masking it.
+                            raise
+                        if existing.get("status") == "failed":
+                            # SPEC §5.4: a failed task must NOT be replayed on
+                            # the same key — the client must submit a fresh
+                            # idempotency_key. abort() rolls back the whole
+                            # outer transaction (including the doc reset),
+                            # so the failed state stays intact.
+                            context.abort(
+                                grpc.StatusCode.FAILED_PRECONDITION,
+                                "task already failed with this idempotency_key; "
+                                "retry with a new key",
+                            )
+                            return  # unreachable; for type checkers
+                        # pending/completed: the concurrent winner's tx already
+                        # published the outbox event — replay it, publish nothing.
+                        task_id = str(existing["id"])
+                        publish_event = False
+
+                    if publish_event:
+                        # Payload mirrors the notify template; storage_path/file_name
+                        # come from the DB row (reparse has no request-side values).
+                        await outbox_repo.insert_event(
+                            conn,
+                            tenant_id=tenant_id,
+                            aggregate_type="kb_documents",
+                            aggregate_id=doc_id,
+                            event_type="kb.reparse",
                             payload={
                                 "doc_id": doc_id,
                                 "kb_id": kb_id,
+                                "storage_path": doc_row.get("storage_path") or "",
+                                "tenant_id": tenant_id,
+                                "file_name": doc_row.get("file_name") or "",
                                 "object_id": doc_row.get("object_id") or "",
+                                "chunk_size": kb_row.get("chunk_size") or 1024,
+                                # Lets the parse consumer close this async_tasks
+                                # row when the doc reaches a terminal parse_status
+                                # (prevents tasks stuck pending forever).
+                                "task_id": task_id,
                             },
-                            status="pending",
                         )
-                    task_id = str(task_row["id"])
-                except asyncpg.UniqueViolationError:
-                    existing = await async_task_repo.find_by_idempotency_key(
-                        conn,
-                        tenant_id=tenant_id,
-                        idempotency_key=idem_key,
-                        task_type="kb.reparse",
-                    )
-                    if existing is None:
-                        # RLS raced the row away between INSERT and SELECT;
-                        # surface as UNKNOWN rather than masking it.
-                        raise
-                    if existing.get("status") == "failed":
-                        # SPEC §5.4: a failed task must NOT be replayed on
-                        # the same key — the client must submit a fresh
-                        # idempotency_key. abort() rolls back the whole
-                        # outer transaction (including the doc reset),
-                        # so the failed state stays intact.
-                        context.abort(
-                            grpc.StatusCode.FAILED_PRECONDITION,
-                            "task already failed with this idempotency_key; "
-                            "retry with a new key",
-                        )
-                        return  # unreachable; for type checkers
-                    # pending/completed: the concurrent winner's tx already
-                    # published the outbox event — replay it, publish nothing.
-                    task_id = str(existing["id"])
-                    publish_event = False
-
-                if publish_event:
-                    # Payload mirrors the notify template; storage_path/file_name
-                    # come from the DB row (reparse has no request-side values).
-                    await outbox_repo.insert_event(
-                        conn,
-                        tenant_id=tenant_id,
-                        aggregate_type="kb_documents",
-                        aggregate_id=doc_id,
-                        event_type="kb.reparse",
-                        payload={
-                            "doc_id": doc_id,
-                            "kb_id": kb_id,
-                            "storage_path": doc_row.get("storage_path") or "",
-                            "tenant_id": tenant_id,
-                            "file_name": doc_row.get("file_name") or "",
-                            "object_id": doc_row.get("object_id") or "",
-                            "chunk_size": kb_row.get("chunk_size") or 1024,
-                            # Lets the parse consumer close this async_tasks
-                            # row when the doc reaches a terminal parse_status
-                            # (prevents tasks stuck pending forever).
-                            "task_id": task_id,
-                        },
-                    )
+        except Exception:
+            # failure audit doc.reparse (plan §6.3): the business rejections
+            # listed above are recorded; the replay branch returns (not an
+            # exception) and the failed-key UNIQUE abort rolls the business
+            # tx back before the audit lands in its own fresh transaction.
+            info = _audit_failure_info(context)
+            if info is not None:
+                await _record_failure_audit(
+                    self._pool,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    action="doc.reparse",
+                    intent=intent,
+                    error_code=info[0],
+                    error_msg=info[1],
+                    actor_user_id=actor,
+                )
+            raise
 
         return common_pb2.AsyncTaskRef(
             task_id=task_id,
@@ -2122,81 +2397,202 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # 2. single transaction: replay check, KB existence, permission
         # upsert, and the idempotency record commit atomically (UpdateKB
         # pattern; nested conn.transaction() degrades to SAVEPOINT)
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                # 2a. idempotency replay: return the recorded KB row
-                existing = await async_task_repo.find_by_idempotency_key(
-                    conn,
-                    tenant_id=tenant_id,
-                    idempotency_key=idem_key,
-                    task_type="kb.perm.update",
-                )
-                if existing and existing.get("result"):
-                    result = existing["result"]
-                    if isinstance(result, str):
-                        result = json.loads(result)
-                    return _kb_row_to_pb(result)
-
-                # 2b. KB existence check (deleted KB → NOT_FOUND)
-                kb_row = await kb_repo.get_kb(
-                    conn, tenant_id=tenant_id, kb_id=request.kb_id
-                )
-                if kb_row is None:
-                    context.abort(
-                        grpc.StatusCode.NOT_FOUND, "knowledge base not found"
-                    )
-                    return
-
-                # 2c. UPSERT permission row
-                await permission_repo.upsert_permissions_in_tx(
-                    conn,
-                    tenant_id=tenant_id,
-                    kb_id=request.kb_id,
-                    public_read=request.public_read,
-                    allowed_user_ids=allowed_user_ids,
-                )
-
-                # 2d. reuse the KB snapshot from step 2b as the replay
-                # result — the permission upsert only touches
-                # kb_permissions, so the knowledge_bases row is unchanged
-                # within this transaction (no second SELECT needed)
-
-                # 2e. idempotency record (poison-key self-heal, align
-                # UpdateKB step 4)
-                try:
-                    async with conn.transaction():
-                        task_row = await async_task_repo.create_task_in_tx(
-                            conn,
-                            tenant_id=tenant_id,
-                            idempotency_key=idem_key,
-                            task_type="kb.perm.update",
-                            resource_type="knowledge_base",
-                            resource_id=request.kb_id,
-                            payload={
-                                "public_read": request.public_read,
-                                "allowed_user_ids": allowed_user_ids,
-                            },
-                            status="pending",
-                        )
-                except asyncpg.UniqueViolationError:
+        # audit kb.permissions.update (plan §6.3): before = the permission
+        # row pre-upsert (defaults when no row exists), after = the
+        # requested {public_read, allowed_user_ids}; written in the same
+        # transaction as the upsert. Failure audits: the 404 abort fires
+        # after the KB gate passed (KB row exists → FK satisfiable);
+        # INVALID_ARGUMENT aborts above, before this try block.
+        actor = _actor_user_id(context)
+        intent: dict[str, Any] = {
+            "public_read": request.public_read,
+            "allowed_user_ids": list(allowed_user_ids),
+        }
+        try:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    # 2a. idempotency replay: return the recorded KB row
                     existing = await async_task_repo.find_by_idempotency_key(
                         conn,
                         tenant_id=tenant_id,
                         idempotency_key=idem_key,
                         task_type="kb.perm.update",
                     )
-                    if existing is None:
-                        raise
-                    task_row = existing
-                await async_task_repo.complete_task_in_tx(
-                    conn,
+                    if existing and existing.get("result"):
+                        result = existing["result"]
+                        if isinstance(result, str):
+                            result = json.loads(result)
+                        return _kb_row_to_pb(result)
+
+                    # 2b. KB existence check (deleted KB → NOT_FOUND)
+                    kb_row = await kb_repo.get_kb(
+                        conn, tenant_id=tenant_id, kb_id=request.kb_id
+                    )
+                    if kb_row is None:
+                        context.abort(
+                            grpc.StatusCode.NOT_FOUND, "knowledge base not found"
+                        )
+                        return
+
+                    # before snapshot: the permission row as it stands
+                    # (defaults when no row exists yet — get_permissions
+                    # never 404s, mirroring the read contract).
+                    before_perm = await permission_repo.get_permissions(
+                        conn, tenant_id=tenant_id, kb_id=request.kb_id
+                    )
+
+                    # 2c. UPSERT permission row
+                    await permission_repo.upsert_permissions_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=request.kb_id,
+                        public_read=request.public_read,
+                        allowed_user_ids=allowed_user_ids,
+                    )
+
+                    # audit kb.permissions.update (plan §6.3) — same
+                    # transaction as the upsert.
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=request.kb_id,
+                        action="kb.permissions.update",
+                        actor_user_id=actor,
+                        before_state={
+                            "public_read": before_perm.get("public_read"),
+                            "allowed_user_ids": before_perm.get("allowed_user_ids") or [],
+                        },
+                        after_state=dict(intent),
+                    )
+
+                    # 2d. reuse the KB snapshot from step 2b as the replay
+                    # result — the permission upsert only touches
+                    # kb_permissions, so the knowledge_bases row is unchanged
+                    # within this transaction (no second SELECT needed)
+
+                    # 2e. idempotency record (poison-key self-heal, align
+                    # UpdateKB step 4)
+                    try:
+                        async with conn.transaction():
+                            task_row = await async_task_repo.create_task_in_tx(
+                                conn,
+                                tenant_id=tenant_id,
+                                idempotency_key=idem_key,
+                                task_type="kb.perm.update",
+                                resource_type="knowledge_base",
+                                resource_id=request.kb_id,
+                                payload={
+                                    "public_read": request.public_read,
+                                    "allowed_user_ids": allowed_user_ids,
+                                },
+                                status="pending",
+                            )
+                    except asyncpg.UniqueViolationError:
+                        existing = await async_task_repo.find_by_idempotency_key(
+                            conn,
+                            tenant_id=tenant_id,
+                            idempotency_key=idem_key,
+                            task_type="kb.perm.update",
+                        )
+                        if existing is None:
+                            raise
+                        task_row = existing
+                    await async_task_repo.complete_task_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        task_id=str(task_row["id"]),
+                        result=kb_row,
+                    )
+        except Exception:
+            # failure audit kb.permissions.update (plan §6.3): the 404
+            # business rejection is recorded. The business tx has already
+            # rolled back, so the audit lands in its own fresh transaction.
+            info = _audit_failure_info(context)
+            if info is not None:
+                await _record_failure_audit(
+                    self._pool,
                     tenant_id=tenant_id,
-                    task_id=str(task_row["id"]),
-                    result=kb_row,
+                    kb_id=request.kb_id,
+                    action="kb.permissions.update",
+                    intent=intent,
+                    error_code=info[0],
+                    error_msg=info[1],
+                    actor_user_id=actor,
                 )
+            raise
 
         # 3. return KB snapshot (contract returns KnowledgeBase)
         return _kb_row_to_pb(kb_row)
+
+    # ── P1 RPC: KB audit log read (B8, plan §6.4) ──────────────────────────────
+
+    def ListKBAuditLogs(self, request, context):
+        return _run_async(self._list_kb_audit_logs(request, context))
+
+    async def _list_kb_audit_logs(
+        self, request, context
+    ) -> kb_pb.ListKBAuditLogsResponse:
+        """ListKBAuditLogs — KB management-plane audit trail (P1 #21).
+
+        get_kb gate → keyset-paginated audit rows (created_at DESC, id
+        DESC) → AuditLogEntry mapping. before/after_state come back from
+        asyncpg as JSON strings by default (no jsonb codec on the pools)
+        and are passed through, re-serialized only if a codec ever returns
+        dicts (the proto carries them as JSON strings, same as
+        KBChunk.custom_metadata).
+        """
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+        limit = request.page.limit or 20
+        if not 1 <= limit <= 100:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "limit must be between 1 and 100"
+            )
+            return
+        cursor = request.page.cursor or None
+
+        async with self._pool.acquire() as conn:
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            try:
+                rows = await audit_repo.list_logs(
+                    conn,
+                    tenant_id=request.tenant_id,
+                    kb_id=request.kb_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+            except InvalidCursorError:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT, "invalid page cursor"
+                )
+                return
+        items = [
+            kb_pb.AuditLogEntry(
+                id=str(r["id"]),
+                kb_id=str(r["kb_id"]),
+                actor_user_id=str(r["actor_user_id"]) if r["actor_user_id"] else "",
+                action=str(r["action"] or ""),
+                before_state=_audit_state_json(r.get("before_state")),
+                after_state=_audit_state_json(r.get("after_state")),
+                error_code=str(r.get("error_code") or ""),
+                error_msg=str(r.get("error_msg") or ""),
+                created_at=_ts(r.get("created_at")),
+            )
+            for r in rows
+        ]
+        next_cursor = (
+            _audit_cursor(rows[-1]) if rows and len(rows) >= limit else ""
+        )
+        return kb_pb.ListKBAuditLogsResponse(items=items, next_cursor=next_cursor)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -2405,6 +2801,196 @@ def _message_cursor(row: dict[str, Any]) -> str:
 def _session_cursor(row: dict[str, Any]) -> str:
     """Encode a composite keyset cursor for kb_sessions (created_at, id)."""
     return f"{_cursor_ts(row['created_at'])}|{row['id']}"
+
+
+def _audit_cursor(row: dict[str, Any]) -> str:
+    """Encode a composite keyset cursor for kb_audit_log (created_at, id)."""
+    return f"{_cursor_ts(row['created_at'])}|{row['id']}"
+
+
+def _audit_state_json(state: Any) -> str:
+    """Serialize an audit before/after_state JSONB value to a JSON string.
+
+    asyncpg returns JSONB as a plain string by default (no jsonb codec is
+    registered on the pools), so the str branch is the production path;
+    the dict branch stays defensive in case a codec is registered later.
+    The proto field is a plain string field — same treatment as
+    KBChunk.custom_metadata. None → "" (creation-type has no before_state,
+    deletion-type has no after_state).
+    """
+    if state is None:
+        return ""
+    if isinstance(state, str):
+        return state
+    return json.dumps(state, default=str)
+
+
+def _actor_user_id(context: Any) -> str | None:
+    """Extract the calling user id from gRPC metadata ``x-user-id``.
+
+    Set by the Gateway on management-plane calls (same header as the
+    tenant-write path). Returns None when absent or not a valid uuid —
+    internal system actors (parse/rebuild consumers) call without it,
+    yielding the NULL actor_user_id audit rows. The metadata lookup is
+    defensive: test fakes may not implement invocation_metadata().
+    """
+    try:
+        metadata = context.invocation_metadata() or ()
+    except Exception:
+        return None
+    for key, value in metadata:
+        if key == "x-user-id":
+            try:
+                uuid.UUID(str(value))
+            except ValueError:
+                return None
+            return str(value)
+    return None
+
+
+# gRPC status codes that constitute a *business failure* for audit
+# purposes (plan §6.3): the request was well-formed but a business rule
+# rejected it. INVALID_ARGUMENT (bad request shape, rejected before any
+# business logic) is not audited. FAILED_PRECONDITION covers both
+# business-rule rejections (KB rebuilding, doc ready, poisoned retry key —
+# audited) and system-not-ready states (skeleton pool, missing bucket);
+# the latter cannot be audited anyway because the pool is None, which
+# makes _record_failure_audit a no-op.
+_AUDITED_FAILURE_CODES = frozenset({
+    grpc.StatusCode.NOT_FOUND,
+    grpc.StatusCode.ALREADY_EXISTS,
+    grpc.StatusCode.FAILED_PRECONDITION,
+    grpc.StatusCode.RESOURCE_EXHAUSTED,
+})
+
+
+def _audit_failure_info(context: Any) -> tuple[str, str] | None:
+    """Return ``(code_name, details)`` for an aborted, audited failure.
+
+    ``context.abort()`` raises a bare ``Exception`` after setting the state
+    (grpc/_server.py) — the status details live on the context, not in the
+    exception message. Failure-audit wrappers therefore catch broadly and
+    read the already-set code/details off the context to decide whether the
+    failure is auditable. Test fakes may not implement code()/details() —
+    treated as not auditable.
+    """
+    try:
+        code = context.code()
+    except Exception:
+        return None
+    if code not in _AUDITED_FAILURE_CODES:
+        return None
+    try:
+        details = str(context.details() or "")
+    except Exception:
+        details = ""
+    return code.name, details
+
+
+async def _record_failure_audit(
+    pool: asyncpg.Pool | None,
+    *,
+    tenant_id: str,
+    kb_id: str,
+    action: str,
+    intent: dict[str, Any] | None,
+    error_code: str,
+    error_msg: str,
+    actor_user_id: str | None,
+) -> None:
+    """Best-effort audit row for a failed write attempt (plan §6.3).
+
+    Runs AFTER the business transaction rolled back, in its own fresh
+    transaction, so the failure record survives. Audit write failures
+    are swallowed — never mask the business error being re-raised to the
+    caller. The kb_audit_log.kb_id FK (ON DELETE CASCADE) rejects rows
+    when the target KB itself does not exist (e.g. a 404 abort) —
+    expected: the audit write is best-effort and those failures are only
+    visible via this debug log.
+    """
+    if pool is None:
+        return
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await audit_repo.insert_audit_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    action=action,
+                    actor_user_id=actor_user_id,
+                    before_state=intent,
+                    after_state=None,
+                    error_code=error_code,
+                    error_msg=error_msg,
+                )
+    except Exception as e:
+        logger.debug(
+            "kb-service: failed to persist failure audit (action=%s kb_id=%s "
+            "error_code=%s): %s", action, kb_id, error_code, e,
+        )
+
+
+def _kb_audit_snapshot(kb_row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Project a KB row onto the audited key fields (plan §6.3 snapshots).
+
+    Creates/updates audit the whole KB config; deletes audit the row being
+    removed. Returns None for a missing row so JSON NULL vs {"empty"} stay
+    distinguishable in the audit payload.
+    """
+    if kb_row is None:
+        return None
+    return {
+        "name": kb_row.get("name"),
+        "description": kb_row.get("description"),
+        "embedding_model": kb_row.get("embedding_model"),
+        "chunk_size": kb_row.get("chunk_size"),
+        "top_k": kb_row.get("top_k"),
+        "score_threshold": kb_row.get("score_threshold"),
+        "retrieval_mode": kb_row.get("retrieval_mode"),
+        "status": kb_row.get("status"),
+        "doc_count": kb_row.get("doc_count"),
+    }
+
+
+def _doc_audit_snapshot(doc_row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Project a document row onto the audited key fields (plan §6.3).
+
+    doc.create audits the document intent (file identity + storage);
+    doc.parse / doc.delete / doc.reparse audit the row's parse lifecycle
+    state at the time of the operation.
+    """
+    if doc_row is None:
+        return None
+    return {
+        "doc_id": str(doc_row.get("id") or doc_row.get("doc_id") or ""),
+        "file_name": doc_row.get("file_name"),
+        "file_type": doc_row.get("file_type"),
+        "file_size_bytes": doc_row.get("file_size_bytes"),
+        "storage_path": doc_row.get("storage_path"),
+        "object_id": doc_row.get("object_id"),
+        "parse_status": doc_row.get("parse_status"),
+        "chunk_count": doc_row.get("chunk_count"),
+    }
+
+
+def _doc_intent_snapshot(request: Any, *, storage_path: str = "") -> dict[str, Any]:
+    """Build the doc.create intent snapshot from the upload request.
+
+    Used both as the success-path after_state and the failure-path
+    before_state ("intent") — a failed create leaves no DB row, so the
+    intent is the only record of what was attempted. storage_path is the
+    servicer-derived object-store key, passed in because the request does
+    not carry it.
+    """
+    return {
+        "file_name": request.file_name,
+        "file_type": request.file_type,
+        "file_size_bytes": request.file_size_bytes,
+        "checksum_sha256": request.checksum_sha256,
+        "storage_path": storage_path,
+        "kb_id": request.kb_id,
+    }
 
 
 def _cursor_ts(dt: datetime) -> str:

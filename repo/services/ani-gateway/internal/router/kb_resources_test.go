@@ -79,6 +79,9 @@ type fakeKBClient struct {
 
 	reparseResp *commonv1.AsyncTaskRef
 	reparseErr  error
+
+	listAuditLogsResp *kbv1.ListKBAuditLogsResponse
+	listAuditLogsErr  error
 }
 
 func (f *fakeKBClient) CreateKB(_ context.Context, tenantID, idem string, req *kbv1.CreateKBRequest) (*kbv1.KnowledgeBase, error) {
@@ -197,6 +200,13 @@ func (f *fakeKBClient) ReparseDocument(_ context.Context, tenantID, kbID, docID,
 	f.lastIDemKey = idemKey
 	return f.reparseResp, f.reparseErr
 }
+func (f *fakeKBClient) ListKBAuditLogs(_ context.Context, tenantID, kbID string, limit int32, cursor string) (*kbv1.ListKBAuditLogsResponse, error) {
+	f.lastTenantID = tenantID
+	f.lastKbID = kbID
+	f.lastLimit = limit
+	f.lastCursor = cursor
+	return f.listAuditLogsResp, f.listAuditLogsErr
+}
 
 // setupKBTestServer builds a gateway with the KB routes registered under
 // /api/v1/svc using the injected client. A RequestID middleware + dev tenant
@@ -223,15 +233,16 @@ func setupKBTestServer(client KBGRPCClient) *server.Hertz {
 // the test.
 func TestKBRoutes_AllEndpointsRegistered(t *testing.T) {
 	h := setupKBTestServer(&fakeKBClient{
-		listKbsResp:     &kbv1.ListKBsResponse{},
-		listDocsResp:    &kbv1.ListDocumentsResponse{},
-		getDocResp:      &kbv1.KBDocument{},
-		listChunksResp:  &kbv1.ListDocumentChunksResponse{},
-		sessionMsgsResp: &kbv1.GetSessionMessagesResponse{},
-		reparseResp:     &commonv1.AsyncTaskRef{},
-		citationsErr:    status.Error(codes.Unimplemented, "P1"),
-		sessionsErr:     status.Error(codes.Unimplemented, "P1"),
-		permissionsErr:  status.Error(codes.Unimplemented, "P1"),
+		listKbsResp:       &kbv1.ListKBsResponse{},
+		listDocsResp:      &kbv1.ListDocumentsResponse{},
+		getDocResp:        &kbv1.KBDocument{},
+		listChunksResp:    &kbv1.ListDocumentChunksResponse{},
+		sessionMsgsResp:   &kbv1.GetSessionMessagesResponse{},
+		reparseResp:       &commonv1.AsyncTaskRef{},
+		listAuditLogsResp: &kbv1.ListKBAuditLogsResponse{},
+		citationsErr:      status.Error(codes.Unimplemented, "P1"),
+		sessionsErr:       status.Error(codes.Unimplemented, "P1"),
+		permissionsErr:    status.Error(codes.Unimplemented, "P1"),
 	})
 
 	routes := []struct {
@@ -261,6 +272,8 @@ func TestKBRoutes_AllEndpointsRegistered(t *testing.T) {
 		{http.MethodDelete, "/api/v1/svc/knowledge-bases/kb-1/sessions/sess-1", ""},
 		// B3 route (SPEC §4.3 #12, issue-048).
 		{http.MethodPost, "/api/v1/svc/knowledge-bases/kb-1/documents/doc-1/reparse", `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440006"}`},
+		// B8 route (SPEC §4.1 #21, kb-p1-plan §6.4): audit trail listing.
+		{http.MethodGet, "/api/v1/svc/knowledge-bases/kb-1/audit-logs", ""},
 	}
 
 	for _, r := range routes {
@@ -466,6 +479,149 @@ func TestKBRoutes_UpdatePermissions_NilClientReturns503(t *testing.T) {
 	_ = json.Unmarshal(resp.Body(), &b)
 	if b["code"] != "UNAVAILABLE" {
 		t.Fatalf("code = %v, want UNAVAILABLE", b["code"])
+	}
+}
+
+// TestKBRoutes_ListAuditLogs_Passthrough verifies the B8 GET audit-logs
+// handler (SPEC §4.1 #21, kb-p1-plan §6.4): the gRPC AuditLogEntry items map
+// to the REST KBAuditLog shape, JSONB state strings become objects, the
+// Auth-middleware tenant id is injected, and limit/cursor pass through.
+func TestKBRoutes_ListAuditLogs_Passthrough(t *testing.T) {
+	client := &fakeKBClient{
+		listAuditLogsResp: &kbv1.ListKBAuditLogsResponse{
+			Items: []*kbv1.AuditLogEntry{
+				{
+					Id:          "log-1",
+					KbId:        "kb-1",
+					ActorUserId: "user-1",
+					Action:      "kb.update",
+					BeforeState: `{"name":"old"}`,
+					AfterState:  `{"name":"new"}`,
+					CreatedAt:   timestamppb.Now(),
+				},
+				{
+					Id:         "log-2",
+					KbId:       "kb-1",
+					Action:     "doc.delete",
+					AfterState: `{"doc_id":"doc-1"}`,
+					CreatedAt:  timestamppb.Now(),
+				},
+			},
+			NextCursor: "cur-2",
+		},
+	}
+	h := setupKBTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases/kb-1/audit-logs?limit=50&cursor=cur-1", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if client.lastTenantID != "tenant-test" {
+		t.Fatalf("gRPC tenant id = %q, want tenant-test", client.lastTenantID)
+	}
+	if client.lastKbID != "kb-1" {
+		t.Fatalf("gRPC kb id = %q, want kb-1", client.lastKbID)
+	}
+	if client.lastLimit != 50 {
+		t.Fatalf("gRPC limit = %d, want 50", client.lastLimit)
+	}
+	if client.lastCursor != "cur-1" {
+		t.Fatalf("gRPC cursor = %q, want cur-1", client.lastCursor)
+	}
+	var body struct {
+		Items      []map[string]any `json:"items"`
+		NextCursor string           `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(body.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(body.Items))
+	}
+	first := body.Items[0]
+	if first["actor_user_id"] != "user-1" {
+		t.Fatalf("actor_user_id = %v, want user-1", first["actor_user_id"])
+	}
+	before, ok := first["before_state"].(map[string]any)
+	if !ok || before["name"] != "old" {
+		t.Fatalf("before_state = %v, want {name: old}", first["before_state"])
+	}
+	after, ok := first["after_state"].(map[string]any)
+	if !ok || after["name"] != "new" {
+		t.Fatalf("after_state = %v, want {name: new}", first["after_state"])
+	}
+	if v, ok := first["error_code"]; !ok || v != nil {
+		t.Fatalf("error_code = %v (%T), want JSON null", v, v)
+	}
+	// deletion-type entry: actor/system + before_state null, error fields null.
+	second := body.Items[1]
+	if v, ok := second["actor_user_id"]; !ok || v != nil {
+		t.Fatalf("actor_user_id = %v (%T), want JSON null", v, v)
+	}
+	if v, ok := second["before_state"]; !ok || v != nil {
+		t.Fatalf("before_state = %v (%T), want JSON null", v, v)
+	}
+	if body.NextCursor != "cur-2" {
+		t.Fatalf("next_cursor = %q, want cur-2", body.NextCursor)
+	}
+}
+
+// TestKBRoutes_ListAuditLogs_RejectsLimitOver100 asserts the handler enforces
+// the contract limit range (v1.yaml: 1..100) before the gRPC call.
+func TestKBRoutes_ListAuditLogs_RejectsLimitOver100(t *testing.T) {
+	client := &fakeKBClient{listAuditLogsResp: &kbv1.ListKBAuditLogsResponse{}}
+	h := setupKBTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases/kb-1/audit-logs?limit=101", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode())
+	}
+	var body map[string]any
+	_ = json.Unmarshal(resp.Body(), &body)
+	if body["code"] != "BAD_REQUEST" {
+		t.Fatalf("code = %v, want BAD_REQUEST", body["code"])
+	}
+	if client.lastLimit != 0 {
+		t.Fatalf("gRPC was called with limit = %d, want no call", client.lastLimit)
+	}
+}
+
+// TestKBRoutes_ListAuditLogs_NotFoundMappedTo404 asserts a kb-service
+// NOT_FOUND surfaces as HTTP 404 (missing KB is the only 404 case).
+func TestKBRoutes_ListAuditLogs_NotFoundMappedTo404(t *testing.T) {
+	client := &fakeKBClient{
+		listAuditLogsErr: status.Error(codes.NotFound, "knowledge base not found"),
+	}
+	h := setupKBTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases/kb-404/audit-logs", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode())
+	}
+	var body map[string]any
+	_ = json.Unmarshal(resp.Body(), &body)
+	if body["code"] != "NOT_FOUND" {
+		t.Fatalf("code = %v, want NOT_FOUND", body["code"])
+	}
+}
+
+// TestKBRoutes_ListAuditLogs_NilClientReturns503 asserts the GET audit-logs
+// handler returns 503 UNAVAILABLE when kb-service is not configured (the RPC
+// is implemented server-side since B8, so 501 would misreport the state).
+func TestKBRoutes_ListAuditLogs_NilClientReturns503(t *testing.T) {
+	h := setupKBTestServer(nil)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases/kb-1/audit-logs", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode())
 	}
 }
 

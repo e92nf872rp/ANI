@@ -33,6 +33,10 @@ func (m *mockMeteringCollectionService) StopCollection(ctx context.Context, reso
 	return nil
 }
 
+func (m *mockMeteringCollectionService) StopStale(ctx context.Context, activeRefs map[string]bool) error {
+	return nil
+}
+
 // mockMessage 实现 ports.Message，可控 Headers/Data。
 type mockMessage struct {
 	headers map[string][]string

@@ -169,3 +169,10 @@ python3 repo/scripts/run_service_runtime_observability_l3.py \
 - 管理 `/readyz` 在 P0 只证明 wire/迁移等价性；尚未完成 P1 的完整业务依赖语义审计，也未接入 Kubernetes readinessProbe。
 - 生产 rollout、共享/生产 Prometheus 接入、长期 SLA/soak、L4/P1、真实多副本业务 readiness、BOSS/Console 页面均未验证，不得从本记录外推为 full platform production ready。
 - API 的 `up`/freshness 只表达 Prometheus scrape 可达性，不表达业务健康、desired replicas 或全平台健康。
+
+## 2026-09-10 CI 范围误报修复
+
+- 个人仓库 main 的 CI run `34456639681` 因 `envoy-authz-adapter/internal/extauth/server.go` 及其测试变更被目录禁改规则拦截。该规则来自观测批次的排除范围，不应冻结独立的 AI 网关调用鉴权与限流开发。
+- 解除该目录的整体禁改限制；七服务 inventory、Prometheus 精确白名单、runtimeadmin import 边界和 reconcile-worker 限制保持校验。回归测试明确允许 ext-auth 业务改动，并继续拒绝将该服务加入七服务观测清单。
+- promtool 的非 Secret 临时配置和模拟 token 显式设置为容器用户可读，模拟 ServiceAccount 目录可遍历，挂载仍为只读；修复宿主机 umask 077 时的 permission denied。未修改真实 Secret 权限。
+- 16 项 validator 测试通过；真实 promtool 校验分别使用原 origin/main 与 upstream/main 作为差异基线通过，CI workflow 和 architecture 门禁通过。本修复不扩展观测服务覆盖，也不声明新的 live readiness。

@@ -114,10 +114,16 @@ func endpointHostPort(raw string, target repository.PublicationTarget) (string, 
 	}
 	host := u.Hostname()
 	expectedHost := runtimeServiceHost(target.ServiceID, target.TenantID)
-	if host == "" || host != expectedHost || host != strings.ToLower(host) || strings.HasSuffix(host, ".") || net.ParseIP(host) != nil || !strings.HasSuffix(host, ".svc.cluster.local") || !validDNSName(host) {
+	shortHost := strings.TrimSuffix(expectedHost, ".cluster.local")
+	qualifiedHost := expectedHost
+	if host == "" || (host != shortHost && host != qualifiedHost) || host != strings.ToLower(host) || strings.HasSuffix(host, ".") || net.ParseIP(host) != nil || !validDNSName(host) {
 		return "", 0, errors.New("invalid runtime endpoint")
 	}
-	return host, port, nil
+	// Always publish the fully-qualified Kubernetes service DNS name. The
+	// runtime endpoint may come back as the short `.svc` form, but the
+	// Envoy Gateway runs in a different namespace and must resolve the
+	// cross-namespace target unambiguously.
+	return qualifiedHost, port, nil
 }
 
 func runtimeServiceHost(serviceID, tenantID uuid.UUID) string {

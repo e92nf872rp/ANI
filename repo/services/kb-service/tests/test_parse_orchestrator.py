@@ -471,7 +471,9 @@ async def test_core_insert_vector_metadata():
     assert len(core.insert_calls) == 1
     ins = core.insert_calls[0]
     assert ins["vector_store_id"] == VECTOR_STORE_ID
-    assert ins["idempotency_key"] == f"parse-{DOC_ID}"
+    # Batched insert: first batch of 100 uses suffix -b0 (gateway idempotency
+    # middleware caches by fingerprint, so each batch needs a fresh key).
+    assert ins["idempotency_key"] == f"parse-{DOC_ID}-b0"
 
     # 1 child + 1 summary = 2 documents inserted
     assert len(ins["documents"]) == 2

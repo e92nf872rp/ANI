@@ -156,6 +156,26 @@ func TestRenderDoesNotShareOwnerLabelsAcrossObjects(t *testing.T) {
 	}
 }
 
+func TestRenderAcceptsKubernetesShortServiceDNS(t *testing.T) {
+	tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	serviceID := uuid.MustParse("182df9a4-4a6a-4eed-9d50-51a458a15f6a")
+	target := publicationTarget(tenantID, serviceID)
+	target.RuntimeEndpoint = "http://pw-" + serviceID.String() + ".ani-tenant-" + tenantID.String() + ".svc:8000"
+
+	objects, err := Render(target)
+	if err != nil {
+		t.Fatalf("Render rejected runtime endpoint emitted by Kubernetes runtime adapter: %v", err)
+	}
+	endpoint := objectMap(t, objectList(t, objectMap(t, objects.Backend.Body["spec"])["endpoints"])[0])
+	fqdn := objectMap(t, endpoint["fqdn"])
+	if fqdn["hostname"] != "pw-"+serviceID.String()+".ani-tenant-"+tenantID.String()+".svc.cluster.local" {
+		t.Fatalf("backend endpoint hostname = %#v", fqdn["hostname"])
+	}
+	if !validManagedSpec(KindBackend, objects.Backend.Body["spec"], objects.Backend.Name, tenantID, serviceID) {
+		t.Fatal("short Kubernetes service DNS was rejected by managed backend validation")
+	}
+}
+
 func publicationTarget(tenantID, serviceID uuid.UUID) repository.PublicationTarget {
 	return repository.PublicationTarget{
 		TenantID:        tenantID,

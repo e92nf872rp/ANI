@@ -69,6 +69,10 @@ service KBService {
   // a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
   // the NotifyDocumentUploaded event pipeline).
   rpc ReparseDocument(ReparseDocumentRequest) returns (common.v1.AsyncTaskRef);
+
+  // ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
+  // Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
+  rpc ListKBAuditLogs(ListKBAuditLogsRequest) returns (ListKBAuditLogsResponse);
 }
 
 // ── Request / Response messages ───────────────────────────────────────────────
@@ -331,6 +335,29 @@ message KBPermissions {
   bool   public_read               = 2;
   repeated string allowed_user_ids = 3;
   google.protobuf.Timestamp updated_at = 4;
+}
+
+message ListKBAuditLogsRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  common.v1.CursorPageRequest page = 3;   // limit + cursor (same shape as citations/sessions)
+}
+
+message AuditLogEntry {
+  string id            = 1;
+  string kb_id         = 2;
+  string actor_user_id = 3;   // empty = internal system actor (parse/rebuild consumer)
+  string action        = 4;
+  string before_state  = 5;   // JSON-serialized; empty = none (creation-type)
+  string after_state   = 6;   // JSON-serialized; empty = none (deletion-type)
+  string error_code    = 7;   // empty = success
+  string error_msg     = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message ListKBAuditLogsResponse {
+  repeated AuditLogEntry items = 1;
+  string next_cursor            = 2;   // flat shape, aligned with ListKBCitations/ListKBSessions
 }
 
 message KBChunk {

@@ -215,6 +215,12 @@
       "scope": ""
     },
     {
+      "operationId": "listKnowledgeBaseAuditLogs",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/audit-logs",
+      "scope": ""
+    },
+    {
       "operationId": "listKnowledgeBaseCitations",
       "method": "GET",
       "path": "/knowledge-bases/{kb_id}/citations",
@@ -907,6 +913,8 @@
     "InvitationResult",
     "InviteAdminRequest",
     "InviteMemberRequest",
+    "KBAuditLog",
+    "KBAuditLogListResponse",
     "KBChunk",
     "KBChunkListResponse",
     "KBCitation",
@@ -1056,8 +1064,10 @@
   "cursorPaginationOperations": [
     "listGpuContainers",
     "listInferencePolicyEvents",
+    "listInferenceServices",
     "getInferenceServiceLogs",
     "listIntegrations",
+    "listKnowledgeBaseAuditLogs",
     "listKnowledgeBaseCitations",
     "listKnowledgeBaseDocumentChunks",
     "listKnowledgeBaseSessions",

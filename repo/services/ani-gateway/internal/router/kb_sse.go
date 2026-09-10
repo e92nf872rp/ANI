@@ -168,10 +168,12 @@ func streamQuerySSENewPath(cfg KbSSEConfig) app.HandlerFunc {
 		// (SPEC §4.3), so the gateway generates a fresh key per request; this
 		// satisfies kb-service's required-key validation (prevents duplicate
 		// billing on retry) without exposing the field to SSE clients.
+		// The key must be a bare UUID — kb-service validates it with
+		// uuid.UUID(...) and rejects any prefixed form ("sse-<uuid>" fails).
 		req := &kbv1.RetrieveRequest{
 			Question:             question,
 			SessionId:            sessionID,
-			IdempotencyKey:       "sse-" + uuid.NewString(),
+			IdempotencyKey:       uuid.NewString(),
 			TopK:                 topK,
 			ScoreThreshold:       scoreThreshold,
 			InferenceServiceName: inferenceServiceName,

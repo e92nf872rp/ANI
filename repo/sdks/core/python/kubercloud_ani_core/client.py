@@ -694,6 +694,7 @@ SCHEMAS = [
     "PlatformWorkloadLogEntry",
     "PlatformWorkloadLogListResponse",
     "PlatformWorkloadMetadata",
+    "PlatformWorkloadModelMaterialization",
     "PlatformWorkloadNetwork",
     "PlatformWorkloadPort",
     "PlatformWorkloadResources",

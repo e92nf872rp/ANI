@@ -1,4 +1,5 @@
 import copy
+import os
 import subprocess
 import sys
 import tempfile
@@ -54,10 +55,41 @@ class ValidateServiceRuntimeObservabilityTest(unittest.TestCase):
     def test_forbidden_service_changes_are_rejected(self) -> None:
         changed = {
             "repo/services/reconcile-worker/main.go",
-            "repo/services/envoy-authz-adapter/Dockerfile",
         }
         errors = validator.validate_forbidden_changes(changed)
-        self.assertEqual(2, len(errors))
+        self.assertEqual(1, len(errors))
+
+    def test_envoy_authz_adapter_business_changes_are_allowed(self) -> None:
+        changed = {
+            "repo/services/envoy-authz-adapter/internal/extauth/server.go",
+            "repo/services/envoy-authz-adapter/internal/extauth/server_test.go",
+        }
+        self.assertEqual([], validator.validate_forbidden_changes(changed))
+
+    def test_envoy_authz_adapter_cannot_expand_observability_inventory(self) -> None:
+        inventory = validator.load_inventory(ROOT)
+        extra = copy.deepcopy(inventory["services"][-1])
+        extra["name"] = "envoy-authz-adapter"
+        inventory["services"].append(extra)
+        errors = validator.validate_inventory(inventory)
+        self.assertTrue(any("service order/set" in error for error in errors), errors)
+
+    def test_promtool_fixture_is_readable_by_container_user(self) -> None:
+        def check_fixture(command, **kwargs):
+            mounts = [command[index + 1] for index, part in enumerate(command) if part == "-v"]
+            config = Path(mounts[0].split(":", 1)[0])
+            service_account = Path(mounts[1].split(":", 1)[0])
+            self.assertEqual(0o444, config.stat().st_mode & 0o444)
+            self.assertEqual(0o555, service_account.stat().st_mode & 0o555)
+            self.assertEqual(0o444, (service_account / "token").stat().st_mode & 0o444)
+            return subprocess.CompletedProcess(command, 0, stdout="promtool ok", stderr="")
+
+        previous_umask = os.umask(0o077)
+        try:
+            with mock.patch.object(validator.subprocess, "run", side_effect=check_fixture):
+                self.assertEqual([], validator.run_promtool(ROOT))
+        finally:
+            os.umask(previous_umask)
 
     def test_kb_service_changes_are_allowed(self) -> None:
         # kb-service 是 ANI Services 活跃开发目录，禁改规则已随 KB-API 实现批次解除。
