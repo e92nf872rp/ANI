@@ -487,7 +487,11 @@ func TestHuggingFaceOpenFollowsOnlyAllowlistedHTTPSCDNRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() rejected allowlisted HF CDN redirect: %v", err)
 	}
-	defer body.Close()
+	t.Cleanup(func() {
+		if err := body.Close(); err != nil {
+			t.Errorf("close source body: %v", err)
+		}
+	})
 	data, err := io.ReadAll(body)
 	if err != nil || string(data) != "model" || size != int64(len(data)) {
 		t.Fatalf("Open() body=%q size=%d err=%v, want model payload", data, size, err)
@@ -618,7 +622,11 @@ func TestModelScopeOpenUsesPublicRepositoryDownloadEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer body.Close()
+	t.Cleanup(func() {
+		if err := body.Close(); err != nil {
+			t.Errorf("close source body: %v", err)
+		}
+	})
 	if size != int64(len("model")) {
 		t.Fatalf("Open() size = %d, want %d", size, len("model"))
 	}
@@ -789,7 +797,11 @@ func TestModelScopeTreeRejectsRedirectButDownloadFollowsAllowlistedCDN(t *testin
 	if err != nil {
 		t.Fatalf("Open() rejected allowlisted HTTPS CDN redirect: %v", err)
 	}
-	defer body.Close()
+	t.Cleanup(func() {
+		if err := body.Close(); err != nil {
+			t.Errorf("close source body: %v", err)
+		}
+	})
 	if size != 5 || openCalls != 2 {
 		t.Fatalf("Open() size/calls = %d/%d, want 5/2", size, openCalls)
 	}

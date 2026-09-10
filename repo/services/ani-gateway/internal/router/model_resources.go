@@ -437,10 +437,6 @@ func modelListJSON(msg *modelv1.ListModelsResponse) map[string]any {
 	return map[string]any{"items": items, "next_cursor": nextCursor}
 }
 
-func modelVersionListJSON(msg *modelv1.Model) map[string]any {
-	return map[string]any{"items": modelVersionsJSON(msg.GetVersions()), "next_cursor": nil}
-}
-
 func modelVersionListResponseJSON(msg *modelv1.ListModelVersionsResponse) map[string]any {
 	if msg == nil {
 		return map[string]any{"items": []map[string]any{}, "next_cursor": nil}

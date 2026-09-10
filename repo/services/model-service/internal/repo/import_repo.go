@@ -270,7 +270,7 @@ func importedModelName(repoID, source, requestHash string) string {
 	if base == "" {
 		base = "imported-model"
 	}
-	if !((base[0] >= 'a' && base[0] <= 'z') || (base[0] >= '0' && base[0] <= '9')) {
+	if (base[0] < 'a' || base[0] > 'z') && (base[0] < '0' || base[0] > '9') {
 		base = "model-" + base
 	}
 	if source == "" {

@@ -340,13 +340,13 @@ func (f *verifyingFakeModelObjectStore) VerifyObject(context.Context, ModelObjec
 
 func (f *signedHeaderModelObjectStore) SignedUploadURL(_ context.Context, ref ModelObjectRef, _ time.Duration) (ModelSignedURL, error) {
 	f.unsignedCalls++
-	f.fakeModelObjectStore.lastRef = ref
+	f.lastRef = ref
 	return ModelSignedURL{URL: "https://object.invalid/unsigned"}, nil
 }
 
 func (f *signedHeaderModelObjectStore) SignedUploadURLWithHeaders(_ context.Context, ref ModelObjectRef, _ time.Duration, headers map[string]string) (ModelSignedURL, error) {
 	f.signedHeaderCalls++
-	f.fakeModelObjectStore.lastRef = ref
+	f.lastRef = ref
 	return ModelSignedURL{URL: "https://object.invalid/signed?X-Amz-SignedHeaders=host%3Bx-amz-meta-sha256", Headers: headers}, nil
 }
 

@@ -278,7 +278,11 @@ func (w *Worker) Handle(ctx context.Context, message ImportMessage) error {
 		}
 		return w.persistRetryableFailure(ctx, importTask, "source unavailable", errSourceUnavailable)
 	}
-	defer archive.Close()
+	defer func() {
+		if err := archive.Close(); err != nil {
+			slog.Warn("model import archive cleanup failed", "task_id", message.TaskID, "model_id", message.ModelID)
+		}
+	}()
 	if progress, ok := w.store.(importProgressStore); ok {
 		if err := progress.UpdateProgress(ctx, message.TenantID, message.TaskID, w.workerID, 90); err != nil {
 			return w.persistRetryableFailure(ctx, importTask, "database unavailable", errDatabaseUnavailable)

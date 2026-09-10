@@ -256,7 +256,7 @@ func sourceGET(ctx context.Context, client *http.Client, requestURL *url.URL) (*
 }
 
 func readSourceResponse(response *http.Response) ([]byte, error) {
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxSourceResponseBytes+1))
 	if err != nil {
 		return nil, errors.New("read source response")

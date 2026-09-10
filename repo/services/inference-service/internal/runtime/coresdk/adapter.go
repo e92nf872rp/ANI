@@ -367,10 +367,6 @@ func createBodyWithMaterializationConfig(request runtime.EnsureRequest, plan run
 	return body
 }
 
-func validateObjectMaterialization(request runtime.EnsureRequest) error {
-	return validateObjectMaterializationWithConfig(request, os.Getenv("MODEL_SERVICE_GRPC_ADDR"), os.Getenv("MODEL_FETCHER_IMAGE_REF"))
-}
-
 func (r *Runtime) validateObjectMaterialization(request runtime.EnsureRequest) error {
 	return validateObjectMaterializationWithConfig(request, r.modelServiceGRPCAddr, r.modelFetcherImageRef)
 }
@@ -446,19 +442,6 @@ func canonicalObjectRef(value string, tenantID uuid.UUID) bool {
 		}
 	}
 	return true
-}
-
-func safeTargetPath(value string) bool {
-	target := strings.TrimSpace(value)
-	if !strings.HasPrefix(target, "/") || strings.Contains(target, "\\") || strings.Contains(target, "..") {
-		return false
-	}
-	decoded, err := url.PathUnescape(target)
-	return err == nil && !strings.Contains(decoded, "..")
-}
-
-func materializationBody(mat domain.ModelMaterialization) map[string]any {
-	return materializationBodyWithConfig(mat, os.Getenv("MODEL_SERVICE_GRPC_ADDR"), os.Getenv("MODEL_FETCHER_IMAGE_REF"))
 }
 
 func materializationBodyWithConfig(mat domain.ModelMaterialization, modelServiceAddr, fetcherImage string) map[string]any {
