@@ -67,6 +67,7 @@ type quotaItem struct {
 	Total        int64              `json:"total"`
 	Used         int64              `json:"used"`
 	Reserved     int64              `json:"reserved"`
+	Available    int64              `json:"available"`
 	Tightened    bool               `json:"tightened,omitempty"`
 	Unit         string             `json:"unit,omitempty"`
 	DisplayName  string             `json:"display_name,omitempty"`
@@ -77,6 +78,8 @@ type quotaResponse struct {
 	TenantID   string      `json:"tenant_id"`
 	TenantName string      `json:"tenant_name,omitempty"`
 	Items      []quotaItem `json:"items"`
+	// GPUReservation 是租户 GPU 预留视图；nil（无 gpu_count 配额行）时省略。
+	GPUReservation *reservationViewResponse `json:"gpu_reservation,omitempty"`
 }
 
 type quotaListResultResponse struct {
@@ -255,6 +258,7 @@ func toQuotaItems(info []ports.QuotaInfo) []quotaItem {
 			Total:        q.Total,
 			Used:         q.Used,
 			Reserved:     q.Reserved,
+			Available:    q.Total - q.Used - q.Reserved,
 			Tightened:    q.Tightened,
 			Unit:         q.Unit,
 			DisplayName:  q.DisplayName,

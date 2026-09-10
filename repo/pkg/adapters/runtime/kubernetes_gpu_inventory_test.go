@@ -516,6 +516,140 @@ func TestParseVolcanoVGPUAnnotation(t *testing.T) {
 	}
 }
 
+// TestParseVolcanoVGPUCardCounts verifies per-physical-GPU slice count
+// parsing; the sum of returned counts must equal parseVolcanoVGPUAnnotation.
+func TestParseVolcanoVGPUCardCounts(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantCounts  []int
+	}{
+		{
+			name:        "nil annotations",
+			annotations: nil,
+			wantCounts:  nil,
+		},
+		{
+			name: "annotation invalid JSON",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "not-json",
+			},
+			wantCounts: nil,
+		},
+		{
+			name: "single device with count=10",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": `[{"id":"GPU-aaa","count":10,"devmem":49140,"devcore":100,"type":"NVIDIA GeForce RTX 4090","health":true}]`,
+			},
+			wantCounts: []int{10},
+		},
+		{
+			name: "two devices with count=10 each",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": `[{"id":"GPU-aaa","count":10,"devmem":49140,"devcore":100,"type":"NVIDIA GeForce RTX 4090","health":true},{"id":"GPU-bbb","index":1,"count":10,"devmem":49140,"devcore":100,"type":"NVIDIA GeForce RTX 4090","health":true}]`,
+			},
+			wantCounts: []int{10, 10},
+		},
+		{
+			name: "two devices with count=0 fallback to 1 each",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": `[{"id":"GPU-aaa","count":0},{"id":"GPU-bbb","count":0}]`,
+			},
+			wantCounts: []int{1, 1},
+		},
+		{
+			name: "comma-separated two GPUs count=4 each (real cluster)",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "GPU-4e7a0d18-9e71-50ac-2de3-05245d7d89b5,4,4914,NVIDIA-NVIDIA GeForce RTX 4090,true,hami-core:GPU-81a7a1b7-3671-2da0-cd94-9ae5e92700da,4,4914,NVIDIA-NVIDIA GeForce RTX 4090,true,hami-core:",
+			},
+			wantCounts: []int{4, 4},
+		},
+		{
+			name: "comma-separated two GPUs with different counts",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "GPU-aaa,4,4914,NVIDIA-RTX4090,true,hami-core:GPU-bbb,8,4914,NVIDIA-RTX4090,true,hami-core:",
+			},
+			wantCounts: []int{4, 8},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseVolcanoVGPUCardCounts(tt.annotations)
+			if len(got) != len(tt.wantCounts) {
+				t.Fatalf("parseVolcanoVGPUCardCounts() = %v, want %v", got, tt.wantCounts)
+			}
+			for i := range got {
+				if got[i] != tt.wantCounts[i] {
+					t.Fatalf("parseVolcanoVGPUCardCounts() = %v, want %v", got, tt.wantCounts)
+				}
+			}
+			// Invariant: per-card counts sum to the total slice count.
+			if total := parseVolcanoVGPUAnnotation(tt.annotations); total != sumInts(got) {
+				t.Fatalf("per-card sum %d != total %d", sumInts(got), total)
+			}
+		})
+	}
+}
+
+func sumInts(values []int) int {
+	total := 0
+	for _, v := range values {
+		total += v
+	}
+	return total
+}
+
+// TestInventoryDeviceSharesFromAnnotation verifies that device records built
+// from the volcano.sh/node-vgpu-register annotation carry per-card Shares
+// (slices per physical GPU), e.g. a node with one card split 4-way reports
+// four slice records each with Shares=4.
+func TestInventoryDeviceSharesFromAnnotation(t *testing.T) {
+	body := `{
+  "items": [{
+    "metadata": {
+      "name": "split-node",
+      "labels": {
+        "kubernetes.io/hostname": "split-node",
+        "nvidia.com/gpu.product": "NVIDIA-GeForce-RTX-4090",
+        "nvidia.com/gpu.memory": "49140",
+        "ani.kubercloud.io/gpu-mode": "vgpu",
+        "ani.kubercloud.io/gpu-sharing-spec": "NVIDIA-RTX-4090-12285MiB",
+        "ani.kubercloud.io/gpu-sharing-policy": "quarter"
+      },
+      "annotations": {
+        "volcano.sh/node-vgpu-register": "GPU-204847f2,4,4914,NVIDIA-NVIDIA GeForce RTX 4090,true,hami-core:"
+      }
+    },
+    "status": {
+      "capacity": {"nvidia.com/gpu": "1", "volcano.sh/vgpu-number": "4"},
+      "allocatable": {"nvidia.com/gpu": "1", "volcano.sh/vgpu-number": "4"},
+      "nodeInfo": {"kubeletVersion": "v1.36.1"},
+      "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
+    }
+  }]
+}`
+	inventory := newTestGPUInventory(t, body)
+	nodes, err := inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListNodeClasses error = %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("len(nodes) = %d, want 1", len(nodes))
+	}
+	devices := nodes[0].Devices
+	if len(devices) != 4 {
+		t.Fatalf("len(devices) = %d, want 4 (one record per slice)", len(devices))
+	}
+	for i, device := range devices {
+		if device.Shares != 4 {
+			t.Fatalf("device[%d] Shares = %d, want 4", i, device.Shares)
+		}
+		if device.ResourceName != "volcano.sh/vgpu-number" {
+			t.Fatalf("device[%d] ResourceName = %q, want volcano.sh/vgpu-number", i, device.ResourceName)
+		}
+	}
+}
+
 // TestInventoryNodeLabelDerivation verifies that GPUNodeClass fields
 // GPUMode, GPUSpec, GPUSharingSpec, GPUSharingPolicy are derived from
 // the corresponding node labels.
@@ -592,6 +726,11 @@ func TestInventoryNodeLabelDerivation(t *testing.T) {
 	}
 	if wholecard.GPUSharingPolicy != "" {
 		t.Fatalf("wholecard node GPUSharingPolicy = %q, want empty", wholecard.GPUSharingPolicy)
+	}
+	for i, device := range wholecard.Devices {
+		if device.Shares != 1 {
+			t.Fatalf("wholecard device[%d] Shares = %d, want 1", i, device.Shares)
+		}
 	}
 
 	// vGPU node: GPUMode=vgpu, GPUSharingSpec and GPUSharingPolicy set, GPUSpec empty.

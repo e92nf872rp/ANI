@@ -291,6 +291,13 @@ func scopeAllowedForPath(path, scope string) bool {
 	if strings.HasPrefix(path, "/api/v1/svc/") {
 		return scope == "platform" || scope == "tenant"
 	}
+	// POST /api/v1/gpu-inventory/gpu-partitions 是 BOSS 专属集群切分操作：
+	// 直接改写 kube-system 设备插件配置与节点标签，影响所有租户的 GPU 池，
+	// 仅 platform scope 可访问。必须放在下方 gpu-inventory 前缀规则之前，
+	// 用精确匹配防止前缀规则把 tenant 放行。
+	if path == "/api/v1/gpu-inventory/gpu-partitions" {
+		return scope == "platform"
+	}
 	// 集群级 GPU 资源目录（规格目录与设备清单）：GPU spec 是集群级 CRD、
 	// 设备清单是集群级视图，platform（BOSS 管理端）和 tenant 均可访问，
 	// 写操作（POST/DELETE /gpu-specs）角色准入由 rbac.go CheckPermission 校验。
@@ -299,6 +306,13 @@ func scopeAllowedForPath(path, scope string) bool {
 	if strings.HasPrefix(path, "/api/v1/gpu-specs") ||
 		strings.HasPrefix(path, "/api/v1/gpu-inventory") ||
 		strings.HasPrefix(path, "/api/v1/gpu-scheduling") {
+		return scope == "platform" || scope == "tenant"
+	}
+	// 异步任务查询（GET /tasks、/tasks/{task_id}）：handler 按 token 上下文
+	// tenant_id 过滤（platform principal 只能读到本 principal 租户名下的任务，
+	// 不走 RLS-bypass、无跨租户泄露）。BOSS 提交 gpu_partition 等集群级异步
+	// 操作后需要用 platform token 轮询任务结果，因此双域放行。
+	if path == "/api/v1/tasks" || strings.HasPrefix(path, "/api/v1/tasks/") {
 		return scope == "platform" || scope == "tenant"
 	}
 	// GET /api/v1/quotas 是 BOSS 平台级跨租户配额总览：handler 不注入租户过滤，

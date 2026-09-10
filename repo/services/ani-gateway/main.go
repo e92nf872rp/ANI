@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 
 	"github.com/kubercloud/ani/pkg/bootstrap"
+	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/router"
 )
@@ -281,6 +282,13 @@ func main() {
 		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
 		os.Exit(1)
 	}
+	// The kubernetes_rest inventory adapter also implements the cluster GPU
+	// split planner (GPU-PARTITION-C); local/dev profiles keep it nil and
+	// the route degrades to 503.
+	var gpuPartitionPlanner ports.GPUPartitionPlanner
+	if planner, ok := gpuInventory.(ports.GPUPartitionPlanner); ok {
+		gpuPartitionPlanner = planner
+	}
 	platformCapacityService, err := newGatewayPlatformCapacityService(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuInventory, kubernetesRESTClient, tenantService)
 	if err != nil {
 		logger.Error("failed to configure platform capacity provider runtime", "err", err)
@@ -337,6 +345,7 @@ func main() {
 		TenantPlanService:                     tenantPlanService,
 		TenantAdminService:                    tenantAdminService,
 		GPUSpecStore:                          gpuSpecStore,
+		GPUPartitionPlanner:                   gpuPartitionPlanner,
 		MetadataStore:                         quotaMetadataStore,
 		QuotaStoreService:                     quotaStoreService,
 		MeteringService:                       meteringService,
