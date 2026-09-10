@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,6 +18,10 @@ type KubernetesLifecycleExecutor struct {
 	client  *KubernetesRESTClient
 	enabled bool
 	now     func() time.Time
+	// translator converts a target GPUSpec spec_id into Volcano scheduling
+	// fragments (nodeSelector/schedulerName/resourceRequests/queue annotation)
+	// used to rebuild the workload on resize. nil disables spec_id resize.
+	translator *VolcanoResourceTranslator
 }
 
 type KubernetesLifecycleOption func(*KubernetesLifecycleExecutor)
@@ -24,6 +29,12 @@ type KubernetesLifecycleOption func(*KubernetesLifecycleExecutor)
 func WithKubernetesLifecycleEnabled(enabled bool) KubernetesLifecycleOption {
 	return func(executor *KubernetesLifecycleExecutor) {
 		executor.enabled = enabled
+	}
+}
+
+func WithKubernetesLifecycleTranslator(translator *VolcanoResourceTranslator) KubernetesLifecycleOption {
+	return func(executor *KubernetesLifecycleExecutor) {
+		executor.translator = translator
 	}
 }
 
@@ -71,6 +82,30 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		}, nil
 	}
 
+	if request.Action == ports.WorkloadLifecycleResize {
+		if err := e.applyResize(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "resized by Kubernetes lifecycle executor (targeted patch)",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
+	if request.Action == ports.WorkloadLifecycleAttachVolume || request.Action == ports.WorkloadLifecycleDetachVolume {
+		if err := e.applyKubeVirtVolume(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "volume change accepted by KubeVirt lifecycle executor",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
 	resource, err := resourceFromRecord(record)
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
@@ -84,6 +119,75 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		Reason:    "accepted by Kubernetes lifecycle executor",
 		CheckedAt: e.now().UTC(),
 	}, nil
+}
+
+func (e *KubernetesLifecycleExecutor) applyKubeVirtVolume(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	if record.Kind != ports.WorkloadKindVM {
+		return fmt.Errorf("%w: Kubernetes volume lifecycle execution is only supported for vm instances", ports.ErrUnsupported)
+	}
+	resource, err := kubeVirtVMResourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	volumeID := strings.TrimSpace(request.VolumeID)
+	if volumeID == "" {
+		return fmt.Errorf("%w: volume_id is required for KubeVirt volume lifecycle execution", ports.ErrInvalid)
+	}
+	volumeName := kubeVirtVolumeName(record, volumeID)
+	var body []byte
+	switch request.Action {
+	case ports.WorkloadLifecycleAttachVolume:
+		body, err = json.Marshal(map[string]any{
+			"name": volumeName,
+			"disk": map[string]any{
+				"disk": map[string]any{"bus": "virtio"},
+			},
+			"volumeSource": map[string]any{
+				"persistentVolumeClaim": map[string]any{
+					"claimName": storageProviderName("vol", volumeID),
+					"readOnly":  request.ReadOnly != nil && *request.ReadOnly,
+				},
+			},
+		})
+	case ports.WorkloadLifecycleDetachVolume:
+		body, err = json.Marshal(map[string]any{"name": volumeName})
+	default:
+		return fmt.Errorf("%w: unsupported KubeVirt volume lifecycle action %q", ports.ErrUnsupported, request.Action)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: marshal KubeVirt volume request: %v", ports.ErrInvalid, err)
+	}
+	subresource := "addvolume"
+	if request.Action == ports.WorkloadLifecycleDetachVolume {
+		subresource = "removevolume"
+	}
+	_, err = e.client.do(ctx, http.MethodPut, e.client.host+kubeVirtVMSubresourcePath(resource.Namespace, resource.Name, subresource), "application/json", body)
+	return err
+}
+
+func kubeVirtVMResourceFromRecord(record ports.WorkloadInstanceRecord) (kubernetesResource, error) {
+	namespace := tenantNamespace(record.TenantID)
+	for _, ref := range record.ResourceRefs {
+		resource, err := resourceFromRef("", namespace, ref)
+		if err != nil {
+			continue
+		}
+		if resource.Provider == "kubevirt" && resource.Kind == "VirtualMachine" && strings.TrimSpace(resource.Name) != "" {
+			return resource, nil
+		}
+	}
+	return kubernetesResource{}, fmt.Errorf("%w: KubeVirt VirtualMachine resource ref is required for volume lifecycle execution", ports.ErrInvalid)
+}
+
+func kubeVirtVolumeName(record ports.WorkloadInstanceRecord, volumeID string) string {
+	for _, attachments := range [][]ports.WorkloadStorageAttachment{record.Status.Storage, record.StorageAttachments} {
+		for _, attachment := range attachments {
+			if sameVolume(attachment, volumeID) && strings.TrimSpace(attachment.Name) != "" && strings.TrimSpace(attachment.Name) != strings.TrimSpace(volumeID) {
+				return strings.TrimSpace(attachment.Name)
+			}
+		}
+	}
+	return storageProviderName("volume", volumeID)
 }
 
 func (e *KubernetesLifecycleExecutor) deleteResources(ctx context.Context, record ports.WorkloadInstanceRecord) error {
@@ -112,8 +216,6 @@ func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.
 	case ports.WorkloadLifecycleStop:
 		return e.stop(ctx, resource)
 	case ports.WorkloadLifecycleRestart:
-		return e.restart(ctx, resource)
-	case ports.WorkloadLifecycleResize:
 		return e.restart(ctx, resource)
 	case ports.WorkloadLifecycleScale:
 		if replicas < 1 {
@@ -179,6 +281,145 @@ func (e *KubernetesLifecycleExecutor) restart(ctx context.Context, resource kube
 	body := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"ani.kubercloud.io/restarted-at":%q}}}}}`, e.now().UTC().Format(time.RFC3339))
 	_, err := e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/merge-patch+json", []byte(body))
 	return err
+}
+
+// applyResize rerenders the workload in place for a resize action via a
+// targeted strategic-merge patch (方案B): it rewrites only the Volcano
+// scheduling fragments and container GPU resources triggered by spec_id and
+// cpu/memory, leaving env/ports/command and the rest of the Deployment intact.
+// The patch content type is strategic-merge so the containers list is keyed by
+// name and nested resource maps merge rather than being wholesale replaced.
+func (e *KubernetesLifecycleExecutor) applyResize(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	resource, err := resourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	if resource.Kind == "VirtualMachine" {
+		if strings.TrimSpace(request.SpecID) != "" {
+			return fmt.Errorf("%w: gpu spec resize is only supported for container and gpu_container instances", ports.ErrUnsupported)
+		}
+		// VM has no container resources to patch; keep the historical
+		// stop+start restart behaviour for cpu/memory-only resize.
+		return e.restart(ctx, resource)
+	}
+	patch, err := e.buildResizePatch(ctx, request, record, resource.Name)
+	if err != nil {
+		return err
+	}
+	_, err = e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/strategic-merge-patch+json", patch)
+	return err
+}
+
+// GPU resource keys retained for spec-mode switches. Swapping from vGPU to
+// wholecard (or back) must clear the other mode's resource keys, otherwise
+// both stale and new GPU resources would be requested simultaneously.
+var (
+	volcanoVGPUResourceKeys = []string{"volcano.sh/vgpu-number", volcanoVGPUResourceName, "volcano.sh/vgpu-cores"}
+	legacyGPUResourceKeys   = []string{"nvidia.com/gpu", "nvidia.com/vgpu"}
+)
+
+func (e *KubernetesLifecycleExecutor) buildResizePatch(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord, containerName string) ([]byte, error) {
+	specID := strings.TrimSpace(request.SpecID)
+	requests := map[string]any{}
+	limits := map[string]any{}
+	podAnnotations := map[string]string{}
+	schedulerName := ""
+	var nodeSelector map[string]string
+
+	if specID != "" {
+		if e.translator == nil {
+			return nil, fmt.Errorf("%w: volcano translator is not configured for spec_id resize", ports.ErrNotConfigured)
+		}
+		count := record.GPU.Count
+		if count < 1 {
+			count = 1
+		}
+		translation, err := e.translator.Translate(ctx, specID, record.GPU.QueueName, count)
+		if err != nil {
+			return nil, err
+		}
+		wholecard := false
+		for key := range translation.ResourceRequests {
+			if strings.EqualFold(key, "nvidia.com/gpu") {
+				wholecard = true
+			}
+		}
+		stale := legacyGPUResourceKeys
+		if wholecard {
+			stale = volcanoVGPUResourceKeys
+		}
+		for _, key := range stale {
+			requests[key] = nil
+			limits[key] = nil
+		}
+		for key, value := range translation.ResourceRequests {
+			requests[key] = value
+			limits[key] = value
+		}
+		for key, value := range translation.Annotations {
+			podAnnotations[key] = value
+		}
+		if translation.SchedulerName != "" {
+			schedulerName = translation.SchedulerName
+			podAnnotations["ani.kubercloud.io/scheduler-name"] = translation.SchedulerName
+		}
+		if len(translation.NodeSelector) > 0 {
+			nodeSelector = translation.NodeSelector
+			data, _ := json.Marshal(translation.NodeSelector)
+			podAnnotations[volcanoNodeSelectorAnnotation] = string(data)
+		}
+		if len(translation.ResourceRequests) > 0 {
+			data, _ := json.Marshal(translation.ResourceRequests)
+			podAnnotations[volcanoResourceRequestAnnotation] = string(data)
+		}
+	}
+
+	if cpu := strings.TrimSpace(request.Resources.CPU); cpu != "" {
+		requests["cpu"] = cpu
+		limits["cpu"] = cpu
+	}
+	if memory := strings.TrimSpace(request.Resources.Memory); memory != "" {
+		requests["memory"] = memory
+		limits["memory"] = memory
+	}
+
+	templateSpec := map[string]any{}
+	if schedulerName != "" {
+		templateSpec["schedulerName"] = schedulerName
+	}
+	if len(nodeSelector) > 0 {
+		// strategic-merge patches maps by merging, so a spec switch (e.g.
+		// vGPU -> wholecard) would leave the other mode's node labels behind.
+		// $patch: replace makes the nodeSelector wholesale-replaced instead.
+		nodeSelector["$patch"] = "replace"
+		templateSpec["nodeSelector"] = nodeSelector
+	}
+	if len(requests) > 0 || len(limits) > 0 {
+		templateSpec["containers"] = []any{
+			map[string]any{
+				"name": containerName,
+				"resources": map[string]any{
+					"requests": requests,
+					"limits":   limits,
+				},
+			},
+		}
+	}
+	templateMeta := map[string]any{}
+	if len(podAnnotations) > 0 {
+		templateMeta["annotations"] = podAnnotations
+	}
+	if len(templateSpec) == 0 && len(templateMeta) == 0 {
+		return nil, fmt.Errorf("%w: resize carries no cpu/memory/spec_id change", ports.ErrInvalid)
+	}
+	template := map[string]any{}
+	if len(templateMeta) > 0 {
+		template["metadata"] = templateMeta
+	}
+	if len(templateSpec) > 0 {
+		template["spec"] = templateSpec
+	}
+	return json.Marshal(map[string]any{"spec": map[string]any{"template": template}})
 }
 
 func kubeVirtVMSubresourcePath(namespace string, vmName string, subresource string) string {

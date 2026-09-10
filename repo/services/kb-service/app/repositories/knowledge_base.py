@@ -153,6 +153,44 @@ async def list_kbs(
     return [dict(r) for r in rows], total
 
 
+async def update_kb(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: str,
+    kb_id: str,
+    name: str = "",
+    description: str = "",
+) -> dict[str, Any] | None:
+    """Update a knowledge_base's name/description (RLS-scoped).
+
+    Empty `name`/`description` mean "keep current value" (COALESCE+NULLIF
+    semantics, SPEC §5.1). A name colliding with another KB in the same
+    tenant raises asyncpg.UniqueViolationError (SQLSTATE 23505, UNIQUE
+    (tenant_id, name)) — the servicer maps that to ALREADY_EXISTS.
+
+    Returns the updated row, or None when the kb_id is not visible to this
+    tenant (RLS hides cross-tenant rows, so NOT_FOUND is indistinguishable).
+    """
+    async with conn.transaction():
+        await set_tenant_context(conn, tenant_id)
+        row = await conn.fetchrow(
+            """
+            UPDATE knowledge_bases
+               SET name = COALESCE(NULLIF($2, ''), name),
+                   description = COALESCE(NULLIF($3, ''), description),
+                   updated_at = now()
+             WHERE id = $1 AND status <> 'deleted'
+            RETURNING id, tenant_id, name, description, embedding_model,
+                      chunk_size, top_k, score_threshold, retrieval_mode,
+                      status, doc_count, created_at, updated_at, vector_store_id
+            """,
+            uuid.UUID(kb_id),
+            name,
+            description,
+        )
+    return dict(row) if row else None
+
+
 async def soft_delete_kb(
     conn: asyncpg.Connection, *, tenant_id: str, kb_id: str
 ) -> bool:

@@ -270,6 +270,8 @@ func isPublicPath(path string) bool {
 // - 平台/管理路由前缀 /auth/platform/*、/platform/*、/admin/* 仅 scope=platform 可访问
 // - sandbox token 仅可访问 /api/v1/instances/{id}/sandbox/* 子资源
 // - /api/v1/svc/* Services 层路由允许 platform 和 tenant scope（角色级 RBAC 由 rbac.go 校验）
+// - /api/v1/gpu-specs*、/api/v1/gpu-inventory* 集群级资源目录允许 platform 和 tenant scope（角色级 RBAC 由 rbac.go 校验）
+// - GET /api/v1/quotas（跨租户配额总览，绕过 RLS）仅 scope=platform；租户自查走 /quotas/me
 // - 其他路由仅 scope=tenant 可访问（API key 默认 tenant scope）
 func scopeAllowedForPath(path, scope string) bool {
 	if scope == sandboxtoken.ScopeSandbox {
@@ -288,6 +290,37 @@ func scopeAllowedForPath(path, scope string) bool {
 	// 具体角色准入（platform-admin/ops/readonly vs tenant-admin）由 rbac.go CheckPermission 校验。
 	if strings.HasPrefix(path, "/api/v1/svc/") {
 		return scope == "platform" || scope == "tenant"
+	}
+	// POST /api/v1/gpu-inventory/gpu-partitions 是 BOSS 专属集群切分操作：
+	// 直接改写 kube-system 设备插件配置与节点标签，影响所有租户的 GPU 池，
+	// 仅 platform scope 可访问。必须放在下方 gpu-inventory 前缀规则之前，
+	// 用精确匹配防止前缀规则把 tenant 放行。
+	if path == "/api/v1/gpu-inventory/gpu-partitions" {
+		return scope == "platform"
+	}
+	// 集群级 GPU 资源目录（规格目录与设备清单）：GPU spec 是集群级 CRD、
+	// 设备清单是集群级视图，platform（BOSS 管理端）和 tenant 均可访问，
+	// 写操作（POST/DELETE /gpu-specs）角色准入由 rbac.go CheckPermission 校验。
+	// gpu-scheduling/queues handler 自身按 tenant label 过滤（平台默认队列全员可见 +
+	// 本租户队列），platform token 只见平台默认队列，无跨租户泄露。
+	if strings.HasPrefix(path, "/api/v1/gpu-specs") ||
+		strings.HasPrefix(path, "/api/v1/gpu-inventory") ||
+		strings.HasPrefix(path, "/api/v1/gpu-scheduling") {
+		return scope == "platform" || scope == "tenant"
+	}
+	// 异步任务查询（GET /tasks、/tasks/{task_id}）：handler 按 token 上下文
+	// tenant_id 过滤（platform principal 只能读到本 principal 租户名下的任务，
+	// 不走 RLS-bypass、无跨租户泄露）。BOSS 提交 gpu_partition 等集群级异步
+	// 操作后需要用 platform token 轮询任务结果，因此双域放行。
+	if path == "/api/v1/tasks" || strings.HasPrefix(path, "/api/v1/tasks/") {
+		return scope == "platform" || scope == "tenant"
+	}
+	// GET /api/v1/quotas 是 BOSS 平台级跨租户配额总览：handler 不注入租户过滤，
+	// store 走 WithPlatformTx 绕过 RLS 返回全部租户行。因此仅 platform scope 可访问；
+	// 租户自查配额必须走 /quotas/me（受 RLS 约束），否则任意租户可跨租户读取全平台配额。
+	// 用精确匹配，避免误伤 /quotas/me（仍走末尾 tenant 默认）。
+	if path == "/api/v1/quotas" {
+		return scope == "platform"
 	}
 	return scope == "tenant"
 }

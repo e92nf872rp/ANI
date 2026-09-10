@@ -391,21 +391,24 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 		// vGPU device plugin. When the annotation is absent, fall back
 		// to nvidia.com/gpu (whole-card) and nvidia.com/vgpu resource
 		// counts.
-		vgpuDevices := parseVolcanoVGPUAnnotation(item.Metadata.Annotations)
+		cardShares := parseVolcanoVGPUCardCounts(item.Metadata.Annotations)
 		var devices []ports.GPUDeviceClass
-		if vgpuDevices > 0 {
-			devices = make([]ports.GPUDeviceClass, 0, vgpuDevices)
-			for range vgpuDevices {
-				devices = append(devices, ports.GPUDeviceClass{
-					Vendor:             ports.GPUVendorNVIDIA,
-					Model:              model,
-					MemoryMiB:          gpuMemoryMiB,
-					ResourceName:       kubernetesVolcanoVGPUNumberResource,
-					VirtualizationMode: ports.GPUVirtualizationVGPU,
-					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "volcano-vgpu"),
-					RuntimeVersion:     item.Status.NodeInfo.KubeletVersion,
-					Capabilities:       []string{"cuda", "compute", "vgpu"},
-				})
+		if len(cardShares) > 0 {
+			devices = make([]ports.GPUDeviceClass, 0)
+			for _, shares := range cardShares {
+				for range shares {
+					devices = append(devices, ports.GPUDeviceClass{
+						Vendor:             ports.GPUVendorNVIDIA,
+						Model:              model,
+						MemoryMiB:          gpuMemoryMiB,
+						ResourceName:       kubernetesVolcanoVGPUNumberResource,
+						VirtualizationMode: ports.GPUVirtualizationVGPU,
+						DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "volcano-vgpu"),
+						RuntimeVersion:     item.Status.NodeInfo.KubeletVersion,
+						Capabilities:       []string{"cuda", "compute", "vgpu"},
+						Shares:             shares,
+					})
+				}
 			}
 		} else {
 			// No Volcano vGPU annotation: parse nvidia.com/gpu (whole
@@ -423,6 +426,7 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "device-plugin"),
 					RuntimeVersion:     item.Status.NodeInfo.KubeletVersion,
 					Capabilities:       []string{"cuda", "compute"},
+					Shares:             1,
 				})
 			}
 			for range vgpuCount {
@@ -435,6 +439,7 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "volcano-vgpu"),
 					RuntimeVersion:     item.Status.NodeInfo.KubeletVersion,
 					Capabilities:       []string{"cuda", "compute", "vgpu"},
+					Shares:             1,
 				})
 			}
 			volcanoNumber := gpuResourceCount(item.Status.Capacity, item.Status.Allocatable, kubernetesVolcanoVGPUNumberResource)
@@ -442,6 +447,17 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 			memoryPerSlice := int64(0)
 			if volcanoNumber > 0 && volcanoMemory > 0 {
 				memoryPerSlice = int64(volcanoMemory / volcanoNumber)
+			}
+			// Derive per-card shares from the physical card count label
+			// (nvidia.com/gpu.count) when it divides the slice total evenly;
+			// otherwise assume a single card owning all slices.
+			cardCount := 0
+			if raw := strings.TrimSpace(item.Metadata.Labels["nvidia.com/gpu.count"]); raw != "" {
+				cardCount, _ = strconv.Atoi(raw)
+			}
+			volcanoSharesPerCard := volcanoNumber
+			if volcanoNumber > 0 && cardCount > 0 && volcanoNumber%cardCount == 0 {
+				volcanoSharesPerCard = volcanoNumber / cardCount
 			}
 			for range volcanoNumber {
 				devices = append(devices, ports.GPUDeviceClass{
@@ -453,6 +469,7 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "volcano-vgpu"),
 					RuntimeVersion:     item.Status.NodeInfo.KubeletVersion,
 					Capabilities:       []string{"cuda", "compute", "vgpu"},
+					Shares:             volcanoSharesPerCard,
 				})
 			}
 		}
@@ -555,6 +572,62 @@ func parseVolcanoVGPUAnnotation(annotations map[string]string) int {
 		}
 	}
 	return total
+}
+
+// parseVolcanoVGPUCardCounts parses the volcano.sh/node-vgpu-register
+// annotation into a per-physical-GPU slice count list. Both supported
+// formats from parseVolcanoVGPUAnnotation are handled:
+//
+//  1. Comma-separated string: each colon-separated segment is one physical
+//     GPU; its 2nd comma-separated field is the slice count (count<=0 or
+//     missing fields count as 1, matching the sum parser semantics).
+//  2. JSON array: each element is one physical GPU with a count field.
+//
+// Returns nil when the annotation is absent or invalid, signalling the
+// caller to fall back to resource parsing. The sum of the returned counts
+// always equals parseVolcanoVGPUAnnotation for the same annotation.
+func parseVolcanoVGPUCardCounts(annotations map[string]string) []int {
+	raw, ok := annotations[kubernetesVolcanoVGPURegisterAnnotation]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	raw = strings.TrimSpace(raw)
+	// JSON array format first (legacy compatibility).
+	if strings.HasPrefix(raw, "[") {
+		var devices []volcanoVGPUDevice
+		if err := json.Unmarshal([]byte(raw), &devices); err != nil {
+			return nil
+		}
+		counts := make([]int, 0, len(devices))
+		for _, d := range devices {
+			if d.Count > 0 {
+				counts = append(counts, d.Count)
+			} else {
+				counts = append(counts, 1)
+			}
+		}
+		return counts
+	}
+	// Comma-separated string format.
+	if !strings.HasPrefix(raw, "GPU-") {
+		return nil
+	}
+	counts := make([]int, 0)
+	for _, seg := range strings.Split(raw, ":") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		fields := strings.Split(seg, ",")
+		if len(fields) >= 2 {
+			if n, err := strconv.Atoi(strings.TrimSpace(fields[1])); err == nil && n > 0 {
+				counts = append(counts, n)
+				continue
+			}
+		}
+		counts = append(counts, 1)
+	}
+	return counts
 }
 
 // hasGPUResource reports whether the node advertises any NVIDIA GPU resource

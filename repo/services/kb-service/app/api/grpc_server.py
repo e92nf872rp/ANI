@@ -9,6 +9,7 @@ persistence + Redis session cache.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import queue
@@ -22,7 +23,6 @@ import grpc
 from google.protobuf import empty_pb2
 from google.protobuf import timestamp_pb2
 
-from app.api import p1_rpcs
 import httpx
 from app.core_api.client import CoreAPIError, CoreClient
 from app.generated.common.v1 import common_pb2
@@ -34,6 +34,8 @@ from app.repositories import chunk as chunk_repo
 from app.repositories import document as document_repo
 from app.repositories import knowledge_base as kb_repo
 from app.repositories import message as message_repo
+from app.repositories import permission as permission_repo
+from app.repositories.cursor import InvalidCursorError
 from app.core.config import settings
 from app.services.contracts import QueryResult
 
@@ -95,11 +97,18 @@ def _run_async_bg(coro):
     return asyncio.run_coroutine_threadsafe(coro, _grpc_loop)
 
 
-def _ts(dt: datetime | None) -> timestamp_pb2.Timestamp:
-    """Convert a datetime to a protobuf Timestamp."""
+def _ts(dt: datetime | str | None) -> timestamp_pb2.Timestamp:
+    """Convert a datetime to a protobuf Timestamp.
+
+    Also accepts ISO strings: idempotency-replay results are stored in
+    async_tasks.result (JSONB), where datetimes come back as strings.
+    """
     ts = timestamp_pb2.Timestamp()
-    if dt is not None:
-        ts.FromDatetime(dt)
+    if dt is None:
+        return ts
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    ts.FromDatetime(dt)
     return ts
 
 
@@ -193,31 +202,52 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # 2. idempotency replay: return existing result
         async with self._pool.acquire() as conn:
             existing = await async_task_repo.find_by_idempotency_key(
-                conn, tenant_id=tenant_id, idempotency_key=idem_key
+                conn,
+                tenant_id=tenant_id,
+                idempotency_key=idem_key,
+                task_type="kb.create",
             )
             if existing and existing.get("result"):
                 # result is JSONB; asyncpg may return it as a str or already-
                 # parsed dict depending on the codec config. Normalize.
                 result = existing["result"]
                 if isinstance(result, str):
-                    import json
                     result = json.loads(result)
                 return _kb_row_to_pb(result)
 
             # 3. INSERT knowledge_bases
-            kb_row = await kb_repo.create_kb(
-                conn,
-                tenant_id=tenant_id,
-                name=request.name,
-                description=request.description,
-                embedding_model=request.embedding_model or "bge-m3",
-                chunk_size=request.chunk_size or 1024,
-                top_k=request.top_k or 5,
-                # 未显式传入时落库存 0（表示未设置；运行时由 rag-engine 的
-                # DEFAULT_SCORE_THRESHOLD 兜底），而不是硬编码 0.3。
-                score_threshold=request.score_threshold or 0.0,
-                retrieval_mode=request.retrieval_mode or "hybrid",
-            )
+            # Name-collision 23505 → ALREADY_EXISTS. Two paths lead here:
+            # (a) another active KB in this tenant already uses the name;
+            # (b) a prior attempt committed the kb INSERT but crashed before
+            #     the async_tasks record was written, so the replay check
+            #     above found nothing and this retry re-inserts. Both must
+            #     surface as a clean 409, not UNKNOWN.
+            #     (Distinct from the async_tasks poison-key 23505 handled in
+            #     step 5 below, which self-heals by reusing the row.)
+            # No SAVEPOINT needed: create_kb runs in its own transaction, so
+            # the connection is clean when the exception is caught.
+            try:
+                kb_row = await kb_repo.create_kb(
+                    conn,
+                    tenant_id=tenant_id,
+                    name=request.name,
+                    description=request.description,
+                    embedding_model=request.embedding_model or "bge-m3",
+                    chunk_size=request.chunk_size or 1024,
+                    top_k=request.top_k or 5,
+                    # 未显式传入时落库存 0（表示未设置；运行时由 rag-engine 的
+                    # DEFAULT_SCORE_THRESHOLD 兜底），而不是硬编码 0.3。
+                    score_threshold=request.score_threshold or 0.0,
+                    retrieval_mode=request.retrieval_mode or "hybrid",
+                )
+            except asyncpg.UniqueViolationError:
+                # UNIQUE(tenant_id, name) hit — mirrors the mapping in
+                # _update_kb (Gateway maps to HTTP 409).
+                context.abort(
+                    grpc.StatusCode.ALREADY_EXISTS,
+                    "knowledge base name already exists in this tenant",
+                )
+                return  # unreachable; for type checkers
             kb_id = str(kb_row["id"])
 
         # 4. Core POST /vector-stores (SPEC §6.1)
@@ -255,17 +285,33 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             return  # unreachable
 
         # 5. write async_tasks(idempotency_key, result=kb) for replay
+        # Poison-key self-heal: a prior attempt that crashed between create
+        # and complete leaves a pending row with result=NULL; the replay
+        # check above skips it, so this INSERT hits the UNIQUE constraint.
+        # Reuse that pending row and complete it (self-heal).
         async with self._pool.acquire() as conn:
-            task_row = await async_task_repo.create_task(
-                conn,
-                tenant_id=tenant_id,
-                idempotency_key=idem_key,
-                task_type="kb.create",
-                resource_type="knowledge_base",
-                resource_id=kb_id,
-                payload={"kb_id": kb_id, "name": request.name},
-                status="pending",
-            )
+            try:
+                task_row = await async_task_repo.create_task(
+                    conn,
+                    tenant_id=tenant_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.create",
+                    resource_type="knowledge_base",
+                    resource_id=kb_id,
+                    payload={"kb_id": kb_id, "name": request.name},
+                    status="pending",
+                )
+            except asyncpg.UniqueViolationError:
+                existing = await async_task_repo.find_by_idempotency_key(
+                    conn,
+                    tenant_id=tenant_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.create",
+                )
+                if existing is None:
+                    # Row vanished between INSERT and SELECT; surface it.
+                    raise
+                task_row = existing
             await async_task_repo.complete_task(
                 conn,
                 tenant_id=tenant_id,
@@ -279,6 +325,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         return _run_async(self._get_kb(request, context))
 
     async def _get_kb(self, request, context) -> kb_pb.KnowledgeBase:
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
         if self._pool is None:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
@@ -295,6 +344,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         return _run_async(self._list_kbs(request, context))
 
     async def _list_kbs(self, request, context) -> kb_pb.ListKBsResponse:
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
         if self._pool is None:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
@@ -310,6 +362,125 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             kbs=kbs,
             meta=common_pb2.CursorPageMeta(total=total, next_cursor=next_cursor),
         )
+
+    def UpdateKB(self, request, context):
+        return _run_async(self._update_kb(request, context))
+
+    async def _update_kb(self, request, context) -> kb_pb.KnowledgeBase:
+        # 1. validate idempotency_key / kb_id / tenant_id (SPEC §5.1)
+        if not request.idempotency_key:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
+            )
+            return
+        if not request.kb_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "kb_id is required")
+            return
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        tenant_id = request.tenant_id
+        idem_key = request.idempotency_key
+
+        # 2-4. single transaction: idempotency replay check, UPDATE, and the
+        # async_tasks idempotency record (insert + complete) all commit
+        # atomically — no partial failure can leave a poison pending row
+        # behind (same pattern as NotifyDocumentUploaded, SPEC §6.1 US-010).
+        # find_by_idempotency_key / update_kb each open conn.transaction(),
+        # which inside this outer transaction degrades to a SAVEPOINT
+        # (asyncpg nested-tx semantics); create_task_in_tx /
+        # complete_task_in_tx are plain. Nothing commits until the outer
+        # transaction commits.
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                # 2. idempotency replay: return the recorded result row
+                existing = await async_task_repo.find_by_idempotency_key(
+                    conn,
+                    tenant_id=tenant_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.update",
+                )
+                if existing and existing.get("result"):
+                    result = existing["result"]
+                    if isinstance(result, str):
+                        result = json.loads(result)
+                    return _kb_row_to_pb(result)
+
+                # 3. UPDATE (empty name/description keep current values)
+                try:
+                    kb_row = await kb_repo.update_kb(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=request.kb_id,
+                        name=request.name,
+                        description=request.description,
+                    )
+                except asyncpg.UniqueViolationError:
+                    # UNIQUE(tenant_id, name) hit: name collides with another KB
+                    # in the same tenant → ALREADY_EXISTS (Gateway maps to 409).
+                    context.abort(
+                        grpc.StatusCode.ALREADY_EXISTS,
+                        "knowledge base name already exists in this tenant",
+                    )
+                    return
+                if kb_row is None:
+                    context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                    return
+
+                # 4. write async_tasks idempotency record (result = updated row)
+                # Poison-key self-heal: a prior attempt that crashed between
+                # create_task and complete_task leaves a pending row with
+                # result=NULL; the replay check above skips it, so the INSERT
+                # here hits UNIQUE(tenant_id, idempotency_key). Reuse that
+                # pending row and complete it — the retry becomes a replay.
+                # The nested transaction (SAVEPOINT) keeps the outer tx usable
+                # after the violated constraint aborts the inner one. Note:
+                # distinct from the name-collision 23505 above, which is a
+                # genuine ALREADY_EXISTS.
+                try:
+                    async with conn.transaction():
+                        task_row = await async_task_repo.create_task_in_tx(
+                            conn,
+                            tenant_id=tenant_id,
+                            idempotency_key=idem_key,
+                            task_type="kb.update",
+                            resource_type="knowledge_base",
+                            resource_id=request.kb_id,
+                            payload={"kb_id": request.kb_id, "name": request.name},
+                            status="pending",
+                        )
+                except asyncpg.UniqueViolationError:
+                    existing = await async_task_repo.find_by_idempotency_key(
+                        conn,
+                        tenant_id=tenant_id,
+                        idempotency_key=idem_key,
+                        task_type="kb.update",
+                    )
+                    if existing is None:
+                        # RLS raced the row away between INSERT and SELECT;
+                        # surface as UNKNOWN rather than masking it.
+                        raise
+                    task_row = existing
+                await async_task_repo.complete_task_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    task_id=str(task_row["id"]),
+                    result=kb_row,
+                )
+
+        # 5. return updated row
+        return _kb_row_to_pb(kb_row)
 
     def DeleteKB(self, request, context):
         return _run_async(self._delete_kb(request, context))
@@ -369,6 +540,13 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         if not request.idempotency_key:
             context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
             )
             return
         # validate file_type (SPEC §6.2)
@@ -480,7 +658,10 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             # 1. idempotency replay: if a prior notify for this doc completed,
             #    return the same AsyncTaskRef (SPEC §6.4 idempotent replay).
             existing = await async_task_repo.find_by_idempotency_key(
-                conn, tenant_id=tenant_id, idempotency_key=idem_key
+                conn,
+                tenant_id=tenant_id,
+                idempotency_key=idem_key,
+                task_type="kb.parse",
             )
             if existing and existing.get("status") in ("pending", "completed"):
                 # Return the recorded task id + status.
@@ -514,53 +695,109 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 )
                 object_id = (doc_row or {}).get("object_id") or ""
 
-                task_row = await async_task_repo.create_task_in_tx(
-                    conn,
-                    tenant_id=tenant_id,
-                    idempotency_key=idem_key,
-                    task_type="kb.parse",
-                    resource_type="kb_document",
-                    resource_id=doc_id,
-                    payload={
-                        "doc_id": doc_id,
-                        "kb_id": kb_id,
-                        "object_id": object_id,
-                    },
-                    status="pending",
-                )
-                task_id = str(task_row["id"])
+                # UNIQUE race self-heal (same pattern as _update_kb): the
+                # replay check above runs outside this transaction, so a
+                # concurrent notify with the same (tenant, kb, doc) key can
+                # win the INSERT between the check and here. The nested
+                # transaction (SAVEPOINT) keeps the outer tx usable after
+                # the violated constraint aborts the inner one; re-lookup
+                # then replays the winner's task instead of surfacing a
+                # gRPC UNKNOWN. A failed row is revived to pending: notify
+                # synthesizes the idempotency key, so the client cannot
+                # pick a fresh one — re-upload-and-retry is the only path.
+                publish_event = True
+                task_id = ""
+                task_type = "kb.parse"
+                task_status = "pending"
+                try:
+                    async with conn.transaction():
+                        task_row = await async_task_repo.create_task_in_tx(
+                            conn,
+                            tenant_id=tenant_id,
+                            idempotency_key=idem_key,
+                            task_type="kb.parse",
+                            resource_type="kb_document",
+                            resource_id=doc_id,
+                            payload={
+                                "doc_id": doc_id,
+                                "kb_id": kb_id,
+                                "object_id": object_id,
+                            },
+                            status="pending",
+                        )
+                    task_id = str(task_row["id"])
+                except asyncpg.UniqueViolationError:
+                    existing = await async_task_repo.find_by_idempotency_key(
+                        conn,
+                        tenant_id=tenant_id,
+                        idempotency_key=idem_key,
+                        task_type="kb.parse",
+                    )
+                    if existing is None:
+                        # RLS raced the row away between INSERT and SELECT;
+                        # surface as UNKNOWN rather than masking it.
+                        raise
+                    task_id = str(existing["id"])
+                    task_type = existing.get("task_type") or "kb.parse"
+                    task_status = existing.get("status") or "pending"
+                    if task_status == "failed":
+                        # Revive the failed row so this retry becomes the
+                        # live task; the new outbox event below re-runs the
+                        # parse and the consumer closes the revived row.
+                        revived = await async_task_repo.revive_task_in_tx(
+                            conn,
+                            tenant_id=tenant_id,
+                            task_id=task_id,
+                        )
+                        if revived is not None:
+                            task_status = "pending"
+                        else:
+                            # Raced out of 'failed' between lookup and
+                            # revive — another writer owns the row; replay
+                            # its state, publish nothing.
+                            publish_event = False
+                    else:
+                        # pending/completed: the concurrent winner's tx
+                        # already published the outbox event — replay it,
+                        # do not publish a second one.
+                        publish_event = False
 
                 # c. insert outbox_events row; dispatcher publishes to NATS.
                 from app.repositories import outbox as outbox_repo
                 from app.repositories import knowledge_base as kb_repo
 
-                # Carry the KB's chunk_size through to the parse_worker so each
-                # task chunks with the KB's configured size (default 1024 when
-                # the KB row is missing or has no chunk_size set).
-                kb_row = await kb_repo.get_kb(conn, tenant_id=tenant_id, kb_id=kb_id)
-                kb_chunk_size = (kb_row or {}).get("chunk_size") or 1024
+                if publish_event:
+                    # Carry the KB's chunk_size through to the parse_worker so each
+                    # task chunks with the KB's configured size (default 1024 when
+                    # the KB row is missing or has no chunk_size set).
+                    kb_row = await kb_repo.get_kb(conn, tenant_id=tenant_id, kb_id=kb_id)
+                    kb_chunk_size = (kb_row or {}).get("chunk_size") or 1024
 
-                await outbox_repo.insert_event(
-                    conn,
-                    tenant_id=tenant_id,
-                    aggregate_type="kb_documents",
-                    aggregate_id=doc_id,
-                    event_type="kb.parse",
-                    payload={
-                        "doc_id": doc_id,
-                        "kb_id": kb_id,
-                        "storage_path": request.storage_path,
-                        "tenant_id": tenant_id,
-                        "file_name": "",
-                        "object_id": object_id,
-                        "chunk_size": kb_chunk_size,
-                    },
-                )
+                    await outbox_repo.insert_event(
+                        conn,
+                        tenant_id=tenant_id,
+                        aggregate_type="kb_documents",
+                        aggregate_id=doc_id,
+                        event_type="kb.parse",
+                        payload={
+                            "doc_id": doc_id,
+                            "kb_id": kb_id,
+                            "storage_path": request.storage_path,
+                            "tenant_id": tenant_id,
+                            "file_name": "",
+                            "object_id": object_id,
+                            "chunk_size": kb_chunk_size,
+                            # Lets the parse consumer close this async_tasks
+                            # row when the doc reaches a terminal parse_status
+                            # (prevents tasks stuck pending forever).
+                            "task_id": task_id,
+                        },
+                    )
 
         return common_pb2.AsyncTaskRef(
             task_id=task_id,
-            task_type="kb.parse",
-            status="pending",
+            task_type=task_type,
+            status=task_status,
             location_url="",
         )
 
@@ -688,6 +925,13 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         if not request.idempotency_key:
             context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
             )
             return
         if not request.question:
@@ -918,6 +1162,13 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         if not request.idempotency_key:
             context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
             )
             return
         if not request.question:
@@ -1233,16 +1484,719 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
 
         return result
 
-    # ── 3 P1 RPC declarations (always UNIMPLEMENTED in P0) ────────────────────
+    # ── B2 servicers (kb-api-completion, issue-045) ────────────────────────────
+
+    def ListDocumentChunks(self, request, context):
+        return _run_async(self._list_document_chunks(request, context))
+
+    async def _list_document_chunks(
+        self, request, context
+    ) -> kb_pb.ListDocumentChunksResponse:
+        """ListDocumentChunks — keyset-paged chunk details (SPEC §5.1 #11).
+
+        get_kb gate → get_document (soft-delete filtered) →
+        list_chunks_by_doc_paged (ORDER BY id ASC, id > $cursor).
+        """
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+        # limit 1–100 (default 50), chunk_type whitelist (SPEC §5.2).
+        limit = request.page.limit or 50
+        if not 1 <= limit <= 100:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "limit must be between 1 and 100"
+            )
+            return
+        allowed_chunk_types = {"child", "parent", "doc_summary"}
+        if request.chunk_type and request.chunk_type not in allowed_chunk_types:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                f"chunk_type must be one of {sorted(allowed_chunk_types)}",
+            )
+            return
+        cursor = request.page.cursor or None
+
+        async with self._pool.acquire() as conn:
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            doc_row = await document_repo.get_document(
+                conn,
+                tenant_id=request.tenant_id,
+                kb_id=request.kb_id,
+                doc_id=request.doc_id,
+            )
+            if not doc_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                return
+            try:
+                rows = await chunk_repo.list_chunks_by_doc_paged(
+                    conn,
+                    tenant_id=request.tenant_id,
+                    kb_id=request.kb_id,
+                    doc_id=request.doc_id,
+                    chunk_type=request.chunk_type or None,
+                    limit=limit,
+                    cursor=cursor,
+                )
+            except InvalidCursorError:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT, "invalid page cursor"
+                )
+                return
+        items = [_chunk_row_to_pb(r) for r in rows]
+        next_cursor = str(rows[-1]["id"]) if rows and len(rows) >= limit else ""
+        return kb_pb.ListDocumentChunksResponse(items=items, next_cursor=next_cursor)
+
+    def GetSessionMessages(self, request, context):
+        return _run_async(self._get_session_messages(request, context))
+
+    async def _get_session_messages(
+        self, request, context
+    ) -> kb_pb.GetSessionMessagesResponse:
+        """GetSessionMessages — session message replay (SPEC §5.1 #17).
+
+        get_kb gate → get_session ownership check (session must belong to the
+        path kb_id → NOT_FOUND otherwise) → list_session_messages_paged
+        (ORDER BY created_at ASC, id ASC composite keyset).
+        """
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+        limit = request.page.limit or 100
+        if not 1 <= limit <= 100:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "limit must be between 1 and 100"
+            )
+            return
+        cursor = request.page.cursor or None
+
+        async with self._pool.acquire() as conn:
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            session_row = await message_repo.get_session(
+                conn,
+                tenant_id=request.tenant_id,
+                kb_id=request.kb_id,
+                session_id=request.session_id,
+            )
+            if not session_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "session not found")
+                return
+            try:
+                rows = await message_repo.list_session_messages_paged(
+                    conn,
+                    tenant_id=request.tenant_id,
+                    session_id=request.session_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+            except InvalidCursorError:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT, "invalid page cursor"
+                )
+                return
+        items = [_session_message_row_to_pb(r) for r in rows]
+        next_cursor = (
+            _message_cursor(rows[-1]) if rows and len(rows) >= limit else ""
+        )
+        return kb_pb.GetSessionMessagesResponse(items=items, next_cursor=next_cursor)
+
+    def DeleteSession(self, request, context):
+        return _run_async(self._delete_session(request, context))
+
+    async def _delete_session(self, request, context) -> empty_pb2.Empty:
+        """DeleteSession — idempotent session removal (SPEC §5.1 #18).
+
+        get_kb gate → single-transaction delete (messages then session with
+        kb_id ownership check) → after commit, best-effort cache delete. A
+        missing session still returns Empty (idempotent 204); only a missing
+        KB returns NOT_FOUND.
+        """
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        async with self._pool.acquire() as conn:
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            await message_repo.delete_session(
+                conn,
+                tenant_id=request.tenant_id,
+                kb_id=request.kb_id,
+                session_id=request.session_id,
+            )
+
+        # Best-effort Redis DEL after the DB transaction commits (SPEC §5.1 #18
+        # step 4): on failure the 24h TTL expires the stale entries anyway.
+        cache = None
+        try:
+            cache = self._session_cache_factory()
+        except Exception as e:  # noqa: BLE001 — best-effort cache
+            logger.warning("session cache factory failed: %s", e)
+        if cache is not None:
+            try:
+                await cache.delete_session(session_id=request.session_id)
+            except Exception as e:  # noqa: BLE001 — best-effort cache
+                logger.warning(
+                    "session cache delete failed after DeleteSession "
+                    "(TTL will expire): %s", e,
+                )
+        return empty_pb2.Empty()
+
+    def ReparseDocument(self, request, context):
+        return _run_async(self._reparse_document(request, context))
+
+    async def _reparse_document(
+        self, request, context
+    ) -> common_pb2.AsyncTaskRef:
+        """ReparseDocument — reset + re-enqueue parse (SPEC §5.1 #12, issue-047).
+
+        Structurally identical to _notify_document_uploaded's atomic outbox
+        transaction (kb_documents reset + async_tasks + outbox_events), with
+        two deliberate divergences:
+        - the idempotency key is the client-supplied request.idempotency_key
+          (the proto has the field; notify synthesizes one because its proto
+          does not);
+        - the outbox payload's storage_path/file_name come from the DB
+          document row, not the request (reparse has no upload request);
+          notify's file_name is always "" while reparse carries the real one.
+
+        Guards: KB missing/rebuilding → NOT_FOUND/FAILED_PRECONDITION; doc
+        missing/soft-deleted/ready → NOT_FOUND/FAILED_PRECONDITION. The
+        parse_orchestrator's built-in re-entrant cleanup (delete_chunks_by_doc
+        + best-effort Core vector delete) removes the old chunks downstream —
+        no code change below this layer.
+        """
+        if not request.idempotency_key:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
+            )
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        tenant_id = request.tenant_id or ""
+        kb_id = request.kb_id or ""
+        doc_id = request.doc_id or ""
+        if not tenant_id or not kb_id or not doc_id:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "tenant_id, kb_id and doc_id are required",
+            )
+            return
+        idem_key = request.idempotency_key
+
+        async with self._pool.acquire() as conn:
+            # 1. idempotent replay: pending/completed task with the same key
+            #    → return the same AsyncTaskRef (a failed task is NOT
+            #    replayed — the client must submit a fresh key, SPEC §5.4).
+            existing = await async_task_repo.find_by_idempotency_key(
+                conn,
+                tenant_id=tenant_id,
+                idempotency_key=idem_key,
+                task_type="kb.reparse",
+            )
+            if existing and existing.get("status") in ("pending", "completed"):
+                return common_pb2.AsyncTaskRef(
+                    task_id=str(existing["id"]),
+                    task_type=existing.get("task_type") or "kb.reparse",
+                    status=existing.get("status") or "pending",
+                    location_url="",
+                )
+
+            # 2. KB gate: missing (or RLS-hidden) → NOT_FOUND; rebuilding →
+            #    FAILED_PRECONDITION (mutually exclusive with a PUT config
+            #    triggered rebuild).
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=tenant_id, kb_id=kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            if kb_row.get("status") == "rebuilding":
+                context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "knowledge base is rebuilding",
+                )
+                return
+
+            # 3. document gate: missing/soft-deleted → NOT_FOUND; ready →
+            #    FAILED_PRECONDITION (guard against accidental re-parse of a
+            #    healthy doc; no force field in the contract — YAGNI).
+            doc_row = await document_repo.get_document(
+                conn, tenant_id=tenant_id, kb_id=kb_id, doc_id=doc_id
+            )
+            if not doc_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                return
+            if doc_row.get("parse_status") == "ready":
+                context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "document is ready; reparse is for failed documents",
+                )
+                return
+
+            # 4. single transaction: reset doc row + async_tasks + outbox_events
+            #    (same atomic shape as NotifyDocumentUploaded; repo helpers
+            #    here do not open their own transactions).
+            from app.repositories import outbox as outbox_repo
+
+            async with conn.transaction():
+                updated = await document_repo.reset_for_reparse_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    doc_id=doc_id,
+                )
+                if not updated:
+                    context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                    return  # unreachable; for type checkers
+
+                # UNIQUE race self-heal (same pattern as _update_kb /
+                # NotifyDocumentUploaded): a concurrent reparse with the
+                # same idempotency key can win the INSERT between the
+                # replay check above and here. The nested transaction
+                # (SAVEPOINT) keeps the outer tx usable after the violated
+                # constraint aborts the inner one; re-lookup then either
+                # replays the winner's task or rejects the retry.
+                publish_event = True
+                task_id = ""
+                try:
+                    async with conn.transaction():
+                        task_row = await async_task_repo.create_task_in_tx(
+                            conn,
+                            tenant_id=tenant_id,
+                            idempotency_key=idem_key,
+                            task_type="kb.reparse",
+                            resource_type="kb_document",
+                            resource_id=doc_id,
+                            payload={
+                                "doc_id": doc_id,
+                                "kb_id": kb_id,
+                                "object_id": doc_row.get("object_id") or "",
+                            },
+                            status="pending",
+                        )
+                    task_id = str(task_row["id"])
+                except asyncpg.UniqueViolationError:
+                    existing = await async_task_repo.find_by_idempotency_key(
+                        conn,
+                        tenant_id=tenant_id,
+                        idempotency_key=idem_key,
+                        task_type="kb.reparse",
+                    )
+                    if existing is None:
+                        # RLS raced the row away between INSERT and SELECT;
+                        # surface as UNKNOWN rather than masking it.
+                        raise
+                    if existing.get("status") == "failed":
+                        # SPEC §5.4: a failed task must NOT be replayed on
+                        # the same key — the client must submit a fresh
+                        # idempotency_key. abort() rolls back the whole
+                        # outer transaction (including the doc reset),
+                        # so the failed state stays intact.
+                        context.abort(
+                            grpc.StatusCode.FAILED_PRECONDITION,
+                            "task already failed with this idempotency_key; "
+                            "retry with a new key",
+                        )
+                        return  # unreachable; for type checkers
+                    # pending/completed: the concurrent winner's tx already
+                    # published the outbox event — replay it, publish nothing.
+                    task_id = str(existing["id"])
+                    publish_event = False
+
+                if publish_event:
+                    # Payload mirrors the notify template; storage_path/file_name
+                    # come from the DB row (reparse has no request-side values).
+                    await outbox_repo.insert_event(
+                        conn,
+                        tenant_id=tenant_id,
+                        aggregate_type="kb_documents",
+                        aggregate_id=doc_id,
+                        event_type="kb.reparse",
+                        payload={
+                            "doc_id": doc_id,
+                            "kb_id": kb_id,
+                            "storage_path": doc_row.get("storage_path") or "",
+                            "tenant_id": tenant_id,
+                            "file_name": doc_row.get("file_name") or "",
+                            "object_id": doc_row.get("object_id") or "",
+                            "chunk_size": kb_row.get("chunk_size") or 1024,
+                            # Lets the parse consumer close this async_tasks
+                            # row when the doc reaches a terminal parse_status
+                            # (prevents tasks stuck pending forever).
+                            "task_id": task_id,
+                        },
+                    )
+
+        return common_pb2.AsyncTaskRef(
+            task_id=task_id,
+            task_type="kb.reparse",
+            status="pending",
+            location_url="",
+        )
 
     def ListKBCitations(self, request, context):
-        return p1_rpcs.list_kb_citations(request, context)
+        return _run_async(self._list_kb_citations(request, context))
+
+    async def _list_kb_citations(
+        self, request, context
+    ) -> kb_pb.ListKBCitationsResponse:
+        """ListKBCitations — expand source_chunks into citations (SPEC §5.1 #15).
+
+        Pages assistant messages with non-empty source_chunks (message
+        granularity), then expands each message's JSON in Python: per (message,
+        doc) group the citation takes the highest-score source. The citation
+        id is uuid5-derived — deterministic, replay-stable, uuid-formatted.
+        """
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+        limit = request.page.limit or 20
+        if not 1 <= limit <= 100:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "limit must be between 1 and 100"
+            )
+            return
+        cursor = request.page.cursor or None
+
+        async with self._pool.acquire() as conn:
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            try:
+                rows = await message_repo.list_citation_messages_paged(
+                    conn,
+                    tenant_id=request.tenant_id,
+                    kb_id=request.kb_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+            except InvalidCursorError:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT, "invalid page cursor"
+                )
+                return
+
+        items: list[kb_pb.KBCitation] = []
+        for row in rows:
+            message_id = str(row["id"])
+            session_id = str(row["session_id"])
+            created_at = row["created_at"]
+            # Malformed JSON on one message must not blow up the whole page
+            # (SPEC §5.4): skip the message instead.
+            try:
+                sources = json.loads(row["source_chunks"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(sources, list) or not sources:
+                continue
+            # Group by doc_id keeping the highest-score source per doc.
+            best: dict[str, dict[str, Any]] = {}
+            for src in sources:
+                if not isinstance(src, dict):
+                    continue
+                doc_id = str(src.get("doc_id", ""))
+                if not doc_id:
+                    continue
+                # Non-numeric score/page on one source must not blow up the
+                # whole page (SPEC §5.4): skip the source instead.
+                try:
+                    score = float(src.get("score", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if doc_id not in best or score > float(best[doc_id].get("score", 0.0) or 0.0):
+                    best[doc_id] = src
+            for doc_id, src in best.items():
+                try:
+                    page = int(src.get("page", 0) or 0)
+                    score = float(src.get("score", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                items.append(
+                    kb_pb.KBCitation(
+                        id=str(uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"ani:kb:citation:{request.kb_id}:{message_id}:{doc_id}",
+                        )),
+                        kb_id=request.kb_id,
+                        doc_id=doc_id,
+                        file_name=str(src.get("file_name", "")),
+                        page=page,
+                        content=str(src.get("content", "")),
+                        score=score,
+                        created_at=_ts(created_at),
+                        message_id=message_id,
+                        session_id=session_id,
+                    )
+                )
+        next_cursor = (
+            _message_cursor(rows[-1]) if rows and len(rows) >= limit else ""
+        )
+        return kb_pb.ListKBCitationsResponse(items=items, next_cursor=next_cursor)
 
     def ListKBSessions(self, request, context):
-        return p1_rpcs.list_kb_sessions(request, context)
+        return _run_async(self._list_kb_sessions(request, context))
+
+    async def _list_kb_sessions(
+        self, request, context
+    ) -> kb_pb.ListKBSessionsResponse:
+        """ListKBSessions — aggregated session list (SPEC §5.1 #16).
+
+        get_kb gate → list_sessions aggregate SQL (message_count /
+        last_active_at / last_query) → KBSession mapping with a composite
+        keyset cursor (created_at DESC, id DESC).
+        """
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+        limit = request.page.limit or 20
+        if not 1 <= limit <= 100:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "limit must be between 1 and 100"
+            )
+            return
+        cursor = request.page.cursor or None
+
+        async with self._pool.acquire() as conn:
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            try:
+                rows = await message_repo.list_sessions(
+                    conn,
+                    tenant_id=request.tenant_id,
+                    kb_id=request.kb_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+            except InvalidCursorError:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT, "invalid page cursor"
+                )
+                return
+        items = [
+            kb_pb.KBSession(
+                id=str(r["id"]),
+                kb_id=request.kb_id,
+                message_count=int(r.get("message_count") or 0),
+                last_query=str(r.get("last_query") or ""),
+                created_at=_ts(r.get("created_at")),
+                last_active_at=_ts(r.get("last_active_at")),
+            )
+            for r in rows
+        ]
+        next_cursor = (
+            _session_cursor(rows[-1]) if rows and len(rows) >= limit else ""
+        )
+        return kb_pb.ListKBSessionsResponse(items=items, next_cursor=next_cursor)
+
+    # ── P1 RPC: permissions read/write pair (B4, plan §2.5) ────────────────────
+
+    def GetKBPermissions(self, request, context):
+        return _run_async(self._get_kb_permissions(request, context))
+
+    async def _get_kb_permissions(self, request, context) -> kb_pb.KBPermissions:
+        # 1. validate (read path: no idempotency)
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if not request.kb_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "kb_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        async with self._pool.acquire() as conn:
+            # 2. KB existence check (RLS query, same semantics as GetKB: a
+            # deleted KB is 404, not defaults)
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            # 3. read the permission row; no row → defaults (contract: not 404)
+            perm = await permission_repo.get_permissions(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+        # 4. updated_at falls back to kb.created_at when no permission row
+        # exists — avoids leaking the proto Timestamp zero value (1970).
+        updated_at = perm.get("updated_at") or kb_row.get("created_at")
+        return kb_pb.KBPermissions(
+            kb_id=request.kb_id,
+            public_read=bool(perm["public_read"]),
+            allowed_user_ids=perm["allowed_user_ids"],
+            updated_at=_ts(updated_at),
+        )
 
     def UpdateKBPermissions(self, request, context):
-        return p1_rpcs.update_kb_permissions(request, context)
+        return _run_async(self._update_kb_permissions(request, context))
+
+    async def _update_kb_permissions(self, request, context) -> kb_pb.KnowledgeBase:
+        # 1. validate idempotency_key / kb_id / tenant_id (align UpdateKB)
+        if not request.idempotency_key:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
+            )
+            return
+        if not request.kb_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "kb_id is required")
+            return
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        # allowed_user_ids: each must be a valid uuid; dedupe preserving order
+        allowed_user_ids: list[str] = []
+        seen_user_ids: set[str] = set()
+        for raw in request.allowed_user_ids:
+            uid = raw.strip()
+            try:
+                uuid.UUID(uid)
+            except ValueError:
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    "allowed_user_ids entries must be uuids",
+                )
+                return
+            if uid not in seen_user_ids:
+                seen_user_ids.add(uid)
+                allowed_user_ids.append(uid)
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        tenant_id = request.tenant_id
+        idem_key = request.idempotency_key
+
+        # 2. single transaction: replay check, KB existence, permission
+        # upsert, and the idempotency record commit atomically (UpdateKB
+        # pattern; nested conn.transaction() degrades to SAVEPOINT)
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                # 2a. idempotency replay: return the recorded KB row
+                existing = await async_task_repo.find_by_idempotency_key(
+                    conn,
+                    tenant_id=tenant_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.perm.update",
+                )
+                if existing and existing.get("result"):
+                    result = existing["result"]
+                    if isinstance(result, str):
+                        result = json.loads(result)
+                    return _kb_row_to_pb(result)
+
+                # 2b. KB existence check (deleted KB → NOT_FOUND)
+                kb_row = await kb_repo.get_kb(
+                    conn, tenant_id=tenant_id, kb_id=request.kb_id
+                )
+                if kb_row is None:
+                    context.abort(
+                        grpc.StatusCode.NOT_FOUND, "knowledge base not found"
+                    )
+                    return
+
+                # 2c. UPSERT permission row
+                await permission_repo.upsert_permissions_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    kb_id=request.kb_id,
+                    public_read=request.public_read,
+                    allowed_user_ids=allowed_user_ids,
+                )
+
+                # 2d. reuse the KB snapshot from step 2b as the replay
+                # result — the permission upsert only touches
+                # kb_permissions, so the knowledge_bases row is unchanged
+                # within this transaction (no second SELECT needed)
+
+                # 2e. idempotency record (poison-key self-heal, align
+                # UpdateKB step 4)
+                try:
+                    async with conn.transaction():
+                        task_row = await async_task_repo.create_task_in_tx(
+                            conn,
+                            tenant_id=tenant_id,
+                            idempotency_key=idem_key,
+                            task_type="kb.perm.update",
+                            resource_type="knowledge_base",
+                            resource_id=request.kb_id,
+                            payload={
+                                "public_read": request.public_read,
+                                "allowed_user_ids": allowed_user_ids,
+                            },
+                            status="pending",
+                        )
+                except asyncpg.UniqueViolationError:
+                    existing = await async_task_repo.find_by_idempotency_key(
+                        conn,
+                        tenant_id=tenant_id,
+                        idempotency_key=idem_key,
+                        task_type="kb.perm.update",
+                    )
+                    if existing is None:
+                        raise
+                    task_row = existing
+                await async_task_repo.complete_task_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    task_id=str(task_row["id"]),
+                    result=kb_row,
+                )
+
+        # 3. return KB snapshot (contract returns KnowledgeBase)
+        return _kb_row_to_pb(kb_row)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -1375,8 +2329,6 @@ def _kb_row_to_pb(row: dict[str, Any]) -> kb_pb.KnowledgeBase:
 
 def _doc_row_to_pb(row: dict[str, Any]) -> kb_pb.KBDocument:
     """Convert a kb_documents repository row to a proto KBDocument."""
-    import json
-
     metadata = row.get("custom_metadata")
     if isinstance(metadata, (dict, list)):
         metadata_str = json.dumps(metadata, default=str)
@@ -1396,3 +2348,65 @@ def _doc_row_to_pb(row: dict[str, Any]) -> kb_pb.KBDocument:
         created_at=_ts(row.get("created_at")),
         parsed_at=_ts(row.get("parsed_at")),
     )
+
+
+def _chunk_row_to_pb(row: dict[str, Any]) -> kb_pb.KBChunk:
+    """Convert a kb_chunks repository row to a proto KBChunk."""
+    metadata = row.get("custom_metadata")
+    if isinstance(metadata, (dict, list)):
+        metadata_str = json.dumps(metadata, default=str)
+    else:
+        metadata_str = str(metadata) if metadata else ""
+    return kb_pb.KBChunk(
+        id=str(row.get("id", "")),
+        doc_id=str(row.get("doc_id", "")),
+        kb_id=str(row.get("kb_id", "")),
+        parent_chunk_id=str(row.get("parent_chunk_id") or ""),
+        chunk_type=row.get("chunk_type") or "",
+        content=row.get("content") or "",
+        parent_content=row.get("parent_content") or "",
+        page_number=row.get("page_number") or 0,
+        content_type=row.get("content_type") or "",
+        token_count=row.get("token_count") or 0,
+        custom_metadata=metadata_str,
+        created_at=_ts(row.get("created_at")),
+        file_name=row.get("file_name") or "",
+    )
+
+
+def _session_message_row_to_pb(row: dict[str, Any]) -> kb_pb.KBSessionMessage:
+    """Convert a kb_messages repository row to a proto KBSessionMessage."""
+    return kb_pb.KBSessionMessage(
+        id=str(row.get("id", "")),
+        session_id=str(row.get("session_id", "")),
+        role=row.get("role") or "",
+        content=row.get("content") or "",
+        source_chunks=str(row.get("source_chunks") or ""),
+        input_tokens=row.get("input_tokens") or 0,
+        output_tokens=row.get("output_tokens") or 0,
+        duration_ms=row.get("duration_ms") or 0,
+        created_at=_ts(row.get("created_at")),
+    )
+
+
+def _message_cursor(row: dict[str, Any]) -> str:
+    """Encode a composite keyset cursor for kb_messages (created_at, id).
+
+    The message id is a random UUID, so created_at alone cannot break ties —
+    the id ASC component guarantees a stable playback order. The timestamp
+    uses the ``Z`` suffix (not ``+00:00``): cursors round-trip through URL
+    query strings where ``+`` is decoded as a space, which would corrupt the
+    cursor on the next request. ``Z`` is parsed fine by
+    parse_composite_cursor (datetime.fromisoformat).
+    """
+    return f"{_cursor_ts(row['created_at'])}|{row['id']}"
+
+
+def _session_cursor(row: dict[str, Any]) -> str:
+    """Encode a composite keyset cursor for kb_sessions (created_at, id)."""
+    return f"{_cursor_ts(row['created_at'])}|{row['id']}"
+
+
+def _cursor_ts(dt: datetime) -> str:
+    """ISO timestamp with the URL-safe ``Z`` suffix for cursor encoding."""
+    return dt.isoformat().replace("+00:00", "Z")

@@ -916,6 +916,193 @@ components:
               latency_ms: { type: integer }
               error:      { type: string, nullable: true }
 
+    PlatformServiceHealthComponent:
+      type: object
+      description: 单个 ANI 目标服务的 Prometheus 抓取可达性；不表示业务依赖或业务请求健康。
+      required: [service_name, scrape_status, observed_replicas, reachable_replicas, versions, sample_age_seconds]
+      properties:
+        service_name:
+          type: string
+          enum: [ani-gateway, auth-service, model-service, task-service, inference-service, tenant-service, metering-service]
+        scrape_status:
+          type: string
+          enum: [reachable, unreachable, unknown]
+        observed_replicas:
+          type: integer
+          minimum: 0
+          description: freshness window 内存在 up series 的目标数。
+        reachable_replicas:
+          type: integer
+          minimum: 0
+          description: freshness window 内 up=1 且 OTel target_info 身份契约有效的目标数。
+        versions:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+          description: 可抓取目标中经 target_info 与 K8s 标签交叉校验的版本集合；冲突目标不返回版本。
+        sample_age_seconds:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+          description: 当前组件纳入聚合的最旧 fresh up 样本年龄；无 fresh target 时为 null。
+
+    PlatformServiceHealthResponse:
+      type: object
+      description: 固定七个 ANI 服务的 Prometheus 抓取可达性聚合；coverage=partial，禁止解释为全平台或业务健康。
+      required: [scope, coverage, signal, observed_at, source_status, components]
+      properties:
+        scope: { type: string, enum: [ani_services] }
+        coverage: { type: string, enum: [partial] }
+        signal: { type: string, enum: [prometheus_scrape] }
+        observed_at: { type: string, format: date-time }
+        source_status: { type: string, enum: [ok] }
+        components:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items: { $ref: '#/components/schemas/PlatformServiceHealthComponent' }
+
+    PlatformComponentStatusResponse:
+      type: object
+      description: 平台组件运行状态聚合；只读，按静态注册表固定分组返回，组件集合不随集群实际对象动态增减。
+      required: [observed_at, groups, dev_profile]
+      properties:
+        observed_at: { type: string, format: date-time }
+        groups:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: '#/components/schemas/PlatformComponentGroup' }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformComponentGroup:
+      type: object
+      description: 组件分组；service 为七个 ANI 自研服务，dependency 为平台基础依赖，platform 为其他平台组件。
+      required: [name, components]
+      properties:
+        name: { type: string, enum: [service, dependency, platform] }
+        components:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformComponent' }
+
+    PlatformComponent:
+      type: object
+      description: 单个组件运行状态；K8s 对象缺失或读取失败时 status=unknown + reason，不阻塞整体 200。
+      required: [name, kind, namespace, group, status]
+      properties:
+        name:
+          type: string
+          description: "K8s 工作负载对象名（注册表固定）"
+        kind:
+          type: string
+          enum: [Deployment, StatefulSet, DaemonSet]
+        namespace:
+          type: string
+        group:
+          type: string
+          enum: [service, dependency, platform]
+        status:
+          type: string
+          enum: [running, degraded, stopped, unknown]
+          description: "running=全副本 Ready 且 Available；degraded=部分副本 Ready 或 Available=False；stopped=期望副本为 0；unknown=对象缺失/读取失败"
+        desired_replicas:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: "期望副本数；Deployment/StatefulSet 取 spec.replicas，DaemonSet 取 desiredNumberScheduled，不可得时为 null"
+        ready_replicas:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: "Ready 副本数；不可得时为 null"
+        version:
+          type: string
+          nullable: true
+          description: "首个容器镜像 tag（镜像名最后一个 ':' 之后段）；不可得时为 null"
+        scrape_status:
+          type: string
+          enum: [reachable, unreachable, unknown]
+          nullable: true
+          description: "仅 service 组融合 Prometheus 抓取可达性；其余组恒为 null。reachable 不表示业务健康"
+        reason:
+          type: string
+          nullable: true
+          description: "降级/unknown 原因；正常时为 null"
+
+    PlatformComponentMetrics:
+      type: object
+      description: 单个平台组件资源指标快照；Prometheus cAdvisor 聚合口径，单源失败字段为 null（不伪造 0）。
+      required: [component, timestamp, dev_profile]
+      properties:
+        component:
+          $ref: '#/components/schemas/PlatformComponentRef'
+        timestamp:
+          type: string
+          format: date-time
+        cpu_cores:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(rate(container_cpu_usage_seconds_total[5m]))，业务容器聚合"
+        memory_used_mb:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(container_memory_working_set_bytes) / 1048576"
+        memory_total_mb:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(container_spec_memory_limit_bytes) / 1048576；未设 limits 时为 null"
+        network_rx_bytes_per_sec:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(rate(container_network_receive_bytes_total[5m]))"
+        network_tx_bytes_per_sec:
+          type: number
+          format: double
+          nullable: true
+          description: "sum(rate(container_network_transmit_bytes_total[5m]))"
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformComponentRef:
+      type: object
+      description: 组件引用（注册表固定信息）。
+      required: [name, namespace, group]
+      properties:
+        name: { type: string }
+        namespace: { type: string }
+        group: { type: string, enum: [service, dependency, platform] }
+
+    PlatformComponentLogEntry:
+      type: object
+      description: 单条组件日志；非 JSON 行回退为纯文本语义（message=整行，level 推断）。
+      required: [timestamp, level, message]
+      properties:
+        timestamp: { type: string, format: date-time }
+        level: { type: string }
+        message: { type: string }
+        pod: { type: string }
+        container: { type: string }
+        stream: { type: string }
+
+    PlatformComponentLogListResponse:
+      type: object
+      description: 组件日志列表（backward 倒序）；cursor 为最早一条 timestamp，供往前翻页。
+      required: [items, total, dev_profile]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformComponentLogEntry' }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
     CoreDevProfileInfo:
       type: object
       description: "Core dev/local profile 标记；用于区分本地联调成功与真实 provider 执行成功。"
@@ -926,12 +1113,85 @@ components:
         real_provider: { type: boolean }
         reason:        { type: string, nullable: true }
 
+    PlatformCapacityResponse:
+      type: object
+      description: "平台容量态势汇总（整平台 = 1 个默认区域；只读，无区域 CRUD）。"
+      required: [regions, summary, dev_profile]
+      properties:
+        regions:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformRegion' }
+          description: "固定返回 1 条区域记录（整平台 = 默认区域）。"
+        summary:
+          $ref: '#/components/schemas/PlatformCapacitySummary'
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformRegion:
+      type: object
+      description: "平台默认区域记录；id/code/name/display_name/status/open_for_tenant 为平台主数据常量。"
+      required: [id, code, name, display_name, status, open_for_tenant, azs, tenant_count, capacity]
+      properties:
+        id:              { type: string, example: "platform" }
+        code:            { type: string, example: "platform" }
+        name:            { type: string, example: "平台" }
+        display_name:    { type: string, example: "平台（默认区域）" }
+        status:          { type: string, enum: [enabled], example: "enabled" }
+        open_for_tenant: { type: boolean, example: true }
+        azs:
+          type: array
+          items: { type: string }
+          description: "Ready GPU 节点 zone label 去重（topology.kubernetes.io/zone 优先，回退 failure-domain.beta.kubernetes.io/zone；缺失为空数组）。"
+        tenant_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: "可用租户数（status <> 'disabled'）；租户服务不可用时为 0 并写入 dev_profile.reason。"
+        capacity:
+          $ref: '#/components/schemas/PlatformRegionCapacity'
+
+    PlatformRegionCapacity:
+      type: object
+      description: "区域容量口径：GPU 总量含 vGPU 切片；gpu_free = gpu_total - in_use - fault；nodes 仅 Ready GPU 节点；cpu/memory 为节点 allocatable 总量（非可用量）。"
+      required: [gpu_total, gpu_free, nodes, cpu_cores, memory_gib]
+      properties:
+        gpu_total:  { type: integer, format: int64, minimum: 0, description: "全部 GPU 设备数（含 vGPU 切片）" }
+        gpu_free:   { type: integer, format: int64, minimum: 0, description: "gpu_total - in_use - fault；in_use 为跨租户 Running GPU Pod 数（每 Pod 占 1 设备）" }
+        nodes:      { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点数" }
+        cpu_cores:  { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点 cpu allocatable 求和（向下取整）" }
+        memory_gib: { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点 memory allocatable 求和（GiB 向下取整）" }
+
+    PlatformCapacitySummary:
+      type: object
+      description: "regions 汇总（当前即单区域值），供顶部指标直接消费。"
+      required: [region_count, gpu_total, gpu_free, tenant_count, nodes, azs]
+      properties:
+        region_count: { type: integer, format: int64, minimum: 0, example: 1 }
+        gpu_total:    { type: integer, format: int64, minimum: 0 }
+        gpu_free:     { type: integer, format: int64, minimum: 0 }
+        tenant_count: { type: integer, format: int64, minimum: 0 }
+        nodes:        { type: integer, format: int64, minimum: 0 }
+        azs:
+          type: array
+          items: { type: string }
+
     InstanceNetworkConfig:
       type: object
-      description: "实例网络引用；只表达 Core 产品意图，不暴露 provider 对象。"
+      description: >-
+        实例网络引用；vpc_id 和 subnet_id 都是 ANI Core 产品资源 ID，不是
+        NetworkAttachmentDefinition（NAD）名称或其他 provider 对象标识。显式提供
+        vpc_id 时必须同时提供 subnet_id；仅提供 subnet_id 时，服务端从该 Subnet
+        补全其所属 vpc_id。服务端不会猜测默认 Subnet，也不会向调用方暴露 NAD
+        或其他 provider 对象。
       properties:
-        vpc_id:              { type: string, nullable: true }
-        subnet_id:           { type: string, nullable: true }
+        vpc_id:
+          type: string
+          nullable: true
+          description: "ANI Core VPC 资源 ID，不是 provider NAD 名称；显式提供时必须同时提供 subnet_id。"
+        subnet_id:
+          type: string
+          nullable: true
+          description: "ANI Core Subnet 资源 ID；可单独提供，服务端将从 Subnet 补全其所属 vpc_id。"
         security_group_ids:  { type: array, items: { type: string } }
         assign_private_ip:   { type: boolean, default: true }
         private_ip:          { type: string, nullable: true }
@@ -1107,6 +1367,7 @@ components:
           type: array
           items: { $ref: '#/components/schemas/InstanceStorageAttachment' }
         termination_protection: { type: boolean, default: false, description: "VM 危险操作保护开关；开启后 stop/delete/rebuild 等操作必须先关闭保护" }
+        auto_start: { type: boolean, default: true, description: "实例创建后是否自动启动（开机自启）" }
         ssh:
           type: object
           nullable: true
@@ -1329,7 +1590,8 @@ components:
         boot_image:          { type: string, nullable: true, deprecated: true, description: "兼容字段；优先使用 CreateInstanceRequest.image_id。" }
         ssh_username:        { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名" }
         ssh_key_ref:         { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
-        password_secret_ref: { type: string, nullable: true, description: "登录密码 Secret 引用；不返回明文。" }
+        password_secret_ref: { type: string, nullable: true, description: "登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。" }
+        cloud_init_secret:   { type: string, nullable: true, description: "cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。" }
         user_data:           { type: string, nullable: true, description: "cloud-init user data；不得包含长期明文凭据。" }
         system_disk:
           $ref: '#/components/schemas/InstanceDiskSpec'
@@ -1850,15 +2112,16 @@ components:
           type: string
           enum: [start, stop, restart, resize, rebuild, delete, snapshot, attach_volume, detach_volume, attach_filesystem, detach_filesystem, rollback, scale, update_image, bind_secret, unbind_secret, change_security_groups, set_termination_protection, pause, resume, extend, touch_idle]
         idempotency_key: { type: string, minLength: 1, maxLength: 128 }
-        cpu:            { type: string, nullable: true, description: "resize 时使用" }
-        memory:         { type: string, nullable: true, description: "resize 时使用" }
+        cpu:            { type: string, nullable: true, description: "resize 时使用；变配重建时写入容器 resources" }
+        memory:         { type: string, nullable: true, description: "resize 时使用；变配重建时写入容器 resources" }
+        spec_id:        { type: string, nullable: true, description: "resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行" }
         snapshot_name:  { type: string, nullable: true, description: "snapshot 时指定快照名称" }
         snapshot_id:    { type: string, nullable: true, description: "rollback 时指定目标快照" }
         include_data_disks: { type: boolean, nullable: true, description: "snapshot 时是否包含数据盘" }
         revision:       { type: string, nullable: true, description: "rollback 时指定目标 revision；与 snapshot_id 二选一" }
         volume_id:      { type: string, nullable: true, description: "attach_volume/detach_volume 时使用" }
         filesystem_id:  { type: string, nullable: true, description: "attach_filesystem/detach_filesystem 时使用" }
-        mount_path:     { type: string, nullable: true, description: "attach_volume/attach_filesystem 时使用" }
+        mount_path:     { type: string, nullable: true, description: "attach_filesystem 时必填；Container/GPU Container 的 attach_volume 时必填；VM attach_volume 仅接入块设备，不要求 guest 挂载路径。" }
         read_only:      { type: boolean, nullable: true, description: "挂载资源时使用" }
         replicas:       { type: integer, minimum: 1, nullable: true, description: "scale 时使用" }
         image_id:       { type: string, nullable: true, description: "update_image 时使用" }
@@ -1885,6 +2148,7 @@ components:
       type: object
       properties:
         protocol: { type: string, enum: [console, vnc, novnc, serial], default: "vnc" }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "可选；旧客户端省略时 Gateway 仅为本次 HTTP 请求生成内部键，不承诺跨 HTTP 重试重放。" }
 
     InstanceConsoleSession:
       type: object
@@ -2387,6 +2651,17 @@ components:
         items: { type: array, items: { $ref: '#/components/schemas/StorageFilesystem' } }
         total: { type: integer }
         next_cursor: { type: string, nullable: true }
+
+    StorageConsumerInfo:
+      type: object
+      description: "存储资源消费者：引用该存储资源的活跃实例"
+      required: [instance_id, instance_name, kind, state]
+      properties:
+        instance_id:   { type: string }
+        instance_name: { type: string }
+        kind:          { type: string, enum: [container, vm, batch_job, sandbox] }
+        state:         { type: string, description: "实例状态（provisioning/running 等）" }
+        mount_path:    { type: string, nullable: true, description: "挂载点，来自实例 storage_attachments" }
 
     StorageObjectListResponse:
       type: object
@@ -3536,6 +3811,7 @@ components:
         gpu_spec:            { type: string, nullable: true, description: "整卡规格标签值，从 ani.kubercloud.io/gpu-spec 读取" }
         gpu_sharing_spec:    { type: string, nullable: true, description: "vGPU 共享规格标签值，从 ani.kubercloud.io/gpu-sharing-spec 读取" }
         gpu_sharing_policy:  { type: string, nullable: true, description: "vGPU 共享策略标签值，从 ani.kubercloud.io/gpu-sharing-policy 读取" }
+        shares:              { type: integer, minimum: 1, description: "该记录所属物理卡的切分份数；1 表示整卡，vgpu 卡为切分份数（2/4/8）。数据源为 volcano.sh/node-vgpu-register 注解（回退用 volcano.sh/vgpu-number allocatable 推导）" }
 
     GPUInventoryListResponse:
       type: object
@@ -3770,6 +4046,30 @@ components:
       properties:
         status: { type: string, enum: [maintenance, idle], description: "目标状态：maintenance=维护中，idle=空闲" }
 
+    # ── 集群切分 Schemas（GPU-PARTITION-A 新增）────────────────────────────────
+
+    GPUPartitionCreateRequest:
+      type: object
+      description: |
+        集群 GPU 等分切分请求。对集群内所有空闲整卡节点统一生效（跨型号），
+        每份显存 = 物理卡显存 / shares，由后端按节点实际显存派生，不在请求中指定。
+      required: [shares]
+      properties:
+        shares:
+          type: integer
+          enum: [2, 4, 8]
+          description: "等分份数：2=half，4=quarter，8=eighth"
+
+    GPUPartitionTaskAccepted:
+      type: object
+      description: "切分异步任务受理响应；通过 GET /tasks/{task_id} 轮询直至 completed/failed"
+      required: [task_id, task_type, status, progress_pct]
+      properties:
+        task_id:      { type: string, format: uuid }
+        task_type:    { type: string, description: "固定为 gpu_partition" }
+        status:       { type: string, enum: [running], description: "受理后初始状态" }
+        progress_pct: { type: integer, minimum: 0, maximum: 100 }
+
     # ── 配额自查 Schemas（SPEC §4.3 新增）────────────────────────────────────────
 
     QuotaListResult:
@@ -3822,156 +4122,6 @@ components:
         next_cursor: { type: string, nullable: true }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
-
-    # ── 邮件通知（BOSS 平台级 SMTP 发信通道、收件人、事件订阅、测试发送）──────────────
-    EmailSmtpConfigResponse:
-      type: object
-      description: "SMTP 发信通道配置响应；password / auth_code 明文永不回显"
-      required: [configured]
-      properties:
-        configured:
-          type: boolean
-          description: "是否已配置（false = 空态，其他字段可省略）"
-        smtp_host:    { type: string }
-        smtp_port:    { type: integer, minimum: 1, maximum: 65535 }
-        encryption:   { type: string, enum: [none, starttls, ssl] }
-        from_address: { type: string, format: email }
-        username:     { type: string }
-        has_password:
-          type: boolean
-          description: "是否已设置 SMTP 登录密码（明文不回显）"
-        has_auth_code:
-          type: boolean
-          description: "是否已设置 SMTP 授权码（明文不回显）；与 password 独立保存，不互斥"
-        created_at:  { type: string, format: date-time }
-        updated_at:  { type: string, format: date-time }
-
-    PutEmailSmtpConfigRequest:
-      type: object
-      description: "保存 SMTP 发信通道配置；password 与 auth_code 独立保存、独立清除，服务端不强制二选一"
-      required: [smtp_host, smtp_port, encryption, from_address, username]
-      properties:
-        smtp_host:    { type: string, minLength: 1 }
-        smtp_port:    { type: integer, minimum: 1, maximum: 65535 }
-        encryption:   { type: string, enum: [none, starttls, ssl] }
-        from_address: { type: string, format: email }
-        username:     { type: string }
-        password:
-          type: string
-          format: password
-          description: |
-            SMTP 登录密码（企业邮箱场景）。
-            - 省略或 null：不修改已有密码
-            - 空字符串 ""：清除已有密码
-            - 非空字符串：加密后覆盖
-            明文永不回显；与 auth_code 独立保存，不互斥。
-        auth_code:
-          type: string
-          format: password
-          description: |
-            SMTP 授权码（QQ/163/Gmail 等国内邮箱服务商 SMTP 授权登录）。
-            - 省略或 null：不修改已有授权码
-            - 空字符串 ""：清除已有授权码
-            - 非空字符串：加密后覆盖
-            明文永不回显；与 password 独立保存，不互斥。
-            发送邮件时若 auth_code 已设置则优先使用 auth_code，否则使用 password。
-      additionalProperties: false
-
-    EmailRecipient:
-      type: object
-      description: "邮件收件人"
-      required: [id, email, enabled, created_at, updated_at]
-      properties:
-        id:         { type: string, format: uuid }
-        email:      { type: string, format: email }
-        label:      { type: string, nullable: true }
-        enabled:    { type: boolean }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-
-    EmailRecipientListResponse:
-      type: object
-      description: "收件人列表"
-      required: [items, total]
-      properties:
-        items: { type: array, items: { $ref: '#/components/schemas/EmailRecipient' } }
-        total: { type: integer }
-
-    CreateEmailRecipientRequest:
-      type: object
-      description: "新增收件人"
-      required: [email]
-      properties:
-        email: { type: string, format: email }
-        label: { type: string }
-      additionalProperties: false
-
-    UpdateEmailRecipientRequest:
-      type: object
-      description: "更新收件人（邮箱地址、备注、启停）"
-      properties:
-        email:   { type: string, format: email }
-        label:   { type: string, nullable: true }
-        enabled: { type: boolean }
-      additionalProperties: false
-
-    EmailSubscription:
-      type: object
-      description: "邮件事件订阅"
-      required: [event_type, description, enabled, updated_at]
-      properties:
-        event_type:
-          type: string
-          enum:
-            - platform_alert_p0
-            - platform_alert_p1
-            - incident_created
-            - incident_escalated
-            - platform_task_failed
-        description: { type: string }
-        enabled:    { type: boolean }
-        updated_at: { type: string, format: date-time }
-
-    EmailSubscriptionListResponse:
-      type: object
-      description: "订阅列表（首期固定 5 行）"
-      required: [items, total]
-      properties:
-        items: { type: array, items: { $ref: '#/components/schemas/EmailSubscription' } }
-        total: { type: integer }
-
-    PutEmailSubscriptionsRequest:
-      type: object
-      description: "批量保存邮件事件订阅"
-      required: [subscriptions]
-      properties:
-        subscriptions:
-          type: array
-          minItems: 1
-          items:
-            type: object
-            required: [event_type, enabled]
-            properties:
-              event_type:
-                type: string
-                enum:
-                  - platform_alert_p0
-                  - platform_alert_p1
-                  - incident_created
-                  - incident_escalated
-                  - platform_task_failed
-              enabled: { type: boolean }
-      additionalProperties: false
-
-    SendTestEmailResponse:
-      type: object
-      description: "测试发送结果"
-      required: [success, message, request_id]
-      properties:
-        success:    { type: boolean }
-        message:    { type: string, description: "成功或失败的可读信息" }
-        request_id: { type: string, description: "请求 ID（用于排障）" }
-        sent_at:    { type: string, format: date-time, nullable: true }
 
     # ── 配额管理（Core API v1，平台级配额管理）────────────────────────────────
     QuotaCreateRequest:
@@ -4038,6 +4188,9 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/QuotaItem' }
+        gpu_reservation:
+          $ref: '#/components/schemas/ReservationView'
+          description: "GPU 预留视图（仅查询类端点返回）；未设置预留时 allocated_gpu_count=0，available 可能为负"
 
     QuotaItem:
       type: object
@@ -4048,6 +4201,7 @@ components:
         total:         { type: integer, format: int64, description: "配额上限" }
         used:          { type: integer, format: int64, description: "已实扣（已 Confirm）" }
         reserved:      { type: integer, format: int64, description: "已预占（已 Try 未 Confirm/Cancel）" }
+        available:     { type: integer, format: int64, description: "可创建 = total - used - reserved" }
         tightened:     { type: boolean, description: "PUT 缩容自动收紧标记（请求 total<used+reserved 时收紧为 used+reserved，置 true）；GET 响应中为零值 false" }
         unit:          { type: string, description: "单位（来自 resource_quota_meta，GET 时返回）" }
         display_name:  { type: string, description: "展示名称（来自 resource_quota_meta，GET 时返回）" }
@@ -4083,16 +4237,112 @@ components:
 
     Tenant:
       type: object
-      description: "租户最小视图（绑定配额套餐所需：status / plan_id）"
+      description: >
+        租户视图。getTenant 在最小字段基础上 additive 扩展 contact_email / frozen_at / disabled_at /
+        user_count / admin_count / auth（tenant_auth）；列表项使用 TenantListItem。
       required: [id, name, display_name, status, plan_id, created_at, updated_at]
       properties:
-        id:           { type: string, format: uuid, description: "租户 ID" }
-        name:         { type: string, description: "租户标识" }
-        display_name: { type: string, description: "展示名" }
-        status:       { type: string, enum: [active, frozen, disabled], description: "租户状态" }
-        plan_id:      { type: string, format: uuid, description: "当前绑定的配额套餐 ID" }
+        id:             { type: string, format: uuid, description: "租户 ID" }
+        name:           { type: string, description: "租户标识" }
+        display_name:   { type: string, description: "展示名" }
+        status:         { type: string, enum: [active, frozen, disabled], description: "租户状态" }
+        plan_id:        { type: string, format: uuid, description: "当前绑定的配额套餐 ID" }
+        contact_email:  { type: string, format: email, nullable: true, description: "联系邮箱（getTenant 扩展）" }
+        frozen_at:      { type: string, format: date-time, nullable: true, description: "冻结时间（status=frozen 时有值）" }
+        disabled_at:    { type: string, format: date-time, nullable: true, description: "禁用时间（status=disabled 时有值）" }
+        user_count:     { type: integer, format: int64, description: "租户成员数（getTenant 计算列）" }
+        admin_count:    { type: integer, format: int64, description: "tenant-admin 角色成员数（getTenant / listTenants 计算列）" }
+        auth:           { $ref: '#/components/schemas/TenantAuthSummary', description: "tenant_auth 摘要：仅 sso_enabled / mfa_required（getTenant 连查；缺行时双 false）" }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
+
+    TenantCreateRequest:
+      type: object
+      description: "创建租户请求（POST /admin/tenants）；事务内建 tenants + tenant_auth + users + user_roles + tenant_lifecycle"
+      required: [name, display_name, email, plan_id, admin_email, admin_name, admin_password_hash]
+      properties:
+        name:                 { type: string, minLength: 3, maxLength: 40, pattern: '^[a-zA-Z0-9-]{3,40}$', description: "租户标识（大小写字母/数字/连字符）；活动租户内唯一" }
+        display_name:         { type: string, minLength: 1, maxLength: 128 }
+        email:                { type: string, format: email, description: "租户联系邮箱（落库 tenants.contact_email）" }
+        plan_id:              { type: string, format: uuid, description: "初始绑定套餐 ID" }
+        admin_email:          { type: string, format: email, description: "首位管理员邮箱" }
+        admin_name:           { type: string, minLength: 1, maxLength: 128, description: "首位管理员显示名" }
+        admin_password_hash:  { type: string, description: "首位管理员密码 bcrypt 哈希（tenant-service 侧生成，Core 不接触明文）" }
+
+    TenantListItem:
+      type: object
+      description: "租户列表项（GET /admin/tenants）"
+      required: [id, name, display_name, status, plan_id, admin_count, created_at]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        display_name: { type: string }
+        status:       { type: string, enum: [active, frozen, disabled] }
+        plan_id:      { type: string, format: uuid }
+        admin_count:  { type: integer, format: int64, description: "tenant-admin 角色成员数（LATERAL 连表统计）" }
         created_at:   { type: string, format: date-time }
+
+    TenantListResponse:
+      type: object
+      description: "租户列表（游标分页；created_at DESC, id DESC）"
+      required: [items, total, next_cursor]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantListItem' } }
+        total:       { type: integer, format: int64, description: "满足筛选条件的总条数（用于前端分页）" }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多" }
+
+    TenantUpdateRequest:
+      type: object
+      description: "更新租户基本信息（PUT /admin/tenants/{tenant_id}）；不可改 name / status"
+      properties:
+        display_name:  { type: string, minLength: 1, maxLength: 128, description: "未传表示不更新" }
+        contact_email: { type: string, format: email, description: "未传表示不更新" }
+
+    TenantAuthSummary:
+      type: object
+      description: "getTenant 内嵌的 auth 摘要（仅开关；完整配置见 TenantAuthConfig）"
+      required: [sso_enabled, mfa_required]
+      properties:
+        sso_enabled:  { type: boolean, description: "是否启用 SSO" }
+        mfa_required: { type: boolean, description: "租户级 MFA 强制开关" }
+
+    TenantAuthConfig:
+      type: object
+      description: "租户认证配置（tenant_auth 表）"
+      required: [sso_enabled, mfa_required, updated_at]
+      properties:
+        sso_enabled:  { type: boolean, description: "是否启用 SSO" }
+        provider:     { type: string, nullable: true, description: "SSO 提供商标识；未配置时为 null" }
+        mfa_required: { type: boolean, description: "租户级 MFA 强制开关" }
         updated_at:   { type: string, format: date-time }
+
+    TenantAuthUpdateRequest:
+      type: object
+      description: "更新租户认证配置（PUT /admin/tenants/{tenant_id}/auth）"
+      properties:
+        sso_enabled:  { type: boolean, description: "未传表示不更新" }
+        provider:     { type: string, nullable: true, description: "未传或 null=不更新；空串=清空" }
+        mfa_required: { type: boolean, description: "未传表示不更新" }
+
+    TenantLifecycleEntry:
+      type: object
+      description: "租户生命周期记录（tenant_lifecycle 表）"
+      required: [id, action, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        action:     { type: string, enum: [create, freeze, unfreeze, disable] }
+        reason:     { type: string, nullable: true, description: "操作原因（预留，当前多为 null）" }
+        user_id:    { type: string, format: uuid, nullable: true, description: "触发人（平台用户）" }
+        request_id: { type: string, nullable: true, description: "全链路追踪 ID" }
+        created_at: { type: string, format: date-time }
+
+    TenantLifecycleListResponse:
+      type: object
+      description: "租户生命周期列表（游标分页）"
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantLifecycleEntry' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多" }
 
     TenantPlanUpdateRequest:
       type: object
@@ -4445,6 +4695,11 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     GPUTypeNotInNodes:
       description: GPU 型号不存在于集群节点标签中（code=GPU_TYPE_NOT_IN_NODES）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NoIdleWholecardGPUs:
+      description: 集群内没有可切分的空闲整卡节点（code=NO_IDLE_WHOLECARD_GPUS）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -5122,6 +5377,15 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+        "500":
+          description: Session Gateway 返回未预期错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /instances/{instance_id}/logs:
     get:
@@ -5143,6 +5407,48 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+
+  /instances/{instance_id}/logs/stream:
+    get:
+      operationId: streamInstanceLogs
+      summary: 实例日志 SSE 流式输出
+      description: |
+        SSE 流式输出实例日志：首屏回放最近 limit 条历史日志（时间正序），
+        然后持续增量推送新日志。每条日志通过 event: log 帧推送，
+        错误通过 event: error 帧推送，结束通过 event: done 帧推送。
+        连接时长上限 10 分钟，到达后发 done{reason:"timeout"} 并关闭。
+        预流错误（401/404/400）返回普通 JSON，不进入 SSE 流。
+      tags: [Instances]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-ani-rbac-scope: "scope:instances:read"
+      x-ani-authz:
+        version: v1
+        resource: instances
+        action: read
+        boundary: tenant
+        principal_kinds: [user, api_key]
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: level,             in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+        - { name: limit,             in: query, schema: { type: integer, default: 1000, minimum: 1, maximum: 1000 } }
+        - { name: interval_seconds,  in: query, schema: { type: integer, default: 2, minimum: 1, maximum: 30 } }
+      responses:
+        "200":
+          description: SSE 日志流
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503":
+          description: 日志流未配置（非 loki profile）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /instances/{instance_id}/events:
     get:
@@ -5207,6 +5513,15 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+        "500":
+          description: Session Gateway 返回未预期错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /instances/{instance_id}/security-events:
     get:
@@ -6137,6 +6452,7 @@ paths:
       parameters:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户活跃实例（pending/provisioning/starting/running/stopping）的 storage_attachments 引用" }
       responses:
         "200":
           description: 块存储卷列表
@@ -6440,6 +6756,7 @@ paths:
       parameters:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户 provisioning/running 状态实例的 storage_attachments 引用" }
       responses:
         "200":
           description: 文件存储列表
@@ -7673,13 +7990,10 @@ paths:
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      # 双域资源：BOSS 提交 gpu_partition 等集群级异步操作后需用 platform token
+      # 轮询任务结果，tenant token 轮询本租户 instance.* 任务；handler 按 token
+      # 上下文 tenant_id 过滤，无跨租户泄露。V2 boundary 只支持单域，故走 legacy。
       x-ani-rbac-scope: "scope:tasks:read"
-      x-ani-authz:
-        version: v1
-        resource: tasks
-        action: read
-        boundary: tenant
-        principal_kinds: [user, api_key]
       parameters:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
         - { name: cursor, in: query, required: false, schema: { type: string } }
@@ -7711,13 +8025,9 @@ paths:
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      # 双域资源：同 GET /tasks；BOSS 用 platform token 轮询 gpu_partition 任务，
+      # tenant 轮询本租户任务。V2 boundary 只支持单域，故走 legacy。
       x-ani-rbac-scope: "scope:tasks:read"
-      x-ani-authz:
-        version: v1
-        resource: tasks
-        action: read
-        boundary: tenant
-        principal_kinds: [user, api_key]
       parameters:
         - { name: task_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -7732,6 +8042,185 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   # ── 可观测性 ────────────────────────────────────────────────────────────────
+  /platform/services/health:
+    get:
+      operationId: getPlatformServiceHealth
+      summary: 查询 ANI 服务监控可达性
+      description: |
+        返回固定七个 ANI 服务的 Prometheus scrape reachability。该响应仅覆盖 ANI 服务子集，
+        不表示全平台健康、业务依赖健康或流量就绪。Prometheus 不可用、响应非法或身份连接契约失败时返回 503，
+        不把数据源失败伪装为七个 unknown。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: platform
+        principal_kinds: [user, service]
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: ANI 服务 Prometheus 抓取可达性
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformServiceHealthResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /platform/components:
+    get:
+      operationId: getPlatformComponents
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: platform
+        principal_kinds: [user, service]
+      summary: 查询平台组件运行状态
+      description: |
+        按静态注册表返回平台组件的只读运行状态，分组为 service / dependency / platform。
+        组件部署状态读取 Kubernetes 工作负载对象（Deployment/StatefulSet/DaemonSet 的副本与 conditions）；
+        service 组额外融合 Prometheus 抓取可达性（scrape_status，语义同 /platform/services/health，
+        不表示业务健康）。单源失败不阻塞 200：缺失数据降级为 unknown 并在 reason 说明。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: 平台组件运行状态聚合
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformComponentStatusResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /platform/components/{component_name}/metrics:
+    get:
+      operationId: getPlatformComponentMetrics
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: platform
+        principal_kinds: [user, service]
+      summary: 查询单个平台组件资源指标快照
+      description: |
+        按组件对象名（静态注册表）返回资源指标快照：CPU 核数（5m rate）、
+        内存用量/上限（MiB）、网络收发速率（B/s），Prometheus cAdvisor 指标按
+        namespace + pod 前缀正则聚合。单源失败不阻塞 200：缺失字段为 null。
+        组件级 P99/错误率/QPS 等业务指标不在本接口返回（产品决策 2026-09-07：
+        组件状态仅提供资源口径与日志下钻，业务指标列不做）。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: component_name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 组件资源指标快照
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformComponentMetrics' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404":
+          description: 组件不在平台注册表中
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: 指标 provider 未配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /platform/components/{component_name}/logs:
+    get:
+      operationId: listPlatformComponentLogs
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: platform
+        principal_kinds: [user, service]
+      summary: 查询单个平台组件日志列表
+      description: |
+        按组件对象名查询 Loki 持久化日志（namespace + pod 前缀正则过滤），
+        backward 方向返回最近 limit 条（时间倒序），cursor 往前翻页。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: component_name, in: path, required: true, schema: { type: string } }
+        - { name: limit,  in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: level,  in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+      responses:
+        "200":
+          description: 组件日志列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformComponentLogListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404":
+          description: 组件不在平台注册表中
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: 日志 provider 未配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /platform/components/{component_name}/logs/stream:
+    get:
+      operationId: streamPlatformComponentLogs
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: platform
+        principal_kinds: [user, service]
+      summary: 平台组件日志 SSE 流式输出
+      description: |
+        SSE 流式输出平台组件日志：首屏回放最近 limit 条历史日志（时间正序），
+        然后持续增量推送新日志。event: log / error / done 帧语义与
+        /instances/{instance_id}/logs/stream 一致。连接时长上限 10 分钟。
+        预流错误（401/403/404/400）返回普通 JSON，不进入 SSE 流。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: component_name, in: path, required: true, schema: { type: string } }
+        - { name: level,             in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+        - { name: limit,             in: query, schema: { type: integer, default: 1000, minimum: 1, maximum: 1000 } }
+        - { name: interval_seconds,  in: query, schema: { type: integer, default: 2, minimum: 1, maximum: 30 } }
+      responses:
+        "200":
+          description: SSE 日志流
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404":
+          description: 组件不在平台注册表中
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: 日志流未配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /observability/query:
     get:
       operationId: queryObservability
@@ -7769,6 +8258,42 @@ paths:
       responses:
         "200":
           description: PromQL 区间查询结果（matrix）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservabilityRangeQueryResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /observability/resource_trend:
+    get:
+      operationId: queryResourceTrendObservability
+      summary: 租户级资源使用率趋势
+      description: |
+        按当前登录租户视角聚合返回 gpu/cpu/memory 资源使用率趋势（单位 %，0-100）。
+        tenant_id 全部从 JWT 提取，后端据此生成 namespace="ani-tenant-<id>" 的聚合 PromQL，
+        天然租户隔离；不接收/不暴露 query PromQL。返回结构与 query_range 一致（matrix），
+        前端复用既有出图逻辑。三条曲线各用一次本请求（一次一个 metric）。
+      tags: [Observability]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-ani-rbac-scope: "scope:observability:read"
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: tenant
+        principal_kinds: [user, api_key]
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [gpu, cpu, memory] } }
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: step, in: query, required: true, schema: { type: string, description: "采样步长，Go duration 正数，如 15s / 30s / 1m；0/负 → 400" } }
+        - { name: timeout, in: query, required: false, schema: { type: string, default: 30s } }
+      responses:
+        "200":
+          description: 租户资源使用率趋势（matrix），value ∈ 0-100（%）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ObservabilityRangeQueryResponse' }
@@ -7938,6 +8463,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/MeteringUsageResponse'
         "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /platform/capacity:
+    get:
+      operationId: getPlatformCapacity
+      x-ani-rbac-scope: "scope:capacity:read"
+      x-ani-authz:
+        version: v1
+        resource: capacity
+        action: get
+        boundary: platform
+        principal_kinds: [user]
+      summary: 查询平台容量态势汇总
+      description: |
+        平台级（跨租户）只读容量汇总视图。整平台作为 1 个默认区域返回，
+        数据从真实集群计算（GPU 节点清单 + 跨租户 Running GPU Pod + 租户列表）。
+        任一数据源失败不阻塞 200：缺失字段降级为 0/空，
+        dev_profile.real_provider=false + reason 记录降级原因。
+      tags: [PlatformCapacity]
+      responses:
+        "200":
+          description: 平台容量态势汇总
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformCapacityResponse'
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
@@ -8586,6 +9139,47 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/DeviceNotFound' }
 
+  # ── GPU 集群切分（GPU-PARTITION-A，BOSS 专属异步操作）─────────────────────────
+  /gpu-inventory/gpu-partitions:
+    post:
+      operationId: createGPUPartition
+      summary: 集群 GPU 等分切分
+      description: |
+        对集群内全部空闲整卡节点做统一等分切分（跨型号生效，异步任务）。
+        自动完成：更新节点级 volcano-vgpu-node-config 的 devicesplitcount、
+        重启节点 volcano vGPU device plugin pod 触发重新注册、打 vGPU 节点标签
+        （gpu-mode/gpu-sharing-policy/gpu-sharing-spec，按各节点卡型实际显存派生）
+        并清除整卡 gpu-spec 标签。
+        节点级判定：存在持有 GPU 资源 Pod（nvidia.com/gpu>0 或
+        volcano.sh/vgpu-number>0）的节点整体跳过，跳过明细记录在任务 result 中。
+        集群内没有可切分的空闲整卡节点时返回 422。
+        本操作不创建 GPUSpec；切分完成后通过 POST /gpu-specs 单独创建规格
+        （mb_per_share 在创建规格时选择）。仅支持 2/4/8 等分；整卡回退暂不提供。
+      tags: [GPUInventory]
+      x-ani-rbac-scope: "scope:gpu-inventory:write"
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "幂等键，防止重复提交" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GPUPartitionCreateRequest' }
+      responses:
+        "202":
+          description: 切分任务已受理
+          headers:
+            Location:
+              description: 任务轮询地址（GET /api/v1/tasks/{task_id}）
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GPUPartitionTaskAccepted' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/NoIdleWholecardGPUs' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
   # ── GPU 规格（Core API v1，只读选择契约）──────────────────────────────────────
   /gpu-specs:
     get:
@@ -8812,197 +9406,6 @@ paths:
               schema: { $ref: '#/components/schemas/SandboxTemplateListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-
-  # ── 邮件通知（BOSS 平台级 SMTP 发信通道、收件人、事件订阅、测试发送）──────────────
-  /notifications/email/smtp:
-    get:
-      operationId: getEmailSmtpConfig
-      summary: 获取邮件 SMTP 发信通道配置
-      description: |
-        返回平台级 SMTP 发信通道配置。
-        - configured=false 表示尚未配置（空态），其他字段可省略。
-        - configured=true 时返回完整字段；password / auth_code 明文永不回显，
-          仅返回 has_password / has_auth_code 布尔位。
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:read"
-      responses:
-        "200":
-          description: SMTP 配置（可能为空态）
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EmailSmtpConfigResponse' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-    put:
-      operationId: putEmailSmtpConfig
-      summary: 保存邮件 SMTP 发信通道配置
-      description: |
-        保存平台级 SMTP 发信通道配置。
-        password 与 auth_code 独立保存、独立清除，服务端不强制二选一：
-        - 省略或 null：不修改已有值
-        - 空字符串 ""：清除已有值
-        - 非空字符串：加密后覆盖
-        发送邮件时若 auth_code 已设置则优先使用 auth_code，否则使用 password。
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:write"
-      parameters:
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid }, description: "幂等键" }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/PutEmailSmtpConfigRequest' }
-      responses:
-        "200":
-          description: 配置已保存
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EmailSmtpConfigResponse' }
-        "400": { $ref: '#/components/responses/BadRequest' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-
-  /notifications/email/recipients:
-    get:
-      operationId: listEmailRecipients
-      summary: 列出邮件收件人
-      description: 返回平台级全局收件人列表；所有已开启订阅的事件共用此列表。
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:read"
-      responses:
-        "200":
-          description: 收件人列表
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EmailRecipientListResponse' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-    post:
-      operationId: createEmailRecipient
-      summary: 新增收件人
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:write"
-      parameters:
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateEmailRecipientRequest' }
-      responses:
-        "201":
-          description: 收件人已创建
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EmailRecipient' }
-        "400": { $ref: '#/components/responses/BadRequest' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "409": { $ref: '#/components/responses/Conflict' }
-
-  /notifications/email/recipients/{recipient_id}:
-    patch:
-      operationId: updateEmailRecipient
-      summary: 更新收件人（邮箱地址、备注、启停）
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:write"
-      parameters:
-        - { name: recipient_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/UpdateEmailRecipientRequest' }
-      responses:
-        "200":
-          description: 收件人已更新
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EmailRecipient' }
-        "400": { $ref: '#/components/responses/BadRequest' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
-    delete:
-      operationId: deleteEmailRecipient
-      summary: 删除收件人
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:write"
-      parameters:
-        - { name: recipient_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
-      responses:
-        "204":
-          description: 收件人已删除
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
-
-  /notifications/email/subscriptions:
-    get:
-      operationId: listEmailSubscriptions
-      summary: 列出邮件事件订阅
-      description: 返回首期冻结的 5 个事件订阅开关状态。
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:read"
-      responses:
-        "200":
-          description: 订阅列表（固定 5 行）
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EmailSubscriptionListResponse' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-    put:
-      operationId: putEmailSubscriptions
-      summary: 批量保存邮件事件订阅
-      description: 批量更新事件订阅开关；非行内 PATCH，整体提交。
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:write"
-      parameters:
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/PutEmailSubscriptionsRequest' }
-      responses:
-        "200":
-          description: 订阅已保存
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EmailSubscriptionListResponse' }
-        "400": { $ref: '#/components/responses/BadRequest' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-
-  /notifications/email/test:
-    post:
-      operationId: sendTestEmail
-      summary: 发送测试邮件
-      description: |
-        向所有启用的收件人发送一封测试邮件，验证 SMTP 通道与收件人可用性。
-        前置条件：
-        - SMTP 通道已配置（configured=true）
-        - 至少一个启用中的收件人（enabled=true）
-        - password 或 auth_code 至少设置一个
-        不满足任一前置条件返回 422 PRECONDITION_FAILED。
-      tags: [Notifications]
-      x-ani-rbac-scope: "scope:notifications:write"
-      parameters:
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
-      responses:
-        "200":
-          description: 测试发送结果
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SendTestEmailResponse' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "422":
-          $ref: '#/components/responses/PreconditionFailed'
-          description: "前置条件不满足（SMTP 未配置 / 无启用收件人 / 无凭据）"
 
   # ── 配额管理（Core API v1，平台级配额管理，scope=platform）──────────────────
   /quotas/me:
@@ -9341,13 +9744,73 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /admin/tenants:
+    post:
+      operationId: createTenant
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: create
+        boundary: platform
+        principal_kinds: [user]
+      summary: 创建租户
+      description: |
+        事务内 INSERT tenants(status='active') + tenant_auth(默认值) + users + user_roles(tenant-admin)
+        + tenant_lifecycle('create')。name UNIQUE 冲突返回 409 TENANT_NAME_CONFLICT。
+        配额初始化由 tenant-service 在事务外调用 upsertTenantQuota。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantCreateRequest' }
+      responses:
+        "200":
+          description: 租户已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_NAME_CONFLICT" }
+    get:
+      operationId: listTenants
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      summary: 租户列表
+      description: |
+        游标分页（created_at DESC, id DESC）；支持 status / search（name 或 display_name ILIKE）过滤。
+        admin_count 由 LATERAL 连表统计 tenant-admin 角色成员数。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:read"
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: status, in: query, schema: { type: string, enum: [active, frozen, disabled] } }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 name 或 display_name" }
+      responses:
+        "200":
+          description: 租户列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /admin/tenants/{tenant_id}:
     get:
       operationId: getTenant
       summary: 查询租户（最小视图）
       description: |
-        平台侧查询租户最小字段（含 status / plan_id），供 Services 绑定配额套餐等场景调用。
-        不替代完整租户管理 API。
+        平台侧查询租户；在最小字段基础上 additive 返回 contact_email / frozen_at / disabled_at /
+        user_count / admin_count / auth（tenant_auth）。供 Services 绑定配额套餐与租户详情等场景调用。
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:read"
       parameters:
@@ -9358,6 +9821,206 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+    put:
+      operationId: updateTenant
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: update
+        boundary: platform
+        principal_kinds: [user]
+      summary: 更新租户基本信息
+      description: |
+        部分更新 display_name / contact_email；不可改 name / status。
+        disabled 或不存在均返回 404 TENANT_NOT_FOUND（WHERE status <> 'disabled'）。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantUpdateRequest' }
+      responses:
+        "200":
+          description: 更新后的租户视图
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+
+  /admin/tenants/{tenant_id}/freeze:
+    post:
+      operationId: freezeTenant
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: update
+        boundary: platform
+        principal_kinds: [user]
+      summary: 冻结租户
+      description: |
+        active → frozen；设置 frozen_at 并写入 tenant_lifecycle('freeze')。
+        非法状态返回 409 TENANT_STATE_INVALID。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户已冻结
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID" }
+
+  /admin/tenants/{tenant_id}/unfreeze:
+    post:
+      operationId: unfreezeTenant
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: update
+        boundary: platform
+        principal_kinds: [user]
+      summary: 解冻租户
+      description: |
+        frozen → active；清空 frozen_at 并写入 tenant_lifecycle('unfreeze')。
+        非法状态返回 409 TENANT_STATE_INVALID。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户已解冻
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID" }
+
+  /admin/tenants/{tenant_id}/disable:
+    post:
+      operationId: disableTenant
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: update
+        boundary: platform
+        principal_kinds: [user]
+      summary: 禁用租户
+      description: |
+        active/frozen → disabled（终态）；设置 disabled_at 并写入 tenant_lifecycle('disable')。
+        非法状态返回 409 TENANT_STATE_INVALID。运行中资源前置校验由 tenant-service 编排。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户已禁用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID" }
+
+  /admin/tenants/{tenant_id}/auth:
+    get:
+      operationId: getTenantAuth
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      summary: 查询租户认证配置
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户认证配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantAuthConfig' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+    put:
+      operationId: updateTenantAuth
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: update
+        boundary: platform
+        principal_kinds: [user]
+      summary: 更新租户认证配置
+      description: |
+        部分更新 sso_enabled / provider / mfa_required。Services 层 SSO/MFA 两个 PUT 均映射到此端点。
+        disabled 终态返回 409 TENANT_STATE_INVALID；不存在返回 404。SSO provider 联动校验由 Services UpdateTenantSso 负责。
+        provider：未传或 null=不更新；空串=清空。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantAuthUpdateRequest' }
+      responses:
+        "200":
+          description: 更新后的认证配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantAuthConfig' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID（disabled 不可改 Auth）" }
+
+  /admin/tenants/{tenant_id}/lifecycle:
+    get:
+      operationId: listTenantLifecycle
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      summary: 查询租户生命周期记录
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: action, in: query, schema: { type: string, enum: [create, freeze, unfreeze, disable] } }
+      responses:
+        "200":
+          description: 生命周期记录列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantLifecycleListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/TenantNotFound' }
@@ -9857,7 +10520,8 @@ tags:
   - { name: Branding,       description: "平台品牌化配置" }
   - { name: Tasks,          description: "异步任务查询" }
   - { name: QuotaAdmin,     description: "平台级配额管理（租户配额 CRUD + 配额元数据）" }
-  - { name: Tenants,        description: "平台级租户最小读写（status / plan_id / 套餐绑定租户计数）" }
+  - { name: Tenants,        description: "平台级租户管理（创建/列表/详情/状态机/认证/生命周期 + 套餐绑定租户计数）" }
   - { name: PlatformUsers,  description: "平台运营账号（tenant_id 为空的 users / user_roles / roles）" }
   - { name: TenantUsers,    description: "平台级租户用户与角色（users / user_roles / roles）" }
   - { name: GPUSpec,        description: "GPU 规格目录管理（创建/删除/可用性查询）" }
+  - { name: PlatformCapacity, description: "平台容量态势汇总（整平台 = 1 个默认区域，只读）" }

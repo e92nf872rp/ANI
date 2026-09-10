@@ -37,7 +37,17 @@ type LocalInstanceResourceResolver struct {
 	gpuSpecs      ports.GPUSpecService
 	registry      ports.ImageRegistry
 	secrets       ports.SecretService
+	instances     ports.WorkloadInstanceStore
 	imageVulnGate ImageVulnGateMode
+}
+
+// WithWorkloadStore attaches the tenant workload instance store used by the
+// conservative RWO volume occupancy precheck at instance create time. When
+// nil (default) the precheck is skipped and volume sharing remains gated by
+// the Kubernetes Multi-Attach controller.
+func (r *LocalInstanceResourceResolver) WithWorkloadStore(store ports.WorkloadInstanceStore) *LocalInstanceResourceResolver {
+	r.instances = store
+	return r
 }
 
 func NewLocalInstanceResourceResolver(network ports.NetworkService, storage ports.StorageService, gpuSpecServices ...ports.GPUSpecService) *LocalInstanceResourceResolver {
@@ -74,6 +84,8 @@ func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, reque
 			return ports.WorkloadResourceResolveResult{}, err
 		}
 		refs = append(refs, resolvedRefs...)
+	} else if hasExplicitInstanceNetworkReferences(spec.Network) {
+		return ports.WorkloadResourceResolveResult{}, fmt.Errorf("%w: instance network resolver is not configured", ports.ErrFailedPrecondition)
 	}
 	if r.storage != nil {
 		resolvedRefs, err := r.resolveStorage(ctx, request.TenantID, &spec)
@@ -131,7 +143,7 @@ func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, reque
 				secretIDs = append(secretIDs, secretRef)
 			}
 		}
-		resolvedRefs, err := r.resolveSecrets(ctx, request.TenantID, secretIDs)
+		resolvedRefs, err := r.resolveSecrets(ctx, request.TenantID, secretIDs, nil)
 		if err != nil {
 			return ports.WorkloadResourceResolveResult{}, err
 		}
@@ -143,13 +155,28 @@ func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, reque
 			spec.VM.PasswordSecret,
 			spec.VM.CloudInitSecret,
 		}
-		resolvedRefs, err := r.resolveSecrets(ctx, request.TenantID, secretIDs)
+		resolvedRefs, err := r.resolveSecrets(ctx, request.TenantID, secretIDs, map[string]struct{}{
+			spec.VM.PasswordSecret:  {},
+			spec.VM.CloudInitSecret: {},
+		})
 		if err != nil {
 			return ports.WorkloadResourceResolveResult{}, err
 		}
 		refs = append(refs, resolvedRefs...)
 	}
 	return ports.WorkloadResourceResolveResult{Spec: spec, ResourceRefs: refs}, nil
+}
+
+func hasExplicitInstanceNetworkReferences(network ports.WorkloadNetworkPolicy) bool {
+	if strings.TrimSpace(network.VPCID) != "" || strings.TrimSpace(network.SubnetID) != "" {
+		return true
+	}
+	for _, securityGroupID := range network.SecurityGroupIDs {
+		if strings.TrimSpace(securityGroupID) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateImagePurposeForInstanceKind(kind ports.WorkloadKind, image ports.RegistryImage) error {
@@ -297,6 +324,9 @@ func (r *LocalInstanceResourceResolver) resolveNetwork(ctx context.Context, tena
 			return nil, fmt.Errorf("%w: instance vpc %q is %s", ports.ErrConflict, spec.Network.VPCID, vpc.State)
 		}
 		refs = append(refs, "vpc/"+vpc.VPCID)
+		if strings.TrimSpace(spec.Network.SubnetID) == "" {
+			return nil, fmt.Errorf("%w: instance vpc %q requires an explicit subnet_id", ports.ErrFailedPrecondition, vpc.VPCID)
+		}
 	}
 	if strings.TrimSpace(spec.Network.SubnetID) != "" {
 		subnet, err := r.network.GetSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: tenantID, ResourceID: spec.Network.SubnetID})
@@ -305,6 +335,17 @@ func (r *LocalInstanceResourceResolver) resolveNetwork(ctx context.Context, tena
 		}
 		if subnet.State != ports.NetworkResourceAvailable {
 			return nil, fmt.Errorf("%w: instance subnet %q is %s", ports.ErrConflict, spec.Network.SubnetID, subnet.State)
+		}
+		if strings.TrimSpace(spec.Network.VPCID) == "" {
+			vpc, err := r.network.GetVPC(ctx, ports.NetworkResourceGetRequest{TenantID: tenantID, ResourceID: subnet.VPCID})
+			if err != nil {
+				return nil, fmt.Errorf("resolve instance vpc %q from subnet %q: %w", subnet.VPCID, subnet.SubnetID, err)
+			}
+			if vpc.State != ports.NetworkResourceAvailable {
+				return nil, fmt.Errorf("%w: instance vpc %q is %s", ports.ErrConflict, vpc.VPCID, vpc.State)
+			}
+			spec.Network.VPCID = vpc.VPCID
+			refs = append(refs, "vpc/"+vpc.VPCID)
 		}
 		if spec.Network.VPCID != "" && subnet.VPCID != spec.Network.VPCID {
 			return nil, fmt.Errorf("%w: instance subnet %q does not belong to vpc %q", ports.ErrConflict, subnet.SubnetID, spec.Network.VPCID)
@@ -350,6 +391,18 @@ func (r *LocalInstanceResourceResolver) resolveStorage(ctx context.Context, tena
 		if volume.State != ports.StorageResourceAvailable && volume.State != ports.StorageResourcePending {
 			return fmt.Errorf("%w: instance volume %q is %s", ports.ErrConflict, volumeID, volume.State)
 		}
+		// Conservative RWO occupancy precheck (INSTANCE-RWO-PRECHECK-B): a
+		// block volume already referenced by an active tenant instance is not
+		// attachable by a new one. Store failures fail open; the Kubernetes
+		// Multi-Attach controller stays the concurrency backstop.
+		if r.instances != nil {
+			consumers, err := ListStorageConsumers(ctx, r.instances, tenantID, "volume", volumeID)
+			if err == nil {
+				for _, consumer := range consumers {
+					return fmt.Errorf("%w: instance volume %q is occupied by instance %q (%s)", ports.ErrConflict, volumeID, consumer.InstanceID, consumer.State)
+				}
+			}
+		}
 		seenVolumes[volumeID] = struct{}{}
 		refs = append(refs, "volume/"+volume.VolumeID)
 		return nil
@@ -366,7 +419,12 @@ func (r *LocalInstanceResourceResolver) resolveStorage(ctx context.Context, tena
 		if err != nil {
 			return fmt.Errorf("resolve instance filesystem %q: %w", filesystemID, err)
 		}
-		if filesystem.State != ports.StorageResourceAvailable {
+		// WaitForFirstConsumer PVCs remain Pending until a consumer Pod mounts
+		// them. Mounting the filesystem is itself the first consumer for RWX
+		// PVCs, so Pending means the PVC intent exists and is attachable;
+		// Failed/Deleting/Deleted remain reject states. Without this allowance
+		// a WFFC filesystem can never be attached by any instance.
+		if filesystem.State != ports.StorageResourceAvailable && filesystem.State != ports.StorageResourcePending {
 			return fmt.Errorf("%w: instance filesystem %q is %s", ports.ErrConflict, filesystemID, filesystem.State)
 		}
 		seenFilesystems[filesystemID] = struct{}{}
@@ -451,7 +509,7 @@ func upsertResolvedStorageAttachment(items []ports.WorkloadStorageAttachment, ne
 	return append(items, next)
 }
 
-func (r *LocalInstanceResourceResolver) resolveSecrets(ctx context.Context, tenantID string, secretIDs []string) ([]string, error) {
+func (r *LocalInstanceResourceResolver) resolveSecrets(ctx context.Context, tenantID string, secretIDs []string, cloudInitSecretIDs map[string]struct{}) ([]string, error) {
 	refs := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, secretID := range secretIDs {
@@ -469,10 +527,22 @@ func (r *LocalInstanceResourceResolver) resolveSecrets(ctx context.Context, tena
 		if secret.State != "active" {
 			return nil, fmt.Errorf("%w: instance secret %q is %s", ports.ErrConflict, secretID, secret.State)
 		}
+		if _, isCloudInit := cloudInitSecretIDs[secretID]; isCloudInit && !secretHasKey(secret.Keys, "userdata") {
+			return nil, fmt.Errorf("%w: cloud-init secret %q must contain a %q key (value: #cloud-config)", ports.ErrConflict, secretID, "userdata")
+		}
 		seen[secretID] = struct{}{}
 		refs = append(refs, "secret/"+secret.SecretID)
 	}
 	return refs, nil
+}
+
+func secretHasKey(keys []string, want string) bool {
+	for _, k := range keys {
+		if k == want {
+			return true
+		}
+	}
+	return false
 }
 
 var _ ports.WorkloadInstanceResourceResolver = (*LocalInstanceResourceResolver)(nil)

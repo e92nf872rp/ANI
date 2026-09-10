@@ -12,6 +12,8 @@ var (
 	ErrPayloadTooLarge    = errors.New("capability payload is too large")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrTenantNotFound     = errors.New("tenant not found")
+	ErrTenantNameConflict = errors.New("tenant name conflict")
+	ErrTenantStateInvalid = errors.New("tenant state invalid")
 	ErrTenantPlanNotFound = errors.New("tenant plan not found")
 	ErrUnavailable        = errors.New("capability dependency is unavailable")
 

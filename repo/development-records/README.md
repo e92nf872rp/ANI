@@ -13,6 +13,106 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 平台组件状态与组件诊断（2026-09，分支 feat/component-status）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-COMPONENT-STATUS-A | BOSS 平台健康组件状态只读能力：OpenAPI 契约优先新增 4 端点——`GET /platform/components`（22 组件静态注册表按 service/dependency/platform 三组聚合，K8s REST 逐对象读状态/副本/版本，service 组融合 Prometheus `up`+`target_info` 身份契约 scrape_status，任一组件失败不阻塞 200，15s TTL 缓存）与组件诊断三接口 metrics（cAdvisor 资源快照，单源失败字段 null）/logs（Loki backward 倒序 + cursor 翻页）/logs/stream（SSE 完全复刻实例日志流语义）；ports + real/local 双 adapter + env 装配（COMPONENT_STATUS_PROVIDER / COMPONENT_DIAGNOSTICS_PROVIDER）+ gateway 路由与错误映射 + authz/Core SDK 生成物；新增单测 35 个全 PASS，门禁全绿；K8s 测试环境实测（镜像 dev-20260905-compdiag）列表/metrics/logs/SSE/401/404 全通过；2026-09-07 补充产品决策：原型 P99/错误率/依赖检查三列裁剪不做（契约 description 同步为产品边界声明），并完成镜像被覆盖后的恢复与回归实测（services/health 503 定位为并行会话重部署服务缺 target_info 埋点的环境漂移，与本批次无关） | platform-component-status-a.md |
+
+### ANI IAM 9 月 30 日前隔离（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| ANI-IAM-PRE930-CONTAINMENT | 基于 `804db51` 外科式移除 PR #145 提前进入当前发布轨道的 Direct P2 目标契约与 Gateway 集成，保留后续 VM/Tenant/KB/Observability 功能；恢复现行 Core v1 compatibility 和 Gateway authz 门禁，并纳入 required Actions。未部署、未切流；测试以 PR exact SHA 的 GitHub Actions 为准 | ANI-IAM-PRE930-CONTAINMENT.md |
+
+### 仓库范围清理（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| REPO-SCOPE-CLEANUP-A | 回滚 PR #60/#62/#68 的邮件通知契约与实现；移除已独立维护的 Console/BOSS 前端源码及 monorepo 构建、CI、CODEOWNERS wiring；本地不跑 CI，GitHub PR 验证待完成 | repo-scope-cleanup-a.md |
+
+### 沙箱模板镜像接入 + code-run 执行依赖（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-SANDBOX-TEMPLATE-IMAGE-A | 修复沙箱 code-run `PRECONDITION_FAILED: sandbox pod is not ready`：内置模板目录 `Image` 占位 `registry.local/ani/sandbox-*:dev` 在集群不可达导致走 `ImagePullBackOff`。两内置模板（`python-secure` 与 `cuda-notebook-secure`，后者临时以 python 镜像承接 code-run）默认镜像接入已验证可拉的复用镜像 `docker.changqingyun.cn/hub/library/python:3.12`（10.10.1.66 探针验证可拉、python3.12.10）；description 如实澄清。catalog 测试新增防回归断言（模板镜像必须以 `docker.changqingyun.cn/` 开头）；`go build` + `go test` + validate-architecture + `git diff --check` 通过。未 rollout 前线上不生效；存量占位镜像实例需重建；GPU/notebook 专用镜像与 live-gate 镜像注入待后续 | instance-sandbox-template-image-a.md |
+| INSTANCE-SANDBOX-CODERRUN-KUBECTL-A | 修复 code-run `exec: "kubectl": executable file not found in $PATH`：`KubernetesSandboxRuntime` 代码执行 shell-out 到 `kubectl exec`，而 gateway 镜像 `alpine:3.20` 未装 kubectl。在 `services/ani-gateway/Dockerfile` 运行镜像阶段 `wget` 安装 kubectl v1.36.0。live 验证（10.10.1.66，rollout `dev-20260907-kubectl-a`）：pod 内 `kubectl version` v1.36.0、in-cluster 认证 `kubectl get ns` 成功、`kubectl auth can-i create pods/exec`=yes、gateway SA 可 exec 进沙箱 Pod。code-run 仍需实例非 paused（replicas=0 时返回 `PRECONDITION_FAILED not ready`，属预期） | instance-sandbox-coderun-kubectl-a.md |
+
+### GPU 接口 platform scope 放行（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GATEWAY-GPU-PLATFORM-SCOPE-A | 修复 BOSS root（platform scope）访问 `/api/v1/gpu-specs*`、`/api/v1/gpu-inventory*` 报 403 `token scope not allowed for this path`：GPU 接口属 legacy policy 走 `scopeAllowedForPath` 末尾 tenant-only 默认。GPU 规格/清单是双域共享资源（Console tenant + BOSS platform），V2 `x-ani-authz` boundary 为域互斥单选无法表达，故按 `/svc/` 分支模式在 `scopeAllowedForPath` 放行 `platform\|\|tenant`，角色准入仍由 rbac.go CheckPermission 承担；auth_test.go 新增 10 用例。live 验证（10.10.1.66，rollout `dev-20260907-gpuscope-a`）：gpu-specs/availability/gpu-inventory/occupancy 全 200，负向对照 /instances 仍 403。部署插曲：滚动更新期间 PG max_connections=100 被 gateway 多 store 连接池打满致新 Pod CrashLoop，已 patch 滚动策略 maxUnavailable:1 解决（策略修改留在线上，连接池收敛待后续）。后续项：GPU 接口迁移 V2 authz（cluster boundary）+ availability 平台视角语义 | gateway-gpu-platform-scope-a.md |
+| GATEWAY-QUOTA-PLATFORM-SCOPE-A | 修复 BOSS `GET /api/v1/quotas?limit=100` 403（GPU 池页面租户下拉 + `/gpu-scheduling/queues` 同挂），并**封堵一个已存在的跨租户配额泄露**：`listQuotas` handler 不注入租户过滤、store 走 `WithPlatformTx` 绕过 RLS 返回全部租户行，而 `scopeAllowedForPath` 末尾默认放行 tenant，导致任何租户 token 可读全平台配额。修法与 GPU 相反——`/api/v1/quotas` **精确匹配仅 platform**（对齐 `/admin/*`），用精确匹配避免误伤 `/quotas/me`（租户自查走 `WithTenantTx` 受 RLS 约束，保持 tenant-only、platform 拒绝）；`/gpu-scheduling*` 并入 GPU 双放行分支（handler 自身按 tenant label 过滤，platform 只见平台默认队列，无泄露）。auth_test.go 新增 6 用例。live 验证（`dev-20260907-quotas-a`）：platform 下 /quotas 200（39 行 39 租户跨租户确认）、/quotas/me 403、gpu-specs/inventory/scheduling 200；tenant 下 /quotas 403（泄露已封堵）、/quotas/me 200、/gpu-specs 200 | gateway-quota-platform-scope-a.md |
+
+### GPU 接口鉴权暂时回退 V1 链路（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GATEWAY-GPU-V1-ROLLBACK-A | 生产 gateway 镜像回退致 BOSS GPU 接口 403 复现，且 main（PR #145）已将 v1.yaml 全量 V2 化、GPU 路径标单域 `scope: platform`，部署后 Console（tenant）将 403。V2 boundary 域互斥无法表达 GPU 双域共享，经产品确认**暂时回退 V1 链路**：v1.yaml 13 个 GPU 操作删除 `x-ani-authz` 且 classification `authorized→authenticated`（交叉校验要求两者一致），operation-registry.v1.json / zz_generated_target_operation_registry.go / zz_generated_core_policies.go 全链同步重生成（GPU 全部 `PolicySourceLegacy`），冻结计数 authenticated 9→22、authorized 278→265；`/quotas`+`/quotas/me` V2 定义与 V1 行为一致故保留；运行时 middleware 零改动（rebase 后已含双放行与 /quotas platform-only）。同期 `hotfix/network-store-read` rebase 到 origin/main（core-schema.d.ts 接受删除、auth.go/auth_test.go 保留 main V2 结构+完整双放行逻辑、修复 rebase 遗留冲突标记）。live 验证（ani-test2 隔离环境 10.10.1.66:30083，镜像 `test2-20260908-b`）：platform token GPU 三端点+/quotas 200、/quotas/me 403；tenant token GPU 三端点+/quotas/me+/instances 200、/quotas 403（泄露封堵保持）；tenant-a/admin Console 登录+核心接口 200。同期 `hotfix/network-store-read` rebase 到含 ANI-IAM-PRE930-CONTAINMENT 的最新 main：V2 target registry 基建（operation-registry.v1.json 等）与 GPU 接口 V2 注解已由 main 整体移除、回退终态由 main 承载，分支残余 delta 为批次记录与 auth-service runtimeadmin replace 构建修复；上述 main 既有红门禁已随隔离批次恢复绿，rebase 文档回归（README 租户列表小节/core.html 旧态）已修复；rebase 后 authz drift/路由覆盖/架构守卫/build/test 复验全绿。后续项：GPU 迁回 V2 前置 boundary 模型双域扩展（cluster） | gateway-gpu-v1-rollback-a.md |
+
+### 集群 GPU 等分切分（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GPU-PARTITION-A~D | BOSS 专属集群 GPU 等分切分：`POST /api/v1/gpu-inventory/gpu-partitions`（platform scope，幂等，2/4/8）对集群内全部空闲整卡节点统一切分；异步任务自动完成节点级 volcano-vgpu-node-config devicesplitcount 更新、重启 device plugin pod 触发 vGPU 重新注册、按各节点实际显存打 vGPU 标签并清除整卡 gpu-spec 标签；忙碌节点（持 GPU Pod）整体跳过记入 result；0 个可切节点 422。lazy-resume 防 gateway 重启悬挂（running 超阈值幂等重入）。不创建 GPUSpec，切分后由 POST /gpu-specs 单独建规格。**live gate passed（2026-09-09，ani-test2 10.10.1.66:30083，镜像 `test2-20260909-e`）**：202→completed/100、CM/relabel/注册证据齐、忙碌节点 node_busy 跳过、tenant 403；执行期间修复 apply goroutine 租户上下文 panic（`detachedTaskContext`）+ GET /tasks 两 op 转 legacy 双域；evidence `live-evidence/gpu-cluster-partition-live.json` | gpu-partition-cluster-split.md |
+
+### 实例列表孤儿 GPU 过滤（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-ORPHAN-GPU-FILTER-A | 修复 `GET /instances?kind=gpu_container` 混入非 GPU 实例：`discoverOrphanDeployments` 对带租户标签且不在 store 的 Deployment 无条件硬编码 `Kind=gpu_container` 生成孤儿记录（`GPUCount>0` 只控制 GPU 字段填充不控制生成），gateway 重启后所有非 GPU Deployment（nginx/sandbox/测试实例等）被当作 gpu_container 回显，列表端 kind 过滤因 orphan.Kind 恒为 gpu_container 而失效。修复：`obs.GPUCount<=0` 直接跳过不再生成记录；`observeOrphan` GPU 探测从仅 `nvidia.com/gpu*` 扩展为兼容 `volcano.sh/vgpu-number`（对齐既定"孤儿仅 GPU"约定）。新增 `TestListOrphanDiscoverySkipsNonGPUDeployments`；既有孤儿重试测试 fake 补 vgpu limits。live 验证（10.10.1.66，rollout `dev-20260907-orphan-a`）：tenant-a 命名空间 35 个 Deployment 中 18 个非 GPU 全部不再回显，3 条孤儿记录经集群核对均真实携带 `nvidia.com/gpu=1`。行为收紧说明：非 GPU 未入库实例重启后不再出现在实例列表，孤儿兜底定位收敛为 GPU 实例专用 | instance-orphan-gpu-filter-a.md |
+
+### RWO 卷占用保守预检（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-RWO-PRECHECK-B | RWO 卷占用保守预检（承接 USAGE-A，后端拦截落地）：resolver `resolveStorage` 对创建入口全部卷路径（spec.Storage/VM 系统盘/数据盘/container VolumeMounts）做占用检查（`WithWorkloadStore` 链式装配，nil 跳过）；`applyLifecycle` 在 `transition` 后计算 `volumeOccupancyConflict` 传入 `lifecyclePrecheck`，`attach_volume` 检查目标卷、`start/resume` 检查实例自身引用卷（`recordVolumeIDs` 汇总 Status.Storage + StorageAttachments，排除实例自身——覆盖"停机期间卷被接管后再启动"场景）；命中活跃消费者 409 `ErrConflict`，消息带占用实例 ID 与状态，operation `FailureReason=volume_occupied_by_active_instance`；文件系统（RWX）共享豁免；stopped/failed/deleted 不占用；store 读失败 fail-open，K8s Multi-Attach 兜底；deps.go + gateway instances.go 装配接线；restart 不预检（运行中自身持卷）。7 个单测（创建拦截/释放放行/RWX 豁免/start 拦截/start 放行/attach 拦截/attach 豁免）；未改 OpenAPI 契约无生成物变更；validate-architecture + openapi lint + gofmt + git diff --check 通过 | instance-rwo-precheck-b.md |
+
+### 存储占用标记与过滤（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-STORAGE-USAGE-A | 存储资源占用可见性（2026-09-04 范围决策：只做打标+过滤，后端拦截留 PRECHECK-B）：`/volumes`、`/filesystems` 列表与详情响应新增 `in_use`/`used_by`（恒输出 `[]` 不输出 null），list 支持 `?in_use=true|false` 过滤（非法值 400）；新增判定 helper `storage_consumers.go`（单资源 + 批量索引两形态，规则：attachments 引用 + 状态 ∈ {pending,provisioning,starting,running,stopping}，stopped/failed/deleted 释放；遍历全部 kind，每页一次扫描避免 N+1）；gateway `storageAPI` 注入 `WorkloadInstanceStore`（nil 安全降级）；OpenAPI additive（in_use 参数 + StorageConsumerInfo schema）+ core-schema.d.ts 重生成。6 个 router HTTP 测试 + 6 组 adapter 单测；openapi lint / validate-architecture / go build 通过。已知边界：孤儿 Deployment、legacy mount API 不参与判定；并发竞态由 K8s 兜底 | instance-storage-usage-a.md |
+
+### 七服务运行时观测与平台聚合 API（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| OBS-RUNTIME-P0 | 七个 canonical 服务统一内部 `/healthz`、`/readyz`、`/metrics`、OTel identity/`target_info`、单一 `ani-components` Pod discovery；Core OpenAPI-first 新增 `GET /platform/services/health`，四条固定 Prometheus 查询逐 target 判定 reachable/unreachable/unknown，并在数据源异常时 503 fail closed。L0～L2 与供应链门禁通过；L3 在 `kubernetes-admin@kubernetes` 的隔离 namespace `ani-service-observability-e2e-0cedae8-0904` 完成七服务 discovery、authz、up=0、missing/stale、Pod 删除自动恢复、Prometheus 故障与最终恢复，30 个新对象、0 个既有对象修改，随后 namespace 清理通过。BOSS/Console 前端因用户明确判定 ANI 前端已废弃而 `not_applicable`，只完成接口测试；不含 P1/L4/生产 rollout，不外推业务健康或 production ready | service-runtime-observability-p0.md |
+
+### 平台容量态势接口（2026-09，分支 feat/platform-capacity）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-CAPACITY-A | 平台容量态势只读汇总：OpenAPI 新增 `GET /platform/capacity`（operationId=getPlatformCapacity，`scope:capacity:read`，boundary=platform），整平台 = 1 个默认区域，只读不实现区域 CRUD；ports 新增 `PlatformCapacityService`；real adapter 组合 GPUInventory（ListNodeClasses 设备/zone/allocatable）+ KubernetesRESTClient（集群级存在性 label selector 统计跨租户 Running GPU Pod，每 Pod 占 1 设备，与 gpu-inventory occupancy 语义一致，in_use 超设备数截断保证 gpu_free ≥ 0）+ TenantService（可用租户数）；单源失败不阻塞 200，降级字段置 0/空 + `real_provider=false` + reason；Gateway runtime 按 `PLATFORM_CAPACITY_PROVIDER` 装配（kubernetes_rest 真实链路 / 空或 local 回退确定性 local 降级）；authz 注册表与 Core SDK 四语言 + 静态文档 + Console schema 生成物同步（64bc8ab + fae60b0）。真实环境实测（10.10.1.66，镜像 dev-20260903-platformcapacity）：平台 token 200 返回真实集群数据（gpu_total=11/gpu_free=3/nodes=3/tenant_count=22，real_provider=true），租户 token 403，无凭证/坏 token 401，全部通过 | PLATFORM-CAPACITY-A.md |
+
+### VM cloud-init 密码注入（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| VM-CLOUDINIT-PASSWORD-A | `password_secret_ref` 接线到 `cloudInitNoCloud.secretRef`（原只解析未接线，设不了密码）：渲染层拆 `vmCloudInitEnabled`（disks `cloudinitdisk` 条件纳入 `PasswordSecret`）+ `vmCloudInitVolume` 二选一 secretRef；Gateway `validateCreateInstanceConfigs` 加 `cloud_init_secret` 与 `password_secret_ref` 互斥（400）；resolver `resolveSecrets` 对 cloud-init secret 校验 `userdata` 键存在（缺键 `ErrConflict`）；OpenAPI 补 `cloud_init_secret` 声明 + 澄清 `password_secret_ref`；core-schema.d.ts 重生成。local verified（go test 5/5 + gateway 全过 + validate-architecture + git diff --check）；live gate 第三条路径待真实集群执行 | vm-cloudinit-password-a.md |
+### 首页租户级资源趋势接口（2026-09-02，分支 feat/observability-resource-trend）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| OBS-RESOURCE-TREND-A | Core 新增 `GET /observability/resource_trend` 租户级资源使用率趋势接口：不复用 query_range 裸透传（跨租户泄露），tenant_id 全从 JWT 取、后端直接生成只锚 `namespace="ani-tenant-<id>"` 的聚合 PromQL 走 queryPrometheusRange、不暴露 query PromQL；三张租户级 PromQL（GPU DCGM_FI_DEV_GPU_UTIL 不乘 100；CPU/内存 cAdvisor 容器维度 `100*avg` 且过滤 pause 容器）；OpenAPI 新 path + x-ani-authz（observability/read/tenant）生成物同步（Core SDK + authz registry 零漂移）；router resourceTrend handler（metric 枚举/RFC3339/step 正数/instanceTenantID）；local 空 matrix 降级；单测覆盖 PromQL 生成、GPU 不乘100、租户隔离、参数校验、忽略前端租户参数、拒绝 query 透传。in-cluster gateway 实测：三 metric matrix、参数校验 400、无凭证 401。不标记 runtime ready | OBS-RESOURCE-TREND-A.md |
+
+### 实例日志流式输出（2026-09，分支 feat/instance-log-stream）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-LOG-STREAM-A | 实例日志 SSE 流式输出：OpenAPI 新增 `GET /instances/{id}/logs/stream`（level/limit/interval_seconds，SSE 事件 log/error/done，预流 401/404/400 普通 JSON + 非 loki profile 503 降级）；port 层 `InstanceLogStreamRequest` + `StreamLogs`；Loki adapter（backward 回放 → lastTS 游标 → forward 轮询，排序去重、失败下一周期自愈）；Gateway Hijack 式 SSE handler（逐帧 Flush，10 分钟上限 `done{timeout}`，sink 断开即取消，不沿用 kb_sse 缓冲写出）；Core SDK/静态 docs/Console schema/authz 生成物同步。真实环境 curl 实测：首屏回放正序、nginx 访问日志增量约 20s 内到达无重复无乱序、404 预流 JSON、客户端断开立即退出；`done{timeout}` 由 handler 单测覆盖 | INSTANCE-LOG-STREAM-A.md |
+
+### KB 接口补全（2026-09，分支 feat/kb-api-completion）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| KB-API-B1 (issue-040) | 契约批次：Services v1.yaml 既有 path 追加 PUT `updateKnowledgeBase`（UpdateKnowledgeBaseRequest：idempotency_key required uuid / name / description nullable，空=不修改；400/401/403/404/409）与 GET `getKnowledgeBaseDocument`（200 返回既有 KBDocument）；proto 新增 `UpdateKB` RPC（tenant_id/kb_id/idempotency_key/name/description → KnowledgeBase）+ UpdateKBRequest message（GetDocument 已存在仅校验）；contract-baseline 登记 2 条 operation_security 豁免；buf+grpc_tools 生成两侧 pb；四语言 SDK/docs/services.html/Console schema.d.ts 重生成（updateKnowledgeBase 自动入幂等集）；范围外良性同步：tenant/inference pb 生成物 reserved 字段追平。纯契约无实现；route-contract 2 条 spec_not_in_code 按 SPEC §4.2 由 issue-044 Gateway 同 PR 解除 | kb-api-b1-issue-040-contract-updatekb-getdoc.md |
+| KB-API-B2 (issue-041) | 契约批次：Services v1.yaml 新增 3 path（GET listKnowledgeBaseDocumentChunks 单列 id keyset、GET listKnowledgeBaseSessionMessages 复合 created_at\|id 游标、DELETE deleteKnowledgeBaseSession 204 幂等）+ 5 新 schema（KBSourceChunk/KBChunk/KBChunkListResponse/KBSessionMessage/KBSessionMessageListResponse）+ KBCitation 追加 message_id/session_id（uuid nullable）；proto 新增 3 RPC（ListDocumentChunks/GetSessionMessages/DeleteSession→Empty）+ 7 message，分页复用 common.v1.CursorPageRequest，JSONB 双字段（custom_metadata/source_chunks）proto 侧统一 string；contract-baseline 登记 3 条豁免；buf+grpc_tools 生成两侧 pb；四语言 SDK/docs/api/Console schema.d.ts 重生成（零漂移双门禁）；范围外良性同步：common pb Python 侧 IdempotentResult 追平。纯契约无实现；route-contract 5 条 spec_not_in_code（B1 2 + B2 3）按 SPEC §4.2 由 issue-046 Gateway 同 PR 解除。⚠ 勘误（B3 记录 OQ1）：B2 的 SDK/docs 重生成因 route-contract 短路未实际执行（缺 B2 3 operation + 5 schema），由 B3 批次 review-it 发现并补齐 | kb-api-b2-issue-041-contract-chunks-sessions-citations.md |
+| KB-API-B3 (issue-042) | 契约批次：proto 新增 ReparseDocument RPC（→ common.v1.AsyncTaskRef，注释固化 202 异步语义 + Outbox→NATSGo `ani.tasks.kb.parse` 复用 NotifyDocumentUploaded 管线）+ ReparseDocumentRequest（tenant_id/kb_id/doc_id/idempotency_key，对齐 NotifyDocumentUploaded 模式）；buf+grpc_tools 生成两侧 pb；**零 OpenAPI/baseline 改动**（AC #4 冻结事实：v1.yaml diff 空）。纯 proto 补齐无 servicer；review-it 收口发现并修复 B2 批次 SDK 四语言欠账（缺 3 operation + 5 schema，根因：门禁链 route-contract 中间态短路使 SDK 零漂移检查漏执行），补齐后 8 文件 MD5 幂等验证；validate-services 全链路逐阶段单跑补证（route-contract 之后 8 阶段全绿） | kb-api-b3-issue-042-contract-reparse-proto.md |
+| KB-API-B4 (#19+#20) | 实现批次（kb-p1-api-completion-plan §2）：KB 权限读写对全链路——proto 新增 GetKBPermissions RPC + KBPermissions message；v1.yaml 补 GET 路由（无行返回默认值 false/[] 而非 404，KB 不存在仍 404）+ KBPermissions schema + uuid format 补齐；migration 005 建 kb_permissions 表（kb_id PK 级联删 + tenant_id 冗余列 + UUID[] 白名单）+ **双 PERMISSIVE RLS**（修正 plan §2.3 单 RESTRICTIVE 原稿——E2E 实证单 RESTRICTIVE 无 PERMISSIVE 全拒，与 TASKCENTER-A2 同型修复）；permission repo（get 默认值 / upsert ON CONFLICT 整体替换）；servicer GetKBPermissions（updated_at 无行回退 kb.created_at 防 1970）+ UpdateKBPermissions（幂等回放 task_type=kb.perm.update + 毒 key 自愈 + 省二次 get_kb 快照复用 + set 保序去重）；Gateway GET/PUT handler + nil-client 503 + proto 空 repeated 归一 `[]`（防 JSON null）。验证：pytest 321 + router go test + **E2E 24/24**（本地服务/服务器 PG+Redis 全链路，含跨租户 RLS 隔离负例）+ validate-architecture + review-it clean | kb-api-b4-issue-019-020-permissions.md |
+
 ### 任务中心异步任务 Core 集成（2026-08，分支 feat/async-task-core-integration）
 
 | 批次 | 内容摘要 | 文件 |
@@ -129,6 +229,28 @@
 | TENANT-ADMIN-DOC-ALIGNMENT | 文档对齐批次：以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档；14 项设计决策、4 张偏差表（spec/ux/prd/plan）、3 项 tradeoff、4 项 open question | tenant-admin-doc-alignment-batch.md |
 | TENANT-ADMIN-FEATURE-BATCH | 功能批次汇总：14 个 issue 全量实现完成（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端 → 多轮 review-it → 文档对齐）；13 项设计决策（Core/Services 边界拆分、全量拉取+内存合并、部分唯一索引竞态防护、审计统一/查询条件/枚举值、ResetPassword 禁用态策略、ChangeRole UUID 入参、Delete 不改 status、幂等键网关处理、接口重命名、迁移三文件拆分、Go subtest 命名）；5 张偏差表（vs SPEC/PRD/UX/Plan/Issue）；4 项 tradeoff；4 项 open question | tenant-admin-feature-batch.md |
 
+### BOSS 租户列表管理（2026-09，分支 tenant-list）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-LIST-ISSUE-001 | OpenAPI：Core 9 `/admin/tenants*` + getTenant 扩展；Services 19 `/tenants*` | tenant-list-issue-001-openapi-contract.md |
+| TENANT-LIST-ISSUE-002 | proto messages + ports；无独立 TenantListService；19 RPC 挂 TenantService | tenant-list-issue-002-interfaces-structs.md |
+| TENANT-LIST-ISSUE-003 | 迁移 `20260902_001`：三态 CHECK、tenant_auth/lifecycle、NULLIF RLS、create 回填 | tenant-list-issue-003-database-migration.md |
+| TENANT-LIST-ISSUE-004 | Gateway 19 svc + 9 admin；tenantCallCtx 归因；骨架后由 005+ 填满 | tenant-list-issue-004-gateway-integration.md |
+| TENANT-LIST-ISSUE-005 | available-plans + CreateTenant（bcrypt→Core 事务 + 事务外配额） | tenant-list-issue-005-create-tenant-api.md |
+| TENANT-LIST-ISSUE-006 | ListTenants/GetTenantDetail；LATERAL admin_count；auth 两布尔 | tenant-list-issue-006-tenant-list-detail-api.md |
+| TENANT-LIST-ISSUE-007 | UpdateTenant；svc disabled→409；Core 动态 SET | tenant-list-issue-007-update-tenant-api.md |
+| TENANT-LIST-ISSUE-008 | freeze/unfreeze/disable；四维 used+reserved；不释放资源；归因 ctx | tenant-list-issue-008-tenant-state-machine-api.md |
+| TENANT-LIST-ISSUE-009 | GetTenantAuth + Update SSO/MFA；不含 TestTenantSso | tenant-list-issue-009-tenant-auth-api.md |
+| TENANT-LIST-ISSUE-011 | GetTenantQuota 单次代理 Core；502 不可达 | tenant-list-issue-011-tenant-quota-api.md |
+| TENANT-LIST-ISSUE-012 | 配额变更提交/列表/整批审批；跨请求同维 pending；CONFLICT/NOT_REGISTERED | tenant-list-issue-012-quota-change-request-api.md |
+| TENANT-LIST-ISSUE-013 | ListTenantLifecycle（Core）+ ListTenantAuditLogs；枚举 Parse* | tenant-list-issue-013-lifecycle-audit-api.md |
+| TENANT-LIST-ISSUE-014 | 租户内 admins：tenant-admin ∪ inviting；TenantScopedAdmin | tenant-list-issue-014-tenant-admins-api.md |
+| TENANT-LIST-DOC-ALIGNMENT | 以实现为准回写 Issue/PRD/SPEC/UX/Plan（§0）；010 仍 OPEN/501 | tenant-list-doc-alignment-batch.md |
+| TENANT-LIST-FEATURE-BATCH | 功能批次汇总：13 issue 完成 + 文档对齐；跨 Issue 决策/偏差/取舍/开放问题 | tenant-list-feature-batch.md |
+
+> Issue-010（SSO test）未实现：契约/路由/ports 在，业务 stub→501；无单独 development-record。
+
 ### Metering Service（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
@@ -159,10 +281,29 @@
 | INSTANCE-NETWORK-STORE-READ-RLS-A | live passed（10.10.1.66）：GPU 容器实例创建引用 VPC NOT_FOUND 三层根因修复——`NetworkResourceStore` 补 5 个读方法（端口+PG SELECT 实现，WithTenantTx）、`LocalNetworkService` Get/List 穿透读、Gateway 有 `DATABASE_URL` 时注入 store；迁移 `20260828_001` 把实例链路 8 张表 RESTRICTIVE-only policy 替换为 PERMISSIVE 双策略（对齐 `20260825_001`）；`WORKLOAD_PROVIDER=kubernetes_rest` + `WORKLOAD_PROVIDER_APPLY_ENABLED=true` 接线。验证：VPC/Subnet 创建落库、实例 201 → provisioning → Volcano 排队（容量问题非代码）；不外推 GPU runtime ready / production ready | instance-network-store-read-rls-a.md |
 | INSTANCE-RUNTIME-HYDRATE-A | live passed（10.10.1.66，镜像 dev-20260901）：GPU 容器实例列表/详情缺节点/私网IP/访问端点/终端——修复 `refreshOneStoreStatus` 节点字段错位（回填 `Compute.NodeName`）、回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入刷新；新增 2 个 httptest 单测；真实 running 实例 `test-gpu-inst-create` 列表/详情均回填 dev-phys-02 / 10.60.0.3 / exec_available=true；`go test` + `make validate-architecture` 通过 | instance-runtime-hydrate-a.md |
 
+### Instance Resize GPU Spec（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-RESIZE-SPEC-A | live passed（10.10.1.66，镜像 dev-20260902-resize-ns）：`resize` 从"纯重启"改为真正变配——`InstanceLifecycleRequest` 新增可选 `spec_id`（换 GPU 规格，v1 兼容）；状态机 resize 仅允许 stopped（running 409）；字段组合 cpu/memory/spec_id 至少一项；`resolveResizeGPUSpec` 经 `GPUSpecService.GetGPUSpec` + `GPUInventory.ListSpecAvailability` 前置校验（不可用 409，避免 Volcano quota 卡死）；executor 注入 Volcano translator，resize 走 targeted strategic-merge patch（方案B）：`volcano.sh/vgpu-*` 资源、schedulerName=volcano、queue 注解、nodeSelector，切换 wholecard/vgpu 清另一模式资源键；变配后回写 `record.Compute.SpecID/GPUType/GPUShares/GPUMBPerShare`。新增 5 个 executor spec_id 用例 + planning/instance_service 用例更新；`go test` + `make validate-architecture` + `git diff --check` 通过。真实集群双向规格切换（quarter↔wholecard）live gate 通过，live 发现并修复 nodeSelector 残留（`$patch: replace`），不外推 GPU runtime ready | instance-resize-spec-a.md |
+
+### Instance Storage Mount Store Fallback（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-STORAGE-MOUNT-STORE-A | live passed（10.10.1.66，镜像 dev-20260902-mount-store）：网关重启后实例创建挂载卷/文件系统报 `mount volume ...: capability resource not found`——根因是解析阶段 `GetVolume/GetFilesystem` 优先读 DB store 而挂载阶段 `MountVolume/MountFilesystem/UnmountVolume/UnmountFilesystem` 只查内存 map；新增 `lookupVolumeRecord/lookupFilesystemRecord`（内存 miss 回落 store 并回填）与 `hydrateFilesystemMountTargets`（挂载前从 store 恢复 mount target），四个 mount/unmount 方法接入；回归测试 `TestLocalStorageServiceMountSurvivesRestartViaStore` 复现重启场景；真实环境网关 rollout 后新 idempotency_key 创建挂载卷实例 201（provisioning，attachments resolved）。已知边界：租户 PVC 卡 `pending`（后端未绑定）属独立问题，文件系统 Available 门禁维持不变 | instance-storage-mount-store-a.md |
+
+### Instance Storage Re-observe & WFFC Attach（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-STORAGE-REOBSERVE-A | local verified + live passed（2026-09-03，镜像 dev-20260903-reobserve）：租户卷/文件系统状态永远停在 `pending` 且文件系统永远无法被实例挂载。三处修复：① `GetVolume`/`GetFilesystem` 对 pending 记录发起 provider re-observe 并持久化（store+内存双写，30s 节流，失败降级 warn）——原观测仅在创建 apply 后执行一次，WFFC PVC 在那一刻必然 Pending，`LocalStorageStatusReconciler` 虽已实现但无调用方；② resolver 文件系统门禁 `Available` → `Available 或 Pending`（挂载即 WFFC 第一个消费者，消除"PVC 等消费者、消费者等 Available"死锁），Failed/Deleting/Deleted 仍拒；③ `MountFilesystem` 放行 `Creating` 状态 mount target（Pod 经共享 PVC/CSI 挂载而非合成 IP）。排查同时确认并修复集群缺失的 `ani-block` StorageClass（helm values 声明但部署规格从未创建，PVC `ProvisioningFailed ×11724`；按 ani-rbd-ssd 参数手工创建后 PVC 绑定；清单落地为独立事项）。live 证据：挂载 Pending NFS 文件系统的容器实例 201（`inst_a60c1092`），Pod 起来后 `fs_306220e7` 经 re-observe pending→available；期间排除两个环境干扰（Harbor `ani-purpose-system` 标签误标 rocky:10 触发 ImagePurposeMismatch、另一部署管道 digest 镜像覆盖 gateway 后已恢复）。新增 4 个回归测试；`go test` + `go build`（pkg+gateway）+ gofmt 通过 | instance-storage-reobserve-a.md |
+
 ### Instance Sandbox 无状态化（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
+| INSTANCE-SANDBOX-KATA-STORAGE-A | Kata lab 部署基线同步到私有 `kata-deploy:4.0.0` 和 3 节点现状；Sandbox 创建/clone/restore 的 5Gi RWO workspace PVC 显式使用 `ani-block`，避免无默认 StorageClass 环境持续 Pending；底座 live verified，代码 local/logic verified；sysctl 不入库 | instance-sandbox-kata-storage-a.md |
 | INSTANCE-SANDBOX-CHECKPOINT-A | live passed：新 Sandbox `/workspace` 使用 5Gi RBD PVC；CSI VolumeSnapshot create/list/restore/clone，Gateway restart 后 provider list 与 PG task 可恢复；filesystem-only，keep_memory/legacy emptyDir 返回 422；删除 Sandbox 级联清理 managed snapshots；default 网络 evidence `live-evidence/instance-sandbox-checkpoint-live-20260802.json`；Gateway `instance-sandbox-checkpoint-20260802-v1` | instance-sandbox-checkpoint-a.md |
 | INSTANCE-SANDBOX-STATELESS-A | live passed：PG 请求上下文驱动 Kubernetes Sandbox、UUID、PG AsyncTaskStore、端口摘要、Redis DELETE/指纹/Token 过期幂等与 checkpoint 422；真实 Gateway rollout 后实例/文件/端口/task 可恢复，原请求可重放、不同 intent 冲突，清理后 provider 资源为 0；evidence `live-evidence/instance-sandbox-stateless-live-20260802.json`；Gateway `instance-sandbox-stateless-20260802-v1` | instance-sandbox-stateless-a.md |
 
@@ -222,6 +363,7 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | GATEWAY-INSTANCE-CREATE-REAL-K8S-PROVIDER-A | issue-011：Gateway 实例创建链路接入 real K8s provider；新增 `bootstrap.ConnectInstanceService` helper（连 DB→`NewCapabilitiesWithConfig(pool,nil,nil,cfg)`→返回 `caps.InstanceService`+close）让 Gateway 间接使用 real K8s provider 不违反组件边界守卫；新增 `instance_service_runtime.go` 按 `WORKLOAD_PROVIDER` env 切换（`""`/`local`→nil 回退 local 闭环，`kubernetes_rest`→调 `ConnectInstanceService`，其他→unsupported）；`router.RegisterOptions` 新增 `InstanceService` 字段；`demo_instances.go` 非 nil 时优先用注入的 real service（operations 仍用 local `LocalOperationStore`），nil 时回退 local 内存闭环；`main.go` 调用 `newGatewayInstanceService` 注入 `RegisterOptions.InstanceService` + `defer closeInstanceService()`；观测前置耦合自动解决（`instanceForObservation`→`api.service.Get` 从真实 DB 读取）；新增 9 个测试覆盖 env 切换 + 注入逻辑；不修改 OpenAPI `v1.yaml`；`make validate-architecture` 通过；真实 K8s 可见性需 live gate 验证 | gateway-instance-create-real-k8s-provider-a.md |
+| ANI-GW-1 | `LOCAL_VERIFIED`：固定 `api/v0.1.0` / `github.com/zhangzhe-ctrl/ani-session-gateway/api v0.1.0` / commit `d86a40d33369b128aabc680d4ea0b3f790ac0bb6`；拆分 `InstanceObservability` 与 `InstanceSessionIssuer`，real-provider exec/console 经内部 gRPC `CreateSession` 签发，缺失/非法/不可用时 503 fail-closed；REST 成功 schema 兼容，OpenAPI 只增加 console 可选幂等键和 409/422/429/500/503；fake/bufconn、race/vet、`make test`、契约/生成/架构/文档门禁全过；真实进程/数据面/集群 rollout 均 `not_verified`，未 commit/push/deploy | ANI-GW-1.md |
 
 ### GPU 调度功能流（2026-07）
 
@@ -263,12 +405,6 @@
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现：RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 | core-registry-console-flow-core-a.md |
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | 镜像仓库 Harbor-backed live gate：`validate-registry-harbor-live-gate` 契约通过；2026-07-27 真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence，artifact/purpose 回读在提供 repository/tag 时执行；不含 Console/BOSS/实例创建镜像门禁 | sprint13-registry-harbor-live-gate.md |
 | REGISTRY-P0-CLOSURE-A | Registry P0 闭环：purpose/scan terminal=`complete`/实例引用/删除 409；live passed（evidence `registry-p0-closure-live-20260803.json`）；不含 BOSS quota/GC | registry-p0-closure-a.md |
-
-### 邮件通知（2026-07）
-
-| 批次 | 内容摘要 | 文件 |
-|---|---|---|
-| EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
 
 ### NATS 接入（2026-07）
 

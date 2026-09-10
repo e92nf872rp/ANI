@@ -186,7 +186,8 @@ func (r *KubernetesSandboxRuntime) restoreWorkspaceCheckpoint(ctx context.Contex
 			"namespace": pvc.Namespace,
 		},
 		"spec": map[string]any{
-			"accessModes": []any{"ReadWriteOnce"},
+			"accessModes":      []any{"ReadWriteOnce"},
+			"storageClassName": sandboxWorkspaceStorageClassName,
 			"resources": map[string]any{
 				"requests": map[string]any{"storage": "5Gi"},
 			},

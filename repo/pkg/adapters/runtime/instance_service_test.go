@@ -145,6 +145,29 @@ func TestLocalInstanceServiceResolvesReferencedResourcesBeforeOrchestration(t *t
 	}
 }
 
+func TestLocalInstanceServiceCreateFailsClosedWhenNetworkResolverMissing(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	service := NewLocalInstanceService(orchestrator, &fakeInstanceStore{}, NewLocalInstanceOpsGuard())
+	_, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey: "create-explicit-network-without-resolver",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "vm-explicit-network",
+			Kind:     ports.WorkloadKindVM,
+			Network:  ports.WorkloadNetworkPolicy{VPCID: "vpc-a", SubnetID: "subnet-a"},
+			VM:       &ports.VMInstanceSpec{BootImage: "images/ubuntu.qcow2"},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("Create error = %v, want ErrFailedPrecondition", err)
+	}
+	if orchestrator.creates != 0 {
+		t.Fatalf("orchestrator creates = %d, want 0 before provider apply", orchestrator.creates)
+	}
+}
+
 func TestLocalInstanceServiceRequiresCreateIdempotencyKey(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	service := NewLocalInstanceService(orchestrator, &fakeInstanceStore{}, NewLocalInstanceOpsGuard())
@@ -886,6 +909,17 @@ func TestLocalInstanceServiceLifecycleRecordsOperation(t *testing.T) {
 	if len(operation.Steps) == 0 {
 		t.Fatalf("operation steps are empty")
 	}
+	// D1: resize requires a stopped instance, so stop before resizing.
+	if _, err := service.Stop(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "stop-for-resize-key-1",
+		TenantID:        "tenant-a",
+		InstanceID:      "instance-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1250, 0),
+	}); err != nil {
+		t.Fatalf("Stop() before resize error = %v", err)
+	}
 	resized, err := service.Resize(context.Background(), ports.WorkloadInstanceResizeRequest{
 		IdempotencyKey:  "resize-key-1",
 		TenantID:        "tenant-a",
@@ -920,8 +954,8 @@ func TestLocalInstanceServiceLifecycleRecordsOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOperations error = %v", err)
 	}
-	if len(list.Items) != 2 {
-		t.Fatalf("operations = %d, want start + resize only", len(list.Items))
+	if len(list.Items) != 3 {
+		t.Fatalf("operations = %d, want start + stop + resize only", len(list.Items))
 	}
 }
 
@@ -1133,7 +1167,6 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 		TenantID:        "tenant-a",
 		InstanceID:      "vm-a",
 		VolumeID:        "vol-data-a",
-		MountPath:       "/mnt/vol-data-a",
 		UserID:          "user-a",
 		PermissionProof: "rbac:update:workload",
 		RequestedAt:     time.Unix(1600, 0),
@@ -1141,14 +1174,14 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachVolume() error = %v", err)
 	}
-	if lifecycle.calls != 0 {
-		t.Fatalf("lifecycle calls = %d, want 0 for local volume binding", lifecycle.calls)
+	if lifecycle.calls != 1 || lifecycle.action != ports.WorkloadLifecycleAttachVolume {
+		t.Fatalf("lifecycle calls = %d action = %s, want provider attach_volume", lifecycle.calls, lifecycle.action)
 	}
 	if attached.Status.State != ports.WorkloadStateRunning || len(attached.Status.Storage) != 2 {
 		t.Fatalf("state=%s storage=%d, want running with root+data disk", attached.Status.State, len(attached.Status.Storage))
 	}
-	if got := attached.Status.Storage[1]; got.Name != "vol-data-a" || got.Kind != ports.StorageAttachmentDataDisk || got.MountPath != "/mnt/vol-data-a" {
-		t.Fatalf("attached volume = %+v, want local data disk binding", got)
+	if got := attached.Status.Storage[1]; got.Name != "vol-data-a" || got.Kind != ports.StorageAttachmentDataDisk || got.MountPath != "" || got.Status != "attached" {
+		t.Fatalf("attached volume = %+v, want provider-attached VM data disk without guest mount path", got)
 	}
 	attachOperation, err := operations.GetOperation(context.Background(), "tenant-a", attached.OperationID)
 	if err != nil {
@@ -1175,6 +1208,9 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("DetachVolume() error = %v", err)
+	}
+	if lifecycle.calls != 2 || lifecycle.action != ports.WorkloadLifecycleDetachVolume {
+		t.Fatalf("lifecycle calls = %d action = %s, want provider detach_volume", lifecycle.calls, lifecycle.action)
 	}
 	if detached.Status.State != ports.WorkloadStateRunning || len(detached.Status.Storage) != 1 {
 		t.Fatalf("state=%s storage=%d, want running with root disk only", detached.Status.State, len(detached.Status.Storage))
@@ -1789,7 +1825,7 @@ func TestLocalInstanceServiceSynchronizesVolumeAttachmentSummary(t *testing.T) {
 
 	attached, err := service.AttachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
 		IdempotencyKey: "attach-summary", TenantID: "tenant-a", InstanceID: "vm-a",
-		VolumeID: "data-a", MountPath: "/data", ReadOnly: boolPointer(true),
+		VolumeID: "data-a", ReadOnly: boolPointer(true),
 		UserID: "user-a", PermissionProof: "rbac:update:workload",
 	})
 	if err != nil {
@@ -1799,7 +1835,7 @@ func TestLocalInstanceServiceSynchronizesVolumeAttachmentSummary(t *testing.T) {
 		t.Fatalf("storage summary = %+v, want data-a", attached.StorageAttachments)
 	}
 	got := attached.StorageAttachments[len(attached.StorageAttachments)-1]
-	if got.ResourceType != "volume" || got.ResourceID != "data-a" || got.Status != "mounted" || got.MountPath != "/data" || !got.ReadOnly {
+	if got.ResourceType != "volume" || got.ResourceID != "data-a" || got.Status != "attached" || got.MountPath != "" || !got.ReadOnly {
 		t.Fatalf("attached volume summary = %+v, want canonical requested values", got)
 	}
 
@@ -2055,7 +2091,8 @@ func TestLocalInstanceServiceRejectsMissingLifecyclePayloadFields(t *testing.T) 
 	}{
 		{name: "resize", kind: ports.WorkloadKindVM, action: ports.WorkloadLifecycleResize},
 		{name: "snapshot", kind: ports.WorkloadKindVM, action: ports.WorkloadLifecycleSnapshot},
-		{name: "attach volume", kind: ports.WorkloadKindVM, action: ports.WorkloadLifecycleAttachVolume, request: ports.WorkloadInstanceLifecycleRequest{VolumeID: "volume-a"}},
+		{name: "attach volume id", kind: ports.WorkloadKindVM, action: ports.WorkloadLifecycleAttachVolume},
+		{name: "container attach volume mount path", kind: ports.WorkloadKindContainer, action: ports.WorkloadLifecycleAttachVolume, request: ports.WorkloadInstanceLifecycleRequest{VolumeID: "volume-a"}},
 		{name: "rollback", kind: ports.WorkloadKindContainer, action: ports.WorkloadLifecycleRollback},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2065,6 +2102,16 @@ func TestLocalInstanceServiceRejectsMissingLifecyclePayloadFields(t *testing.T) 
 				t.Fatalf("validateLifecycleIntent() error = %v, want ErrInvalid", err)
 			}
 		})
+	}
+}
+
+func TestLocalInstanceServiceAllowsVMVolumeAttachWithoutMountPath(t *testing.T) {
+	record := ports.WorkloadInstanceRecord{Kind: ports.WorkloadKindVM}
+	err := validateLifecycleIntent(record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleAttachVolume, VolumeID: "volume-a",
+	})
+	if err != nil {
+		t.Fatalf("validateLifecycleIntent() error = %v, want VM block attachment without mount_path", err)
 	}
 }
 
@@ -2339,3 +2386,176 @@ func stringPointer(value string) *string { return &value }
 func int32Pointer(value int32) *int32 { return &value }
 
 func boolPointer(value bool) *bool { return &value }
+
+func volumeOccupancyFixture(t *testing.T, holderState ports.WorkloadState) (*fakeInstanceStore, ports.WorkloadInstanceRecord) {
+	t.Helper()
+	stopped := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-a",
+		Name:       "app-a",
+		Kind:       ports.WorkloadKindContainer,
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateStopped,
+			Storage: []ports.WorkloadStorageAttachment{{
+				Name: "data", ResourceType: "volume", ResourceID: "vol-shared", MountPath: "/data",
+			}},
+		},
+		StorageAttachments: []ports.WorkloadStorageAttachment{{
+			Name: "data", ResourceType: "volume", ResourceID: "vol-shared", MountPath: "/data",
+		}},
+	}
+	holder := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-b",
+		Name:       "app-b",
+		Kind:       ports.WorkloadKindContainer,
+		Status: ports.WorkloadStatus{
+			State: holderState,
+		},
+		StorageAttachments: []ports.WorkloadStorageAttachment{{
+			Name: "data", ResourceType: "volume", ResourceID: "vol-shared", MountPath: "/data",
+		}},
+	}
+	return &fakeInstanceStore{last: stopped, records: []ports.WorkloadInstanceRecord{stopped, holder}}, stopped
+}
+
+func TestLocalInstanceServiceStartBlockedWhenVolumeTakenWhileStopped(t *testing.T) {
+	store, _ := volumeOccupancyFixture(t, ports.WorkloadStateRunning)
+	operations := NewLocalOperationStore()
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(operations),
+		WithInstanceLifecycleExecutor(&fakeLifecycleExecutor{}),
+	)
+	_, err := service.Start(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "start-blocked",
+		TenantID:        "tenant-a",
+		InstanceID:      "inst-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1700, 0),
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("Start() error = %v, want ErrConflict for volume taken while stopped", err)
+	}
+	if !strings.Contains(err.Error(), "inst-b") {
+		t.Fatalf("error = %v, want occupying instance id in message", err)
+	}
+	operation, err := operations.GetOperationByIdempotencyKey(context.Background(), "tenant-a", "start-blocked")
+	if err != nil {
+		t.Fatalf("GetOperationByIdempotencyKey error = %v", err)
+	}
+	if operation.Status != ports.WorkloadOperationFailed || operation.FailureReason != "volume_occupied_by_active_instance" {
+		t.Fatalf("operation status=%s failure=%q, want failed/volume_occupied_by_active_instance", operation.Status, operation.FailureReason)
+	}
+}
+
+func TestLocalInstanceServiceStartAllowedWhenVolumeFreeAgain(t *testing.T) {
+	store, _ := volumeOccupancyFixture(t, ports.WorkloadStateStopped)
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceLifecycleExecutor(&fakeLifecycleExecutor{}),
+	)
+	if _, err := service.Start(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "start-free",
+		TenantID:        "tenant-a",
+		InstanceID:      "inst-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1710, 0),
+	}); err != nil {
+		t.Fatalf("Start() with free volume error = %v, want success", err)
+	}
+}
+
+func TestLocalInstanceServiceAttachVolumeBlockedByActiveHolder(t *testing.T) {
+	store, stopped := volumeOccupancyFixture(t, ports.WorkloadStateRunning)
+	// The attaching instance is a separate running instance; the store's Get
+	// must return it while List keeps both records for the occupancy scan.
+	attacher := stopped
+	attacher.InstanceID = "inst-c"
+	attacher.Name = "app-c"
+	attacher.Status = ports.WorkloadStatus{State: ports.WorkloadStateRunning}
+	attacher.StorageAttachments = nil
+	attacher.Status.Storage = nil
+	store.last = attacher
+	operations := NewLocalOperationStore()
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(operations),
+		WithInstanceLifecycleExecutor(&fakeLifecycleExecutor{}),
+	)
+	_, err := service.AttachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "attach-blocked",
+		TenantID:        "tenant-a",
+		InstanceID:      "inst-c",
+		VolumeID:        "vol-shared",
+		MountPath:       "/data",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1720, 0),
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("AttachVolume() error = %v, want ErrConflict for actively held volume", err)
+	}
+	operation, err := operations.GetOperationByIdempotencyKey(context.Background(), "tenant-a", "attach-blocked")
+	if err != nil {
+		t.Fatalf("GetOperationByIdempotencyKey error = %v", err)
+	}
+	if operation.FailureReason != "volume_occupied_by_active_instance" {
+		t.Fatalf("failure reason = %q, want volume_occupied_by_active_instance", operation.FailureReason)
+	}
+}
+
+func TestLocalInstanceServiceAttachVolumeAllowsFilesystemShared(t *testing.T) {
+	// Filesystem (RWX) attachments are shared by design: a running holder
+	// must not block another instance, and the occupancy scan only looks at
+	// ResourceType "volume".
+	store := &fakeInstanceStore{
+		last: ports.WorkloadInstanceRecord{
+			TenantID:   "tenant-a",
+			InstanceID: "inst-c",
+			Name:       "app-c",
+			Kind:       ports.WorkloadKindContainer,
+			Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		},
+		records: []ports.WorkloadInstanceRecord{
+			{
+				TenantID:   "tenant-a",
+				InstanceID: "inst-b",
+				Name:       "app-b",
+				Kind:       ports.WorkloadKindContainer,
+				Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+				StorageAttachments: []ports.WorkloadStorageAttachment{{
+					Name: "share", ResourceType: "filesystem", ResourceID: "fs-shared", MountPath: "/share",
+				}},
+			},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceLifecycleExecutor(&fakeLifecycleExecutor{}),
+	)
+	if _, err := service.AttachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "attach-fs-shared",
+		TenantID:        "tenant-a",
+		InstanceID:      "inst-c",
+		VolumeID:        "vol-free",
+		MountPath:       "/data",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1730, 0),
+	}); err != nil {
+		t.Fatalf("AttachVolume() with only filesystem holders error = %v, want success", err)
+	}
+}

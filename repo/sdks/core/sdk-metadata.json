@@ -89,9 +89,57 @@
       "scope": "scope:users:read"
     },
     {
+      "operationId": "listTenants",
+      "method": "GET",
+      "path": "/admin/tenants",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "createTenant",
+      "method": "POST",
+      "path": "/admin/tenants",
+      "scope": "scope:tenant:write"
+    },
+    {
       "operationId": "getTenant",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "updateTenant",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "getTenantAuth",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "updateTenantAuth",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "disableTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/disable",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "freezeTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/freeze",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "listTenantLifecycle",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/lifecycle",
       "scope": "scope:tenant:read"
     },
     {
@@ -147,6 +195,12 @@
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/roles",
       "scope": "scope:users:read"
+    },
+    {
+      "operationId": "unfreezeTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/unfreeze",
+      "scope": "scope:tenant:write"
     },
     {
       "operationId": "lookupTenantUser",
@@ -449,6 +503,12 @@
       "scope": "scope:gpu-inventory:read"
     },
     {
+      "operationId": "createGPUPartition",
+      "method": "POST",
+      "path": "/gpu-inventory/gpu-partitions",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
       "operationId": "getGPUOccupancy",
       "method": "GET",
       "path": "/gpu-inventory/occupancy",
@@ -578,6 +638,12 @@
       "operationId": "listInstanceLogs",
       "method": "GET",
       "path": "/instances/{instance_id}/logs",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "streamInstanceLogs",
+      "method": "GET",
+      "path": "/instances/{instance_id}/logs/stream",
       "scope": "scope:instances:read"
     },
     {
@@ -941,60 +1007,6 @@
       "scope": "scope:networks:read"
     },
     {
-      "operationId": "listEmailRecipients",
-      "method": "GET",
-      "path": "/notifications/email/recipients",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "createEmailRecipient",
-      "method": "POST",
-      "path": "/notifications/email/recipients",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "deleteEmailRecipient",
-      "method": "DELETE",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "updateEmailRecipient",
-      "method": "PATCH",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "getEmailSmtpConfig",
-      "method": "GET",
-      "path": "/notifications/email/smtp",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "putEmailSmtpConfig",
-      "method": "PUT",
-      "path": "/notifications/email/smtp",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "listEmailSubscriptions",
-      "method": "GET",
-      "path": "/notifications/email/subscriptions",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "putEmailSubscriptions",
-      "method": "PUT",
-      "path": "/notifications/email/subscriptions",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "sendTestEmail",
-      "method": "POST",
-      "path": "/notifications/email/test",
-      "scope": "scope:notifications:write"
-    },
-    {
       "operationId": "listStorageObjects",
       "method": "GET",
       "path": "/objects",
@@ -1079,6 +1091,12 @@
       "scope": "scope:observability:read"
     },
     {
+      "operationId": "queryResourceTrendObservability",
+      "method": "GET",
+      "path": "/observability/resource_trend",
+      "scope": "scope:observability:read"
+    },
+    {
       "operationId": "getPlatformWorkloadCapabilities",
       "method": "GET",
       "path": "/platform-workload-capabilities",
@@ -1119,6 +1137,42 @@
       "method": "GET",
       "path": "/platform-workloads/{workload_id}/logs",
       "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "getPlatformCapacity",
+      "method": "GET",
+      "path": "/platform/capacity",
+      "scope": "scope:capacity:read"
+    },
+    {
+      "operationId": "getPlatformComponents",
+      "method": "GET",
+      "path": "/platform/components",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "listPlatformComponentLogs",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/logs",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "streamPlatformComponentLogs",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/logs/stream",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "getPlatformComponentMetrics",
+      "method": "GET",
+      "path": "/platform/components/{component_name}/metrics",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "getPlatformServiceHealth",
+      "method": "GET",
+      "path": "/platform/services/health",
+      "scope": "scope:observability:read"
     },
     {
       "operationId": "listQuotas",
@@ -1432,7 +1486,6 @@
     "CreateAPIKeyRequest",
     "CreateAPIKeyResponse",
     "CreateContainerInstanceConfig",
-    "CreateEmailRecipientRequest",
     "CreateGPUContainerInstanceConfig",
     "CreateInstanceConsoleSessionRequest",
     "CreateInstanceExecSessionRequest",
@@ -1461,11 +1514,6 @@
     "CreateVectorStoreRequest",
     "CreateVolumeSnapshotRequest",
     "CursorPage",
-    "EmailRecipient",
-    "EmailRecipientListResponse",
-    "EmailSmtpConfigResponse",
-    "EmailSubscription",
-    "EmailSubscriptionListResponse",
     "EncryptionKey",
     "EncryptionKeyCreateRequest",
     "EncryptionKeyListResponse",
@@ -1486,6 +1534,8 @@
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
     "GPUOccupancyStats",
+    "GPUPartitionCreateRequest",
+    "GPUPartitionTaskAccepted",
     "GPUSchedulingQueue",
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
@@ -1576,7 +1626,20 @@
     "PasswordLoginRequest",
     "PlanBoundTenantCount",
     "PlanBoundTenantCountList",
+    "PlatformCapacityResponse",
+    "PlatformCapacitySummary",
+    "PlatformComponent",
+    "PlatformComponentGroup",
+    "PlatformComponentLogEntry",
+    "PlatformComponentLogListResponse",
+    "PlatformComponentMetrics",
+    "PlatformComponentRef",
+    "PlatformComponentStatusResponse",
     "PlatformPasswordLoginRequest",
+    "PlatformRegion",
+    "PlatformRegionCapacity",
+    "PlatformServiceHealthComponent",
+    "PlatformServiceHealthResponse",
     "PlatformUser",
     "PlatformUserCreateRequest",
     "PlatformUserIdempotentRequest",
@@ -1603,8 +1666,6 @@
     "PlatformWorkloadSecretBinding",
     "PlatformWorkloadTopology",
     "PlatformWorkloadUpdateRequest",
-    "PutEmailSmtpConfigRequest",
-    "PutEmailSubscriptionsRequest",
     "Quota",
     "QuotaCreateItem",
     "QuotaCreateRequest",
@@ -1665,7 +1726,6 @@
     "SecretBindingRequest",
     "SecretCreateRequest",
     "SecretListResponse",
-    "SendTestEmailResponse",
     "SetRegistryPermissionRequest",
     "StorageBucketACLUpdateRequest",
     "StorageBucketClassUpdateRequest",
@@ -1677,6 +1737,7 @@
     "StorageBucketObjectEntry",
     "StorageBucketObjectListResponse",
     "StorageBucketRecord",
+    "StorageConsumerInfo",
     "StorageFilesystem",
     "StorageFilesystemExpandRequest",
     "StorageFilesystemListResponse",
@@ -1699,15 +1760,23 @@
     "StorageVolumeUnmountRequest",
     "TaskListResponse",
     "Tenant",
+    "TenantAuthConfig",
+    "TenantAuthSummary",
+    "TenantAuthUpdateRequest",
+    "TenantCreateRequest",
+    "TenantLifecycleEntry",
+    "TenantLifecycleListResponse",
+    "TenantListItem",
+    "TenantListResponse",
     "TenantPlanUpdateRequest",
     "TenantSummary",
     "TenantSummaryList",
+    "TenantUpdateRequest",
     "TenantUser",
     "TenantUserListResponse",
     "TenantUserPermissions",
     "TokenPairResponse",
     "TokenUsageReport",
-    "UpdateEmailRecipientRequest",
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
     "UserMutationResult",
@@ -1809,6 +1878,8 @@
   "cursorPaginationOperations": [
     "listPlatformUsers",
     "listTenantUsers",
+    "listTenants",
+    "listTenantLifecycle",
     "listStorageBuckets",
     "listBucketObjects",
     "listEncryptionKeys",
@@ -1836,6 +1907,7 @@
     "listStorageObjects",
     "listObservabilityAlertRules",
     "getPlatformWorkloadLogs",
+    "listPlatformComponentLogs",
     "listQuotas",
     "listRegistryImages",
     "listRegistryProjects",
@@ -1862,6 +1934,7 @@
     "LAST_PLATFORM_ADMIN",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
+    "NO_IDLE_WHOLECARD_GPUS",
     "PASSWORD_SAME_AS_OLD",
     "PLATFORM_USER_NOT_FOUND",
     "PRECONDITION_FAILED",

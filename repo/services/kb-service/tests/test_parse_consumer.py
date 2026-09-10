@@ -100,7 +100,10 @@ class _FakeOrchestrator:
 
 
 class _MockConn:
-    """Minimal asyncpg.Connection mock for doc_repo + kb_repo lookups."""
+    """Minimal asyncpg.Connection mock for doc_repo + kb_repo lookups.
+
+    Records execute() calls so tests can assert async_tasks close-out
+    statements (complete_task_in_tx's UPDATE)."""
 
     def __init__(
         self,
@@ -110,6 +113,7 @@ class _MockConn:
     ):
         self._doc_row = doc_row
         self._kb_row = kb_row
+        self.executes: list[tuple[str, tuple]] = []
 
     @asynccontextmanager
     async def transaction(self):
@@ -124,8 +128,12 @@ class _MockConn:
         return None
 
     async def execute(self, sql, *args):
+        self.executes.append((sql, args))
+        # complete_task_in_tx checks "UPDATE 1"
+        if "UPDATE async_tasks" in sql:
+            return "UPDATE 1"
         # set_tenant_context / set_config calls
-        pass
+        return None
 
 
 class _MockPool:
@@ -381,9 +389,30 @@ async def test_process_message_missing_tenant_id_dropped():
 
 
 @pytest.mark.asyncio
-async def test_process_message_missing_object_id_dropped():
+async def test_process_message_missing_object_id_resolved_from_db():
+    """object_id missing in payload → resolved from kb_documents.object_id
+    (Core-assigned UUID persisted at upload time) and dispatched."""
     nats = _FakeNATS()
     pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(object_id=""))
+    assert len(orchestrator.calls) == 1
+    assert orchestrator.calls[0]["object_id"] == OBJECT_ID
+
+
+@pytest.mark.asyncio
+async def test_process_message_missing_object_id_dropped_when_db_empty():
+    """object_id in neither payload nor kb_documents → dropped."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["object_id"] = None
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
     orchestrator = _FakeOrchestrator()
     consumer = ParseConsumer(
         nats_client=nats,
@@ -584,6 +613,172 @@ async def test_max_concurrency_bounds_in_flight_tasks():
     await consumer.stop(timeout=2.0)
     # All 3 should have been processed (serially under the semaphore)
     assert len(orchestrator.calls) == 3
+
+
+# ── task lifecycle close-out (issue-047 follow-up) ───────────────────────────
+
+
+TASK_ID = "55555555-5555-5555-5555-555555555555"
+
+
+def _async_task_updates(pool: _MockPool) -> list[tuple[str, tuple]]:
+    """Collect UPDATE async_tasks statements across all pooled conns."""
+    return [
+        (sql, args)
+        for conn in pool._conns
+        for (sql, args) in conn.executes
+        if "UPDATE async_tasks" in sql
+    ]
+
+
+def _assert_complete(update, *, status):
+    sql, args = update
+    assert "SET status = $2" in sql
+    # args: (task_id, status, result_json) — status is index 1
+    assert args[1] == status
+
+
+@pytest.mark.asyncio
+async def test_closes_task_completed_when_doc_ready():
+    """With task_id in the payload, a ready doc closes the task as
+    completed (UPDATE async_tasks SET status='completed')."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "ready"
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    updates = _async_task_updates(pool)
+    assert len(updates) == 1
+    _assert_complete(updates[0], status="completed")
+    # The UPDATE targeted the payload's task_id
+    assert str(updates[0][1][0]) == TASK_ID
+
+
+@pytest.mark.asyncio
+async def test_closes_task_failed_when_doc_failed():
+    """A failed doc closes the task as failed."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "failed"
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    updates = _async_task_updates(pool)
+    assert len(updates) == 1
+    _assert_complete(updates[0], status="failed")
+
+
+@pytest.mark.asyncio
+async def test_no_task_id_skips_close_out():
+    """Payloads without task_id (pre-change messages) keep the old
+    behavior: no async_tasks write at all."""
+    nats = _FakeNATS()
+    pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload())  # no task_id
+    assert len(orchestrator.calls) == 1
+    assert _async_task_updates(pool) == []
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_exception_still_closes_task_by_doc_state():
+    """The orchestrator raises AFTER writing doc state in production;
+    here we simulate its contract: exception raised but the doc row shows
+    failed. The closure still runs and records failed."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "failed"
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    orchestrator.raise_next(RuntimeError("boom after doc write"))
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    updates = _async_task_updates(pool)
+    assert len(updates) == 1
+    _assert_complete(updates[0], status="failed")
+
+
+@pytest.mark.asyncio
+async def test_non_terminal_status_leaves_task_open():
+    """Doc still pending/parsing/indexing after processing (e.g. a
+    concurrent reset raced the orchestrator) — the task row is left
+    untouched for the next delivery."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "indexing"
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    assert _async_task_updates(pool) == []
+
+
+@pytest.mark.asyncio
+async def test_doc_deleted_mid_parse_skips_close_out():
+    """Doc row gone between orchestrator run and closure re-read (deleted
+    mid-parse) — nothing to record, no UPDATE issued."""
+    nats = _FakeNATS()
+    # Metadata lookup (first conn) sees the doc; the closure re-read (second
+    # conn) returns None. _MockPool reuses rows per-conn, so simulate via
+    # doc_row present then a pool whose doc vanishes: use a mutable dict.
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "ready"
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
+    original_acquire = pool.acquire
+
+    state = {"first": True}
+
+    @asynccontextmanager
+    async def acquire():
+        if state["first"]:
+            state["first"] = False
+            async with original_acquire() as conn:
+                yield conn
+        else:
+            # Closure re-read: doc deleted
+            conn = _MockConn(doc_row=None, kb_row=None)
+            pool._conns.append(conn)
+            yield conn
+
+    pool.acquire = acquire
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    assert _async_task_updates(pool) == []
 
 
 # ── config flag ───────────────────────────────────────────────────────────

@@ -225,7 +225,7 @@ func TestPostgresQuotaStoreListNoFilter(t *testing.T) {
 }
 
 // TestPostgresQuotaStoreListTenantFilter 验证 List tenant_id 过滤 → 直接返回指定
-// 租户全部维度（不分页）。
+// 租户全部维度（不分页），并带 GPU 预留视图。
 func TestPostgresQuotaStoreListTenantFilter(t *testing.T) {
 	tx := &quotaFakeTx{}
 	// GetMy 回读该租户全部维度
@@ -233,6 +233,8 @@ func TestPostgresQuotaStoreListTenantFilter(t *testing.T) {
 		reReadRow(string(ports.QuotaGPUCount), 8, 2, 1),
 		reReadRow(string(ports.QuotaCPUCore), 16, 0, 4),
 	}})
+	// GetMy GPU 预留视图回读：used=1, reserved=2, allocated=4
+	tx.enqueueRows(quotaFakeRow{values: []any{int64(1), int64(2), int64(4)}})
 	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
 
 	result, err := q.List(context.Background(), ports.QuotaListRequest{TenantID: testTenantID})
@@ -250,6 +252,14 @@ func TestPostgresQuotaStoreListTenantFilter(t *testing.T) {
 	}
 	if result.Total != 1 {
 		t.Fatalf("List(tenant) Total = %d, want 1", result.Total)
+	}
+	res := result.Items[0].GPUReservation
+	if res == nil {
+		t.Fatalf("List(tenant) GPUReservation = nil, want 预留视图")
+	}
+	if res.AllocatedGPUCount != 4 || res.Used != 1 || res.Reserved != 2 || res.Available != 1 {
+		t.Fatalf("List(tenant) GPUReservation = alloc%v used%v reserved%v available%v, want 4/1/2/1",
+			res.AllocatedGPUCount, res.Used, res.Reserved, res.Available)
 	}
 }
 
@@ -347,7 +357,7 @@ func TestPostgresQuotaStoreListHasMore(t *testing.T) {
 	}
 }
 
-// TestPostgresQuotaStoreGetMy 验证 GetMy 返回当前租户多维度 map。
+// TestPostgresQuotaStoreGetMy 验证 GetMy 返回当前租户多维度 map + GPU 预留视图。
 func TestPostgresQuotaStoreGetMy(t *testing.T) {
 	tx := &quotaFakeTx{}
 	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
@@ -355,6 +365,8 @@ func TestPostgresQuotaStoreGetMy(t *testing.T) {
 		reReadRow(string(ports.QuotaMemoryGB), 32, 4, 0),
 		reReadRow(string(ports.QuotaTokenCount), 1000000, 0, 500000),
 	}})
+	// GPU 预留视图回读：used=1, reserved=2, allocated=4 → available=1
+	tx.enqueueRows(quotaFakeRow{values: []any{int64(1), int64(2), int64(4)}})
 	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
 
 	view, err := q.GetMy(context.Background(), testTenantID)
@@ -372,6 +384,73 @@ func TestPostgresQuotaStoreGetMy(t *testing.T) {
 	}
 	if view.Total[ports.QuotaTokenCount] != 1000000 || view.Used[ports.QuotaTokenCount] != 500000 {
 		t.Fatalf("GetMy() token = total%v used%v", view.Total[ports.QuotaTokenCount], view.Used[ports.QuotaTokenCount])
+	}
+	res := view.GPUReservation
+	if res == nil {
+		t.Fatalf("GetMy() GPUReservation = nil, want 预留视图")
+	}
+	if res.AllocatedGPUCount != 4 || res.Used != 1 || res.Reserved != 2 || res.Available != 1 {
+		t.Fatalf("GetMy() GPUReservation = alloc%v used%v reserved%v available%v, want 4/1/2/1",
+			res.AllocatedGPUCount, res.Used, res.Reserved, res.Available)
+	}
+}
+
+// TestPostgresQuotaStoreGetMyNoReservation 验证 GetMy 无预留行（allocations 无行）
+// → allocated=0；无 gpu_count 配额行 → GPUReservation 保持 nil。
+func TestPostgresQuotaStoreGetMyNoReservation(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		reReadRow(string(ports.QuotaGPUCount), 8, 0, 3),
+	}})
+	// 预留视图查询无行（无 gpu_count 配额行的极端场景）→ ErrNoRows → nil
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	view, err := q.GetMy(context.Background(), testTenantID)
+	if err != nil {
+		t.Fatalf("GetMy() error = %v", err)
+	}
+	if view.GPUReservation != nil {
+		t.Fatalf("GetMy() GPUReservation = %+v, want nil（无 gpu_count 行）", view.GPUReservation)
+	}
+}
+
+// TestPostgresQuotaStoreListReservationBatch 验证 List 无过滤第三步批量查询
+// 填充各租户 GPU 预留视图（未设置预留 → allocated=0）。
+func TestPostgresQuotaStoreListReservationBatch(t *testing.T) {
+	tx := &quotaFakeTx{}
+	// step1：租户列表 [t1, t2]
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		{values: []any{testTenantID}},
+		{values: []any{testTenantID2}},
+	}})
+	// step2：两租户的 gpu_count 维度
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		{values: []any{testTenantID, "tenant-a", string(ports.QuotaGPUCount), int64(8), int64(2), int64(1)}},
+		{values: []any{testTenantID2, "tenant-b", string(ports.QuotaGPUCount), int64(4), int64(0), int64(0)}},
+	}})
+	// step3：批量预留视图：t1 已设置预留 alloc=5，t2 未设置（无 allocations 行不出现，
+	// 但 gpu_count 行 LEFT JOIN 仍返回 allocated=0）
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		{values: []any{testTenantID, int64(1), int64(2), int64(5)}},
+		{values: []any{testTenantID2, int64(0), int64(0), int64(0)}},
+	}})
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	result, err := q.List(context.Background(), ports.QuotaListRequest{Limit: 50})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("List() Items = %d, want 2", len(result.Items))
+	}
+	r1 := result.Items[0].GPUReservation
+	if r1 == nil || r1.AllocatedGPUCount != 5 || r1.Available != 2 {
+		t.Fatalf("List() Items[0].GPUReservation = %+v, want alloc=5 available=2", r1)
+	}
+	r2 := result.Items[1].GPUReservation
+	if r2 == nil || r2.AllocatedGPUCount != 0 || r2.Available != 0 {
+		t.Fatalf("List() Items[1].GPUReservation = %+v, want alloc=0 available=0", r2)
 	}
 }
 

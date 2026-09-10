@@ -22,11 +22,12 @@ type RegisterOptions struct {
 	ImageRegistry                         ports.ImageRegistry
 	VectorStoreService                    ports.VectorStoreService
 	InstanceObservability                 ports.InstanceObservability
+	InstanceSessionIssuer                 ports.InstanceSessionIssuer
 	InstanceObservabilityUsesInstanceName bool
 	InstanceRuntime                       *InstanceRuntime
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
-	EmailNotificationStore                ports.EmailNotificationStore
+	PlatformServiceHealthReader           ports.PlatformServiceHealthReader
 	// InferenceServiceClient routes /api/v1/svc/inference-services* to
 	// inference-service via internal InferenceControl gRPC. When nil the
 	// product handlers return 503 DEPENDENCY_UNAVAILABLE so the gateway
@@ -53,6 +54,10 @@ type RegisterOptions struct {
 	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
 	// in gpu_spec_resources.go). When nil those handlers return 503.
 	GPUSpecStore ports.GPUSpecStore
+	// GPUPartitionPlanner backs POST /gpu-inventory/gpu-partitions (BOSS
+	// cluster GPU split, gpu_partition_resources.go). When nil the handler
+	// returns 503; the kubernetes_rest inventory adapter implements it.
+	GPUPartitionPlanner ports.GPUPartitionPlanner
 	// MetadataStore enables platform-scoped (RLS-bypass) queries for the
 	// cross-tenant GPUSpecInUse check in gpu_spec_resources.go. When nil
 	// the check falls back to a tenant-scoped instanceStore.List.
@@ -65,6 +70,19 @@ type RegisterOptions struct {
 	// (GET /metering/usage + GET /metering/usage/platform). When nil the
 	// handlers fall back to the in-process local adapter.
 	MeteringService ports.MeteringService
+	// PlatformCapacityService backs the platform capacity overview endpoint
+	// (GET /platform/capacity). When nil the handler falls back to the
+	// local deterministic adapter.
+	PlatformCapacityService ports.PlatformCapacityService
+	// ComponentStatusService backs the platform component status endpoint
+	// (GET /platform/components). When nil the handler falls back to the
+	// local deterministic adapter.
+	ComponentStatusService ports.ComponentStatusService
+	// ComponentMetricsReader / ComponentLogReader 背书平台组件诊断接口
+	// （GET /platform/components/{name}/metrics、/logs、/logs/stream）。
+	// 为 nil 时 handler 回退 local 确定性 adapter。
+	ComponentMetricsReader ports.PlatformComponentMetricsReader
+	ComponentLogReader     ports.PlatformComponentLogReader
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -83,6 +101,9 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerBranding(v1)
 	registerAuth(v1)
 	registerMetering(v1, options.MeteringService)
+	registerPlatformCapacity(v1, options.PlatformCapacityService)
+	registerComponentStatus(v1, options.ComponentStatusService)
+	registerComponentDiagnostics(v1, options.ComponentMetricsReader, options.ComponentLogReader)
 	registerHarbor(v1, options.ImageRegistry)
 	// Instances register first so their service can act as InstanceLookup.
 	// 注入到 ObservabilityService（时序图 PromQL 代理需要解析实例记录的
@@ -90,7 +111,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	if options.InstanceRuntime != nil && options.InstanceRuntime.TaskStore == nil {
 		options.InstanceRuntime.TaskStore = options.AsyncTaskStore
 	}
-	instanceLookup, observeInstance := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
+	instanceLookup, observeInstance := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceSessionIssuer, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
 	// Tasks register after instances so the lazy-sync observer (store read +
 	// single-instance Kubernetes refresh) is available for GET /tasks/{id}.
 	registerTasksWithStore(v1, options.AsyncTaskStore, observeInstance)
@@ -98,10 +119,11 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 		promSvc.SetInstanceLookup(instanceLookup)
 	}
 	registerObservability(v1, options.ObservabilityService)
+	registerPlatformServiceHealth(v1, options.PlatformServiceHealthReader)
 	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient, options.GPUSpecStore, options.QuotaStoreService, options.QuotaAdminService)
 	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
-	registerStorageResourcesWithServiceAndTasks(v1, options.StorageService, options.AsyncTaskStore)
+	registerStorageResourcesWithServiceAndTasksAndStore(v1, options.StorageService, options.AsyncTaskStore, options.GPUInstanceStore)
 	if options.VectorStoreService != nil {
 		registerVectorStoreResourcesWithServiceAndTasks(v1, options.VectorStoreService, options.AsyncTaskStore)
 	} else {
@@ -110,7 +132,6 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerK8sClusterResourcesWithService(v1, options.K8sClusterService)
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
-	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)
@@ -119,6 +140,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	// GPU spec directory CRUD (POST/DELETE) + reservation management +
 	// tenant self-query endpoints (SPEC §4.3).
 	registerGPUSpecResources(v1, options.GPUSpecStore, options.GPUInventory, options.GPUInstanceStore, options.MetadataStore)
+	// BOSS cluster GPU split (GPU-PARTITION-C): async task accepted + in-process apply.
+	registerGPUPartitionResources(v1, options.GPUPartitionPlanner, options.AsyncTaskStore)
 	registerReservationResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 
 	svc := h.Group("/api/v1/svc")
@@ -141,6 +164,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerSandboxes(svc)
 	registerTenant(svc)
 	registerTenantPlans(svc)
+	registerTenantList(svc)
 	registerTenantAdmins(svc)
 
 	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)

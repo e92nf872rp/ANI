@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>235</dd></div>
-          <div><dt>Schemas</dt><dd>318</dd></div>
+          <div><dt>Operations</dt><dd>244</dd></div>
+          <div><dt>Schemas</dt><dd>332</dd></div>
         </dl>
       </section>
 
@@ -273,11 +273,75 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants</code></td>
+          <td><code>listTenants</code></td>
+          <td>租户列表</td>
+          <td><code>scope:tenant:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants</code></td>
+          <td><code>createTenant</code></td>
+          <td>创建租户</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenants/{tenant_id}</code></td>
           <td><code>getTenant</code></td>
           <td>查询租户（最小视图）</td>
           <td><code>scope:tenant:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}</code></td>
+          <td><code>updateTenant</code></td>
+          <td>更新租户基本信息</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/auth</code></td>
+          <td><code>getTenantAuth</code></td>
+          <td>查询租户认证配置</td>
+          <td><code>scope:tenant:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}/auth</code></td>
+          <td><code>updateTenantAuth</code></td>
+          <td>更新租户认证配置</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants/{tenant_id}/disable</code></td>
+          <td><code>disableTenant</code></td>
+          <td>禁用租户</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants/{tenant_id}/freeze</code></td>
+          <td><code>freezeTenant</code></td>
+          <td>冻结租户</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/lifecycle</code></td>
+          <td><code>listTenantLifecycle</code></td>
+          <td>查询租户生命周期记录</td>
+          <td><code>scope:tenant:read</code></td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-put">PUT</span></td>
@@ -350,6 +414,14 @@
           <td>查询租户可分配角色列表</td>
           <td><code>scope:users:read</code></td>
           <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants/{tenant_id}/unfreeze</code></td>
+          <td><code>unfreezeTenant</code></td>
+          <td>解冻租户</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -752,6 +824,14 @@
           <td>200, 401, 403</td>
         </tr>
         <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-inventory/gpu-partitions</code></td>
+          <td><code>createGPUPartition</code></td>
+          <td>集群 GPU 等分切分</td>
+          <td><code>scope:gpu-inventory:write</code></td>
+          <td>202, 400, 401, 403, 422, 503</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/gpu-inventory/occupancy</code></td>
           <td><code>getGPUOccupancy</code></td>
@@ -893,7 +973,7 @@
           <td><code>createInstanceConsoleSession</code></td>
           <td>申请 VM console/VNC session</td>
           <td><code>scope:instances:console</code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 409, 422, 429, 500, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -909,7 +989,7 @@
           <td><code>createInstanceExecSession</code></td>
           <td>创建实例终端 exec session</td>
           <td><code>scope:instances:exec</code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 409, 422, 429, 500, 503</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -926,6 +1006,14 @@
           <td>查询实例日志</td>
           <td><code>scope:instances:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/instances/{instance_id}/logs/stream</code></td>
+          <td><code>streamInstanceLogs</code></td>
+          <td>实例日志 SSE 流式输出</td>
+          <td><code>scope:instances:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1409,78 +1497,6 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
-          <td><code>/notifications/email/recipients</code></td>
-          <td><code>listEmailRecipients</code></td>
-          <td>列出邮件收件人</td>
-          <td><code>scope:notifications:read</code></td>
-          <td>200, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/notifications/email/recipients</code></td>
-          <td><code>createEmailRecipient</code></td>
-          <td>新增收件人</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>201, 400, 401, 403, 409</td>
-        </tr>
-        <tr>
-          <td><span class="method method-delete">DELETE</span></td>
-          <td><code>/notifications/email/recipients/{recipient_id}</code></td>
-          <td><code>deleteEmailRecipient</code></td>
-          <td>删除收件人</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>204, 401, 403, 404</td>
-        </tr>
-        <tr>
-          <td><span class="method method-patch">PATCH</span></td>
-          <td><code>/notifications/email/recipients/{recipient_id}</code></td>
-          <td><code>updateEmailRecipient</code></td>
-          <td>更新收件人（邮箱地址、备注、启停）</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>200, 400, 401, 403, 404</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/notifications/email/smtp</code></td>
-          <td><code>getEmailSmtpConfig</code></td>
-          <td>获取邮件 SMTP 发信通道配置</td>
-          <td><code>scope:notifications:read</code></td>
-          <td>200, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-put">PUT</span></td>
-          <td><code>/notifications/email/smtp</code></td>
-          <td><code>putEmailSmtpConfig</code></td>
-          <td>保存邮件 SMTP 发信通道配置</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>200, 400, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/notifications/email/subscriptions</code></td>
-          <td><code>listEmailSubscriptions</code></td>
-          <td>列出邮件事件订阅</td>
-          <td><code>scope:notifications:read</code></td>
-          <td>200, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-put">PUT</span></td>
-          <td><code>/notifications/email/subscriptions</code></td>
-          <td><code>putEmailSubscriptions</code></td>
-          <td>批量保存邮件事件订阅</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>200, 400, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/notifications/email/test</code></td>
-          <td><code>sendTestEmail</code></td>
-          <td>发送测试邮件</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>200, 401, 403, 422</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
           <td><code>/objects</code></td>
           <td><code>listStorageObjects</code></td>
           <td>查询对象元数据列表</td>
@@ -1593,6 +1609,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/observability/resource_trend</code></td>
+          <td><code>queryResourceTrendObservability</code></td>
+          <td>租户级资源使用率趋势</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/platform-workload-capabilities</code></td>
           <td><code>getPlatformWorkloadCapabilities</code></td>
           <td>查询平台工作负载能力</td>
@@ -1646,6 +1670,54 @@
           <td>查询平台内部工作负载日志</td>
           <td><code>scope:platform-workloads:read</code></td>
           <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/capacity</code></td>
+          <td><code>getPlatformCapacity</code></td>
+          <td>查询平台容量态势汇总</td>
+          <td><code>scope:capacity:read</code></td>
+          <td>200, 401, 403, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/components</code></td>
+          <td><code>getPlatformComponents</code></td>
+          <td>查询平台组件运行状态</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/components/{component_name}/logs</code></td>
+          <td><code>listPlatformComponentLogs</code></td>
+          <td>查询单个平台组件日志列表</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/components/{component_name}/logs/stream</code></td>
+          <td><code>streamPlatformComponentLogs</code></td>
+          <td>平台组件日志 SSE 流式输出</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/components/{component_name}/metrics</code></td>
+          <td><code>getPlatformComponentMetrics</code></td>
+          <td>查询单个平台组件资源指标快照</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/services/health</code></td>
+          <td><code>getPlatformServiceHealth</code></td>
+          <td>查询 ANI 服务监控可达性</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 401, 403, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -2062,7 +2134,6 @@
         <li><code>CreateAPIKeyRequest</code></li>
         <li><code>CreateAPIKeyResponse</code></li>
         <li><code>CreateContainerInstanceConfig</code></li>
-        <li><code>CreateEmailRecipientRequest</code></li>
         <li><code>CreateGPUContainerInstanceConfig</code></li>
         <li><code>CreateInstanceConsoleSessionRequest</code></li>
         <li><code>CreateInstanceExecSessionRequest</code></li>
@@ -2091,11 +2162,6 @@
         <li><code>CreateVectorStoreRequest</code></li>
         <li><code>CreateVolumeSnapshotRequest</code></li>
         <li><code>CursorPage</code></li>
-        <li><code>EmailRecipient</code></li>
-        <li><code>EmailRecipientListResponse</code></li>
-        <li><code>EmailSmtpConfigResponse</code></li>
-        <li><code>EmailSubscription</code></li>
-        <li><code>EmailSubscriptionListResponse</code></li>
         <li><code>EncryptionKey</code></li>
         <li><code>EncryptionKeyCreateRequest</code></li>
         <li><code>EncryptionKeyListResponse</code></li>
@@ -2116,6 +2182,8 @@
         <li><code>GPUInventoryListResponse</code></li>
         <li><code>GPUInventoryRecord</code></li>
         <li><code>GPUOccupancyStats</code></li>
+        <li><code>GPUPartitionCreateRequest</code></li>
+        <li><code>GPUPartitionTaskAccepted</code></li>
         <li><code>GPUSchedulingQueue</code></li>
         <li><code>GPUSchedulingQueueCreateRequest</code></li>
         <li><code>GPUSchedulingQueueListResponse</code></li>
@@ -2206,7 +2274,20 @@
         <li><code>PasswordLoginRequest</code></li>
         <li><code>PlanBoundTenantCount</code></li>
         <li><code>PlanBoundTenantCountList</code></li>
+        <li><code>PlatformCapacityResponse</code></li>
+        <li><code>PlatformCapacitySummary</code></li>
+        <li><code>PlatformComponent</code></li>
+        <li><code>PlatformComponentGroup</code></li>
+        <li><code>PlatformComponentLogEntry</code></li>
+        <li><code>PlatformComponentLogListResponse</code></li>
+        <li><code>PlatformComponentMetrics</code></li>
+        <li><code>PlatformComponentRef</code></li>
+        <li><code>PlatformComponentStatusResponse</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
+        <li><code>PlatformRegion</code></li>
+        <li><code>PlatformRegionCapacity</code></li>
+        <li><code>PlatformServiceHealthComponent</code></li>
+        <li><code>PlatformServiceHealthResponse</code></li>
         <li><code>PlatformUser</code></li>
         <li><code>PlatformUserCreateRequest</code></li>
         <li><code>PlatformUserIdempotentRequest</code></li>
@@ -2224,7 +2305,6 @@
         <li><code>PlatformWorkloadLogEntry</code></li>
         <li><code>PlatformWorkloadLogListResponse</code></li>
         <li><code>PlatformWorkloadMetadata</code></li>
-        <li><code>PlatformWorkloadModelMaterialization</code></li>
         <li><code>PlatformWorkloadNetwork</code></li>
         <li><code>PlatformWorkloadPort</code></li>
         <li><code>PlatformWorkloadResources</code></li>
@@ -2233,8 +2313,6 @@
         <li><code>PlatformWorkloadSecretBinding</code></li>
         <li><code>PlatformWorkloadTopology</code></li>
         <li><code>PlatformWorkloadUpdateRequest</code></li>
-        <li><code>PutEmailSmtpConfigRequest</code></li>
-        <li><code>PutEmailSubscriptionsRequest</code></li>
         <li><code>Quota</code></li>
         <li><code>QuotaCreateItem</code></li>
         <li><code>QuotaCreateRequest</code></li>
@@ -2295,7 +2373,6 @@
         <li><code>SecretBindingRequest</code></li>
         <li><code>SecretCreateRequest</code></li>
         <li><code>SecretListResponse</code></li>
-        <li><code>SendTestEmailResponse</code></li>
         <li><code>SetRegistryPermissionRequest</code></li>
         <li><code>StorageBucketACLUpdateRequest</code></li>
         <li><code>StorageBucketClassUpdateRequest</code></li>
@@ -2307,6 +2384,7 @@
         <li><code>StorageBucketObjectEntry</code></li>
         <li><code>StorageBucketObjectListResponse</code></li>
         <li><code>StorageBucketRecord</code></li>
+        <li><code>StorageConsumerInfo</code></li>
         <li><code>StorageFilesystem</code></li>
         <li><code>StorageFilesystemExpandRequest</code></li>
         <li><code>StorageFilesystemListResponse</code></li>
@@ -2329,15 +2407,23 @@
         <li><code>StorageVolumeUnmountRequest</code></li>
         <li><code>TaskListResponse</code></li>
         <li><code>Tenant</code></li>
+        <li><code>TenantAuthConfig</code></li>
+        <li><code>TenantAuthSummary</code></li>
+        <li><code>TenantAuthUpdateRequest</code></li>
+        <li><code>TenantCreateRequest</code></li>
+        <li><code>TenantLifecycleEntry</code></li>
+        <li><code>TenantLifecycleListResponse</code></li>
+        <li><code>TenantListItem</code></li>
+        <li><code>TenantListResponse</code></li>
         <li><code>TenantPlanUpdateRequest</code></li>
         <li><code>TenantSummary</code></li>
         <li><code>TenantSummaryList</code></li>
+        <li><code>TenantUpdateRequest</code></li>
         <li><code>TenantUser</code></li>
         <li><code>TenantUserListResponse</code></li>
         <li><code>TenantUserPermissions</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
-        <li><code>UpdateEmailRecipientRequest</code></li>
         <li><code>UpdateNetworkSecurityGroupRuleRequest</code></li>
         <li><code>UpdateObservabilityAlertRuleRequest</code></li>
         <li><code>UserMutationResult</code></li>
