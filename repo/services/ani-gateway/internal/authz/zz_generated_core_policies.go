@@ -1383,6 +1383,18 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/platform-workloads/{workload_id}/logs",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}},
 	},
+	"GET /api/v1/platform/audit-logs": {
+		Source:               PolicySourceGenerated,
+		OperationID:          "getPlatformAuditLogs",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/platform/audit-logs",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+		Version:              "v1",
+		Resource:             "audit-log",
+		Action:               "read",
+		Boundary:             BoundaryPlatform,
+		PrincipalKinds:       []PrincipalKind{PrincipalUser},
+	},
 	"GET /api/v1/platform/capacity": {
 		Source:               PolicySourceGenerated,
 		OperationID:          "getPlatformCapacity",

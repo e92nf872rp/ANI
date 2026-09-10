@@ -74,6 +74,10 @@ type RegisterOptions struct {
 	// (GET /platform/capacity). When nil the handler falls back to the
 	// local deterministic adapter.
 	PlatformCapacityService ports.PlatformCapacityService
+	// PlatformAuditService backs the platform audit logs endpoint
+	// (GET /platform/audit-logs). When nil the handler falls back to the
+	// local deterministic adapter.
+	PlatformAuditService ports.PlatformAuditService
 	// ComponentStatusService backs the platform component status endpoint
 	// (GET /platform/components). When nil the handler falls back to the
 	// local deterministic adapter.
@@ -102,6 +106,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerAuth(v1)
 	registerMetering(v1, options.MeteringService)
 	registerPlatformCapacity(v1, options.PlatformCapacityService)
+	registerPlatformAudit(v1, options.PlatformAuditService)
 	registerComponentStatus(v1, options.ComponentStatusService)
 	registerComponentDiagnostics(v1, options.ComponentMetricsReader, options.ComponentLogReader)
 	registerHarbor(v1, options.ImageRegistry)

@@ -1139,6 +1139,12 @@
       "scope": "scope:platform-workloads:read"
     },
     {
+      "operationId": "getPlatformAuditLogs",
+      "method": "GET",
+      "path": "/platform/audit-logs",
+      "scope": "scope:audit-log:read"
+    },
+    {
       "operationId": "getPlatformCapacity",
       "method": "GET",
       "path": "/platform/capacity",
@@ -1626,6 +1632,11 @@
     "PasswordLoginRequest",
     "PlanBoundTenantCount",
     "PlanBoundTenantCountList",
+    "PlatformAuditLogDetail",
+    "PlatformAuditLogItem",
+    "PlatformAuditLogResponse",
+    "PlatformAuditResource",
+    "PlatformAuditUser",
     "PlatformCapacityResponse",
     "PlatformCapacitySummary",
     "PlatformComponent",

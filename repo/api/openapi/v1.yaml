@@ -1090,6 +1090,92 @@ components:
         real_provider: { type: boolean }
         reason:        { type: string, nullable: true }
 
+    PlatformAuditLogResponse:
+      type: object
+      description: "平台审计日志（kube-apiserver 控制面 write 审计）查询响应。total 为近似量；游标翻页基于末条 timestamp。"
+      required: [items, next_after, total_approx, dev_profile]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformAuditLogItem' }
+          description: "按 timestamp(+auditID) 全局倒序的一页数据。"
+        next_after:
+          type: string
+          nullable: true
+          description: "下一页游标（末条 timestamp，RFC3339）；nil 表示已无更多。"
+        total_approx:
+          type: integer
+          format: int64
+          minimum: 0
+          description: "近似总量（count_over_time 按 step 聚合），非精确值。"
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformAuditLogItem:
+      type: object
+      description: "单条 k8s 控制面审计记录（Metadata 级，不包含请求体）。"
+      required: [audit_id, timestamp, verb, user, resource, response_code, detail]
+      properties:
+        audit_id:
+          type: string
+          description: "K8s auditID，配合 timestamp 构成全局游标键。"
+        timestamp:
+          type: string
+          format: date-time
+          description: "requestReceivedTimestamp（RFC3339 UTC）。"
+        verb:
+          type: string
+          enum: [create, update, patch, delete]
+        user:
+          $ref: '#/components/schemas/PlatformAuditUser'
+        resource:
+          $ref: '#/components/schemas/PlatformAuditResource'
+        response_code:
+          type: integer
+          description: "apiserver 响应状态码（responseStatus.code）。"
+        detail:
+          $ref: '#/components/schemas/PlatformAuditLogDetail'
+
+    PlatformAuditUser:
+      type: object
+      description: "K8s 原生操作者身份（不映射 ANI 用户）。"
+      required: [username, groups]
+      properties:
+        username:
+          type: string
+          description: "k8s 用户名（如 system:serviceaccount:* / system:masters）。"
+        groups:
+          type: array
+          items: { type: string }
+          description: "k8s 用户所属 group 列表（空为无）。"
+
+    PlatformAuditResource:
+      type: object
+      description: "被操作的 K8s 资源引用。"
+      required: [namespace, resource, name]
+      properties:
+        namespace:
+          type: string
+          description: "资源所在命名空间（命名空间级资源；集群级为空串）。"
+        resource:
+          type: string
+          description: "K8s resource 复数（如 deployments）。"
+        name:
+          type: string
+          description: "资源名称。"
+
+    PlatformAuditLogDetail:
+      type: object
+      description: "审计详情（已脱敏：不含请求体，敏感 query 已置 ***）。"
+      required: [request_uri, user_agent]
+      properties:
+        request_uri:
+          type: string
+          description: "脱敏后的请求 URI（敏感 query 置 ***）。"
+        user_agent:
+          type: string
+          description: "User-Agent。"
+
     PlatformCapacityResponse:
       type: object
       description: "平台容量态势汇总（整平台 = 1 个默认区域；只读，无区域 CRUD）。"
@@ -8468,6 +8554,97 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlatformCapacityResponse'
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /platform/audit-logs:
+    get:
+      operationId: getPlatformAuditLogs
+      x-ani-rbac-scope: "scope:audit-log:read"
+      x-ani-authz:
+        version: v1
+        resource: audit-log
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      summary: 查询平台审计日志（k8s 控制面 write 审计）
+      description: |
+        平台级（跨租户）只读审计检索。数据源为 kube-apiserver 审计日志（Metadata 级，
+        仅 write verb：create/update/patch/delete），操作者为 K8s 原生身份。
+        返回按 timestamp(+auditID) 全局倒序的一页，游标翻页（after=末条 timestamp），
+        total 为近似量（count_over_time）。任一数据源失败不阻塞 200：
+        缺失字段降级为 0/空，dev_profile.real_provider=false + reason 记录降级原因；
+        空流返回 items:[]。租户 token 访问必须 403。
+      tags: [PlatformAuditLog]
+      parameters:
+        - name: time_from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: 查询窗口起点（RFC3339），必须与 time_to 成对且 time_from<=time_to。
+        - name: time_to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: 查询窗口终点（RFC3339），必须与 time_from 成对且 time_from<=time_to。
+        - name: user
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 按操作者过滤（audit_user 标签）。
+        - name: verb
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [create, update, patch, delete]
+          description: 按动作过滤（audit_verb 标签）。
+        - name: resource_type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 按资源类型过滤（audit_resource 标签，K8s resource 复数）。
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 按命名空间过滤（audit_namespace 标签）。
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: 游标（上一页末条 timestamp，RFC3339），配合时间窗口实现不重复翻页。
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+          description: 每页条数，默认 20，上限 100，超限钳制为 100。
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 可选全文检索（|~），限时间窗使用，谨慎。
+      responses:
+        "200":
+          description: 平台审计日志记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAuditLogResponse'
+        "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }

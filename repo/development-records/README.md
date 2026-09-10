@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### BOSS 平台审计日志读取（2026-09，分支 feat/platform-audit-log）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-AUDIT-LOG | BOSS 平台只读审计日志查询接口：Core OpenAPI 契约优先新增 `GET /api/v1/platform/audit-logs`（time_from/time_to 必填成对、user/verb/resource_type/namespace/after/page_size/keyword 过滤，page_size 默认 20 上限 100 钳制），数据源 kube-apiserver Metadata 级 write 审计经 fluent-bit 接流 Loki；`pkg/ports/platform_audit.go` 新接口 + loki_platform_audit.go real adapter（query_range + LogQL label 过滤 + timestamp+auditID 全局倒序游标分页 + count_over_time 近似总量 + Loki 不可用/非 200 单源降级 200）+ local_platform_audit.go 确定性降级（TotalApprox 随过滤裁剪）+ gateway 路由与装配（AUDIT_LOG_PROVIDER=local/loki 分派）+ authz/Core SDK 生成物（+12 策略/+7 各语言，validate_gateway_authz_drift 零漂移）；修复 `scripts/generate_gateway_authz.py` Windows 写 CRLF 导致生成全量漂移（newline=\\"\\n\\"）；新增/增量单测全 PASS，平台/租户隔离红线由 middleware 锁定；K8s 测试环境（ani-test2，镜像 test2-20260910-auditlog2）local 降级路径实测 T-3~T-5 全通过；真实控制面审计接流因 apiserver static pod manifest 编辑受限未启用（遗留风险，待后续】 | platform-audit-log.md |
+
 ### 平台组件状态与组件诊断（2026-09，分支 feat/component-status）
 
 | 批次 | 内容摘要 | 文件 |
