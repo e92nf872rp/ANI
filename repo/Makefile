@@ -1318,7 +1318,7 @@ validate-services:
 	@echo "→ 运行 Services inference-service Go tests..."
 	$(GO_CACHE_ENV) go test ./services/inference-service/... -v
 	@echo "→ 检查 RAG Python compile（运行级测试见 python-ci job，依赖完整 rag-engine requirements）..."
-	python -m compileall -q ai/rag-engine
+	python -m compileall -q -x '.*[\\/]\.venv[\\/].*' ai/rag-engine
 	$(MAKE) validate-architecture
 	@echo "✅ Services PR gate valid"
 
