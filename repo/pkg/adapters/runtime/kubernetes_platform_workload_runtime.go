@@ -508,10 +508,6 @@ func shortWorkloadIdentity(tenantID string) string {
 	return clean
 }
 
-func renderLeaderWorkerPlatformWorkloadManifests(tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec, nodeCIDRs []string) []ports.WorkloadManifest {
-	return renderLeaderWorkerPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID, spec, nodeCIDRs, false)
-}
-
 func renderLeaderWorkerPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec, nodeCIDRs []string, allowInsecureHTTP bool) []ports.WorkloadManifest {
 	namespace := tenantNamespace(tenantID)
 	resourceName := platformWorkloadResourceName(spec.Name)
@@ -653,9 +649,11 @@ func renderPlatformWorkloadNetworkPolicy(tenantID, workloadID string, spec ports
 		)
 	}
 	policyTypes := []any{"Ingress"}
-	policySpec := map[string]any{"podSelector": map[string]any{"matchLabels": selector}, "policyTypes": policyTypes, "ingress": ingress}
 	if spec.ModelMaterialization != nil {
 		policyTypes = append(policyTypes, "Egress")
+	}
+	policySpec := map[string]any{"podSelector": map[string]any{"matchLabels": selector}, "policyTypes": policyTypes, "ingress": ingress}
+	if spec.ModelMaterialization != nil {
 		policySpec["egress"] = []any{
 			map[string]any{"to": []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "kube-system"}}}}, "ports": []any{map[string]any{"protocol": "UDP", "port": 53}, map[string]any{"protocol": "TCP", "port": 53}}},
 			map[string]any{"to": []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "ani-system"}}, "podSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "model-service"}}}}, "ports": []any{map[string]any{"protocol": "TCP", "port": 9105}}},
@@ -724,14 +722,11 @@ func platformWorkloadPodVolumes(spec ports.PlatformWorkloadCreateSpec) ([]any, [
 	return volumes, mounts
 }
 
-// platformWorkloadMaterializationContainers adds a single bounded, publisher-owned
-// fetcher init container and returns read-only mounts for the runtime container.
-// The descriptor contains only immutable metadata; the short-lived download URL
-// is obtained by the fetcher at runtime and is never rendered here.
-func platformWorkloadMaterializationContainers(spec ports.PlatformWorkloadCreateSpec, mounts []any) ([]any, []any) {
-	return platformWorkloadMaterializationContainersWithConfig(spec, mounts, false)
-}
-
+// platformWorkloadMaterializationContainersWithConfig adds a single bounded,
+// publisher-owned fetcher init container and returns read-only mounts for the
+// runtime container. The descriptor contains only immutable metadata; the
+// short-lived download URL is obtained by the fetcher at runtime and is never
+// rendered here.
 func platformWorkloadMaterializationContainersWithConfig(spec ports.PlatformWorkloadCreateSpec, mounts []any, allowInsecureHTTP bool) ([]any, []any) {
 	if spec.ModelMaterialization == nil {
 		return nil, mounts
