@@ -51,13 +51,13 @@ func TestCoreRegistryBasics(t *testing.T) {
 		t.Error("policy should allow principal kind user")
 	}
 
-	// Direct P2 接受的显式 operationId 端点命中。
-	refresh, ok := registry.LookupOperation("refreshSession")
+	// 派生 operationId 端点命中。
+	refresh, ok := registry.LookupOperation("refreshToken")
 	if !ok {
-		t.Fatal("operation refreshSession not found")
+		t.Fatal("operation refreshToken not found")
 	}
 	if refresh.Method != "POST" || refresh.PathTemplate != "/api/v1/auth/refresh" {
-		t.Errorf("refreshSession route = %s %s, want POST /api/v1/auth/refresh", refresh.Method, refresh.PathTemplate)
+		t.Errorf("refreshToken route = %s %s, want POST /api/v1/auth/refresh", refresh.Method, refresh.PathTemplate)
 	}
 
 	// public 端点命中且无 security。

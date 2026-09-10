@@ -25,6 +25,7 @@ const (
 	ModelService_GetModel_FullMethodName            = "/model.v1.ModelService/GetModel"
 	ModelService_GetModelVersion_FullMethodName     = "/model.v1.ModelService/GetModelVersion"
 	ModelService_ListModels_FullMethodName          = "/model.v1.ModelService/ListModels"
+	ModelService_ListModelVersions_FullMethodName   = "/model.v1.ModelService/ListModelVersions"
 	ModelService_DeleteModel_FullMethodName         = "/model.v1.ModelService/DeleteModel"
 	ModelService_CreateModelVersion_FullMethodName  = "/model.v1.ModelService/CreateModelVersion"
 	ModelService_GetUploadURL_FullMethodName        = "/model.v1.ModelService/GetUploadURL"
@@ -46,6 +47,8 @@ type ModelServiceClient interface {
 	GetModelVersion(ctx context.Context, in *GetModelVersionRequest, opts ...grpc.CallOption) (*GetModelVersionResponse, error)
 	// ListModels returns a cursor-paginated list of models for the tenant.
 	ListModels(ctx context.Context, in *ListModelsRequest, opts ...grpc.CallOption) (*ListModelsResponse, error)
+	// ListModelVersions returns cursor-paginated versions for one tenant-owned model.
+	ListModelVersions(ctx context.Context, in *ListModelVersionsRequest, opts ...grpc.CallOption) (*ListModelVersionsResponse, error)
 	// DeleteModel soft-deletes a model. Fails if any InferenceService references it.
 	DeleteModel(ctx context.Context, in *DeleteModelRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// CreateModelVersion registers a new version after the file is uploaded to MinIO.
@@ -99,6 +102,15 @@ func (c *modelServiceClient) GetModelVersion(ctx context.Context, in *GetModelVe
 func (c *modelServiceClient) ListModels(ctx context.Context, in *ListModelsRequest, opts ...grpc.CallOption) (*ListModelsResponse, error) {
 	out := new(ListModelsResponse)
 	err := c.cc.Invoke(ctx, ModelService_ListModels_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *modelServiceClient) ListModelVersions(ctx context.Context, in *ListModelVersionsRequest, opts ...grpc.CallOption) (*ListModelVersionsResponse, error) {
+	out := new(ListModelVersionsResponse)
+	err := c.cc.Invoke(ctx, ModelService_ListModelVersions_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -164,6 +176,8 @@ type ModelServiceServer interface {
 	GetModelVersion(context.Context, *GetModelVersionRequest) (*GetModelVersionResponse, error)
 	// ListModels returns a cursor-paginated list of models for the tenant.
 	ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error)
+	// ListModelVersions returns cursor-paginated versions for one tenant-owned model.
+	ListModelVersions(context.Context, *ListModelVersionsRequest) (*ListModelVersionsResponse, error)
 	// DeleteModel soft-deletes a model. Fails if any InferenceService references it.
 	DeleteModel(context.Context, *DeleteModelRequest) (*emptypb.Empty, error)
 	// CreateModelVersion registers a new version after the file is uploaded to MinIO.
@@ -195,6 +209,9 @@ func (UnimplementedModelServiceServer) GetModelVersion(context.Context, *GetMode
 }
 func (UnimplementedModelServiceServer) ListModels(context.Context, *ListModelsRequest) (*ListModelsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListModels not implemented")
+}
+func (UnimplementedModelServiceServer) ListModelVersions(context.Context, *ListModelVersionsRequest) (*ListModelVersionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListModelVersions not implemented")
 }
 func (UnimplementedModelServiceServer) DeleteModel(context.Context, *DeleteModelRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteModel not implemented")
@@ -292,6 +309,24 @@ func _ModelService_ListModels_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ModelServiceServer).ListModels(ctx, req.(*ListModelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ModelService_ListModelVersions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListModelVersionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModelServiceServer).ListModelVersions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModelService_ListModelVersions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModelServiceServer).ListModelVersions(ctx, req.(*ListModelVersionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -408,6 +443,10 @@ var ModelService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListModels",
 			Handler:    _ModelService_ListModels_Handler,
+		},
+		{
+			MethodName: "ListModelVersions",
+			Handler:    _ModelService_ListModelVersions_Handler,
 		},
 		{
 			MethodName: "DeleteModel",

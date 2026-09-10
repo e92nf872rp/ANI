@@ -223,7 +223,10 @@ jobs:
           # PYSEC-2026-3740 (nltk pathsec model-artifact 漏洞): nltk 3.10.3 已是最新版且无修复版本
           # (GHSA-8mgp-746c-j5xp last_affected=3.10.3, Not yet patched); rag-engine 仅将 nltk 作为
           # llama-index-core 传递依赖, 不调用受影响的 TransitionParser/AveragedPerceptron 等 API。
-          pip-audit -r ai/rag-engine/requirements.txt --ignore-vuln PYSEC-2026-3740 --ignore-vuln GHSA-8mgp-746c-j5xp
+          # CVE-2026-69112 (accelerate): 1.14.0 已是最新版且公告无修复版本 (Fix Versions 为空);
+          # accelerate 仅作为 llama-index-readers-docling → docling-slim 的传递依赖被安装,
+          # rag-engine 不直接调用受影响的 API, 待上游发布修复版本后移除本豁免。
+          pip-audit -r ai/rag-engine/requirements.txt --ignore-vuln PYSEC-2026-3740 --ignore-vuln GHSA-8mgp-746c-j5xp --ignore-vuln CVE-2026-69112
 
   # ── OpenAPI Spec 校验 ────────────────────────────────────────────────────────
   api-spec-lint:
@@ -250,6 +253,32 @@ jobs:
           python scripts/validate_openapi_spec_test.py
           python scripts/validate_openapi_spec.py
 
+  # ── Core v1 兼容性与 Gateway 授权门禁 ───────────────────────────────────────
+  core-contract-gate:
+    name: Core Compatibility / Gateway Authz
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: repo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: repo/ci/requirements-contract.txt
+
+      - name: Install contract gate dependencies
+        run: pip install -r ci/requirements-contract.txt
+
+      - name: Validate frozen Core v1 compatibility
+        run: make validate-core-api-compatibility
+
+      - name: Validate current Gateway authorization registry
+        run: make validate-gateway-authz
+
   required-gates:
     name: Required PR Gates
     if: ${{ always() }}
@@ -259,6 +288,7 @@ jobs:
       - services-pr-gate
       # - dependency-scan
       - api-spec-lint
+      - core-contract-gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -268,9 +298,10 @@ jobs:
           PYTHON_RESULT: ${{ needs.python-ci.result }}
           SERVICES_RESULT: ${{ needs.services-pr-gate.result }}
           OPENAPI_RESULT: ${{ needs.api-spec-lint.result }}
+          CORE_CONTRACT_RESULT: ${{ needs.core-contract-gate.result }}
         run: |
           set -euo pipefail
-          for result in "$GO_RESULT" "$PYTHON_RESULT" "$SERVICES_RESULT" "$OPENAPI_RESULT"; do
+          for result in "$GO_RESULT" "$PYTHON_RESULT" "$SERVICES_RESULT" "$OPENAPI_RESULT" "$CORE_CONTRACT_RESULT"; do
             test "$result" = success || {
               echo "Required PR Gates blocked by job result: $result"
               exit 1

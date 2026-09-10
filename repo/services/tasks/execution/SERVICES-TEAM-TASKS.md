@@ -150,13 +150,13 @@ Handler：
 
 ## TASK-SVC-011
 
-状态：[ ] 待开始  
-接口：Gateway `POST /v1/chat/completions`  
-优先级：P2  
-本任务依赖：TASK-SVC-003  
+状态：[-] 已取消（数据面归属 Envoy AI Gateway）
+接口：`ani-gateway` 不提供 `POST /v1/chat/completions`
+优先级：—
+本任务依赖：—
 模块详文：`docs/console-modules/integration/openai-compatible-api.md`
 
-> 不在 `services/v1.yaml`；Gateway `inferenceProxy` stub 验通
+> 该路径由独立 Envoy AI Gateway 数据面提供；不要在 ANI Gateway 控制面重新注册代理。
 
 ---
 

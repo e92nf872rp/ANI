@@ -114,6 +114,10 @@ class _MockCoreClient:
             raise CoreAPIError("core down", status_code=503, code="UNAVAILABLE")
         return {"id": _vector_store_name(KB_ID), "name": kwargs["name"]}
 
+    async def set_knowledge_base_link(self, **kwargs):
+        self.calls.append(("set_knowledge_base_link", kwargs))
+        return {"id": kwargs["vector_store_id"]}
+
     async def delete_vector_store(self, **kwargs):
         self.calls.append(("delete_vector_store", kwargs))
         return {"id": kwargs["vector_store_id"]}
@@ -189,17 +193,49 @@ def test_delete_kb_without_pool_returns_failed_precondition(stub):
     assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
-# ── P1 RPCs: UpdateKBPermissions still UNIMPLEMENTED; B2 RPCs wired ──────────
+# ── P1 RPCs: B2 RPCs wired; permissions pair wired in B4 ─────────────────────
 
 
-def test_update_kb_permissions_still_unimplemented(stub):
+def test_update_kb_permissions_b4_wired_not_unimplemented(stub):
+    """B4 (kb-p1-plan §2.5): UpdateKBPermissions is implemented. Constructed
+    without a pool it must return FAILED_PRECONDITION — never UNIMPLEMENTED
+    (that would mean the P1 stub still shadows the servicer)."""
     with pytest.raises(grpc.RpcError) as exc:
         stub.UpdateKBPermissions(
             kb_pb.UpdateKBPermissionsRequest(
                 tenant_id=TENANT_ID, kb_id=KB_ID, idempotency_key=str(uuid.uuid4())
             )
         )
-    assert exc.value.code() == grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_get_kb_permissions_b4_wired_not_unimplemented(stub):
+    """B4 (kb-p1-plan §2.5): GetKBPermissions is implemented; without a pool
+    it returns FAILED_PRECONDITION — never UNIMPLEMENTED."""
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetKBPermissions(kb_pb.GetKBPermissionsRequest(tenant_id=TENANT_ID, kb_id=KB_ID))
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_b2_rpcs_wired_not_unimplemented(stub):
+    """ListKBCitations/ListKBSessions are implemented in B2 (issue-045).
+
+    Constructed without a pool they must return FAILED_PRECONDITION — never
+    UNIMPLEMENTED (that would mean the P1 stub still shadows the servicer).
+    """
+    for rpc, req in [
+        ("ListKBCitations", kb_pb.ListKBCitationsRequest(tenant_id=TENANT_ID, kb_id=KB_ID)),
+        ("ListKBSessions", kb_pb.ListKBSessionsRequest(tenant_id=TENANT_ID, kb_id=KB_ID)),
+        ("ListDocumentChunks", kb_pb.ListDocumentChunksRequest(tenant_id=TENANT_ID, kb_id=KB_ID, doc_id=str(uuid.uuid4()))),
+        ("GetSessionMessages", kb_pb.GetSessionMessagesRequest(tenant_id=TENANT_ID, kb_id=KB_ID, session_id=str(uuid.uuid4()))),
+        ("DeleteSession", kb_pb.DeleteSessionRequest(tenant_id=TENANT_ID, kb_id=KB_ID, session_id=str(uuid.uuid4()))),
+    ]:
+        with pytest.raises(grpc.RpcError) as exc:
+            getattr(stub, rpc)(req)
+        assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+        assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
 def test_b2_rpcs_wired_not_unimplemented(stub):
@@ -363,6 +399,9 @@ def test_create_kb_poison_key_self_heals():
                     'duplicate key value violates unique constraint '
                     '"async_tasks_tenant_id_idempotency_key_key"'
                 )
+            if "INSERT INTO kb_audit_log" in sql:
+                self.events.append("insert_audit")
+                return {"id": uuid.uuid4()}
             return None
 
         async def fetch(self, sql, *args):

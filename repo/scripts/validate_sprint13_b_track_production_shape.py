@@ -157,6 +157,8 @@ REQUIRED_RBAC_RESOURCES = {
     "volumesnapshotclasses",
     "volumesnapshotcontents",
     "volumesnapshots",
+    "virtualmachines/addvolume",
+    "virtualmachines/removevolume",
 }
 REQUIRED_STANDARD_SLICES = {"S01", "S02", "S03", "S04", "S05", "S06", "S07"}
 REQUIRED_DEPLOYMENT_ENVS = {

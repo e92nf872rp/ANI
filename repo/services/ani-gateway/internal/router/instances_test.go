@@ -1001,7 +1001,6 @@ func TestInstanceInstanceServiceVMVolumeBinding(t *testing.T) {
 		TenantID:        "tenant-a",
 		InstanceID:      created.Ref.InstanceID,
 		VolumeID:        "vol-data-demo",
-		MountPath:       "/mnt/vol-data-demo",
 		UserID:          "user-a",
 		PermissionProof: "demo:test",
 		RequestedAt:     time.Unix(1800, 0),
@@ -1671,7 +1670,7 @@ func extractInstanceID(body string) string {
 	return rest[:end]
 }
 
-func TestInstanceInstanceLifecycleForwardsAttachVolumeMountPath(t *testing.T) {
+func TestInstanceInstanceLifecycleAllowsVMVolumeAttachWithoutMountPath(t *testing.T) {
 	h := server.New()
 	h.Use(func(ctx context.Context, c *app.RequestContext) {
 		c.Set("tenant_id", "tenant-a")
@@ -1693,7 +1692,7 @@ func TestInstanceInstanceLifecycleForwardsAttachVolumeMountPath(t *testing.T) {
 		t.Fatalf("could not extract instance id from %s", createResp.Body())
 	}
 
-	attachBody := `{"action":"attach_volume","volume_id":"volume-a","mount_path":"/data","idempotency_key":"attach-volume-a"}`
+	attachBody := `{"action":"attach_volume","volume_id":"volume-a","idempotency_key":"attach-volume-a"}`
 	attachResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/"+instanceID+"/lifecycle",
 		&ut.Body{Body: bytes.NewBufferString(attachBody), Len: len(attachBody)},
 		ut.Header{Key: "Content-Type", Value: "application/json"},
@@ -1701,8 +1700,8 @@ func TestInstanceInstanceLifecycleForwardsAttachVolumeMountPath(t *testing.T) {
 	if attachResp.StatusCode() != http.StatusOK {
 		t.Fatalf("attach status = %d, want 200; body=%s", attachResp.StatusCode(), attachResp.Body())
 	}
-	if !strings.Contains(string(attachResp.Body()), `"mount_path":"/data"`) {
-		t.Fatalf("attach response = %s, want forwarded mount_path", attachResp.Body())
+	if strings.Contains(string(attachResp.Body()), `"mount_path"`) || !strings.Contains(string(attachResp.Body()), `"status":"attached"`) {
+		t.Fatalf("attach response = %s, want attached VM disk without guest mount_path", attachResp.Body())
 	}
 }
 

@@ -42,6 +42,11 @@ type QuotaView struct {
 	Total      map[ResourceType]int64
 	Used       map[ResourceType]int64
 	Reserved   map[ResourceType]int64
+	// GPUReservation is the tenant's GPU reservation snapshot (SPEC §4.4
+	// ReservationView). Nil when the tenant has no gpu_count quota row.
+	// AllocatedGPUCount is 0 when no reservation has been configured
+	// (Available may then be negative).
+	GPUReservation *ReservationView
 }
 
 // QuotaPutRequest carries a platform-level quota configuration write. Total is

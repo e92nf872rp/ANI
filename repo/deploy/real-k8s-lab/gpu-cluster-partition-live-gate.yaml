@@ -1,0 +1,74 @@
+profile: GPU-CLUSTER-PARTITION-LIVE-GATE-C1
+status: live
+description: >
+  GPU-PARTITION-D live validation gate for the BOSS cluster GPU equal split
+  (POST /api/v1/gpu-inventory/gpu-partitions, task_type=gpu_partition). Prove
+  the async task sequence end to end on a real lab cluster: node config
+  devicesplitcount rewrite, node relabeling (gpu-mode/gpu-sharing-policy/
+  gpu-sharing-spec, wholecard gpu-spec label removed), volcano vGPU device
+  plugin pod restart with vgpu re-registration, busy-node skip reporting and
+  tenant-scope denial. This gate must not mark GPU or full platform runtime
+  ready.
+
+required_tools:
+  - kubectl
+  - curl
+
+required_endpoints:
+  - kubernetes_api
+  - gateway_api
+
+required_env:
+  - KUBECONFIG
+  - ANI_GATEWAY_URL
+  - ANI_PLATFORM_TOKEN
+
+live_checks:
+  - id: gpu-partition-task-accepted-and-completed
+    command: >
+      curl -sS -X POST "$ANI_GATEWAY_URL/api/v1/gpu-inventory/gpu-partitions"
+      -H "Authorization: Bearer $ANI_PLATFORM_TOKEN"
+      -H "Idempotency-Key: gpu-partition-live-$(date +%s)"
+      -H "Content-Type: application/json" -d '{"shares":4}'
+      then poll GET $ANI_GATEWAY_URL/api/v1/tasks/{task_id} until completed
+    pass_condition: http_202_with_task_id_and_task_result_has_applied_nodes
+  - id: tenant-token-denied-on-gpu-partitions
+    command: >
+      curl -sS -o /dev/null -w "%{http_code}" -X POST
+      "$ANI_GATEWAY_URL/api/v1/gpu-inventory/gpu-partitions"
+      -H "Authorization: Bearer $ANI_TENANT_TOKEN"
+      -H "Idempotency-Key: gpu-partition-tenant-deny" -d '{"shares":4}'
+    pass_condition: http_403_for_tenant_scope
+  - id: node-config-devicesplitcount-rewritten
+    command: kubectl -n kube-system get configmap volcano-vgpu-node-config -o json
+    pass_condition: nodeconfig_entries_have_devicesplitcount_equal_to_shares
+  - id: partitioned-nodes-relabeled-vgpu
+    command: kubectl get nodes --show-labels
+    pass_condition: >
+      applied_nodes_have_gpu_mode_vgpu_and_gpu_sharing_policy_and_gpu_sharing_spec
+      labels_and_no_wholecard_gpu_spec_label
+  - id: volcano-device-plugin-restarted-and-registered
+    command: >
+      kubectl -n kube-system get po -l app.kubernetes.io/name=volcano-vgpu-device-plugin
+      -o wide && kubectl get nodes -o json
+    pass_condition: plugin_pods_recently_restarted_and_nodes_advertise_volcano_sh_vgpu_number_above_zero
+  - id: busy-nodes-skipped-in-task-result
+    command: >
+      GET $ANI_GATEWAY_URL/api/v1/tasks/{task_id}
+    pass_condition: skipped_nodes_in_result_carry_node_busy_reason_and_pod_list
+
+evidence: development-records/live-evidence/gpu-cluster-partition-live.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - GPU UUID lists
+
+readiness_levels:
+  contract:
+    meaning: API contract, planner port and adapter tests exist; no live cluster proof.
+  live:
+    meaning: Approved cluster run completed one real gpu_partition task with config/label/registration evidence; GPU/runtime ready remain false.

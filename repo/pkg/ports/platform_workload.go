@@ -74,6 +74,20 @@ type PlatformWorkloadArtifact struct {
 	MountPath string
 }
 
+// PlatformWorkloadModelMaterialization describes a tenant-fenced object model
+// that must be fetched and verified before the runtime container starts.
+// It intentionally contains no signed URL or credentials.
+type PlatformWorkloadModelMaterialization struct {
+	TenantID             string
+	ModelVersionID       string
+	ObjectRef            string
+	SizeBytes            int64
+	ChecksumSHA256       string
+	ModelServiceGRPCAddr string
+	FetcherImageRef      string
+	TargetPath           string
+}
+
 type PlatformWorkloadSecretBinding struct {
 	SecretRef string
 	MountPath string
@@ -91,23 +105,24 @@ type PlatformWorkloadMetadata struct {
 }
 
 type PlatformWorkloadCreateSpec struct {
-	IdempotencyKey string
-	Name           string
-	WorkloadClass  string
-	RuntimeKind    string
-	ImageRef       string
-	Command        []string
-	Args           []string
-	Env            []PlatformWorkloadEnvVar
-	Replicas       int
-	Resources      PlatformWorkloadResources
-	Topology       PlatformWorkloadTopology
-	Scheduling     PlatformWorkloadScheduling
-	Network        PlatformWorkloadNetwork
-	Artifacts      []PlatformWorkloadArtifact
-	SecretBindings []PlatformWorkloadSecretBinding
-	HealthCheck    PlatformWorkloadHealthCheck
-	Metadata       PlatformWorkloadMetadata
+	IdempotencyKey       string
+	Name                 string
+	WorkloadClass        string
+	RuntimeKind          string
+	ImageRef             string
+	Command              []string
+	Args                 []string
+	Env                  []PlatformWorkloadEnvVar
+	Replicas             int
+	Resources            PlatformWorkloadResources
+	Topology             PlatformWorkloadTopology
+	Scheduling           PlatformWorkloadScheduling
+	Network              PlatformWorkloadNetwork
+	Artifacts            []PlatformWorkloadArtifact
+	ModelMaterialization *PlatformWorkloadModelMaterialization
+	SecretBindings       []PlatformWorkloadSecretBinding
+	HealthCheck          PlatformWorkloadHealthCheck
+	Metadata             PlatformWorkloadMetadata
 }
 
 type PlatformWorkloadRecord struct {

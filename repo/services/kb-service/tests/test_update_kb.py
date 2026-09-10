@@ -146,6 +146,10 @@ class _UpdateKBMockConn:
                 "task_type": "kb.update",
                 "status": "pending",
             }
+        # audit INSERT (kb_audit_log written by the success path)
+        if "INSERT INTO kb_audit_log" in sql:
+            self.events.append(("insert_audit", args))
+            return {"id": uuid.uuid4()}
         return None
 
     async def fetch(self, sql, *args):

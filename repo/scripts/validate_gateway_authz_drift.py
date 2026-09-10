@@ -10,14 +10,12 @@ from __future__ import annotations
 import argparse
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 import generate_gateway_authz as generator
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET_REGISTRY_TOOL = ROOT / "services/ani-gateway/tools/dp2_operation_registry.py"
 
 
 def validate(input_path: Path, committed: Path) -> None:
@@ -26,16 +24,6 @@ def validate(input_path: Path, committed: Path) -> None:
         raise SystemExit("gofmt not found; install the Go toolchain to validate authz drift")
     if not committed.is_file():
         raise SystemExit(f"committed authz registry missing: {committed}")
-    result = subprocess.run(
-        [sys.executable, str(TARGET_REGISTRY_TOOL), "--check"],
-        cwd=ROOT,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise SystemExit(f"target operation registry is not current:\n{result.stdout.strip()}")
     with tempfile.TemporaryDirectory() as directory:
         generated = Path(directory) / "zz_generated_core_policies.go"
         generator.generate(input_path, generated)

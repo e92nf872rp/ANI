@@ -4,9 +4,13 @@
 
 > **仓库范围：ANI Core + 受控 Services PR。** ANI Core 继续负责基础设施平台底座；Services 受控并行 PR 阶段已经启动，不再按旧冻结规则处理。Services PR 统一运行 `make validate-services`，覆盖 CODEOWNERS 共同审查要求之外的 API split、Services boundary gate、OpenAPI/Gateway route contract、语义契约、生成物漂移、模块检查和 `make validate-architecture`。
 > **仓库范围更新（2026-09-07）：** Console/BOSS 前端源码已迁至独立仓库，本仓库已移除 `repo/frontends/`、前端代码生成/构建目标和前端 CI job；历史批次中的前端描述仅作归档。PR #60/#62/#68 引入的邮件通知契约与实现已回滚，Core 不再提供 `/api/v1/notifications/email/*`。本批次按用户要求不跑本地 CI，完整验证交由 GitHub PR。
+> **ANI-IAM-PRE930-CONTAINMENT（2026-09-08，PR 验证中）：** 基于用户接受的 ANI `804db51a5f93605f9bbd4ac407f0489ecb1d187c` 外科式移除 PR #145 提前进入当前发布轨道的 Direct P2 目标契约、SDK、Gateway composition/runtime、Proto copy 与候选 registry；完整保留 #145 后的 VM、Tenant、KB 和平台组件 Observability 功能。现行 Core v1 compatibility 与 Gateway authz 门禁已作为独立 required Actions job 接入；本地只执行生成和 diff/path 审计，测试结果以 PR exact SHA 的 GitHub Actions 为准。未部署、未切流、未修改数据或 Credential；9 月 30 日后仍需人工指定不可变 release SHA 才能重新进行 IAM target rebaseline。详情见 `development-records/ANI-IAM-PRE930-CONTAINMENT.md`。
 > **当前重心：Sprint 13 / Core real provider 与 live gate 收敛。** Core Sprint 13/14 既有事实继续有效：Sprint 12 已完成 Core「Services 支撑 Handler」A/B1/B2/B3 全部 19 个 handler + 2 个 422 的 Tier1 local profile 收口；Sprint 13 S01-S07 production-shaped live gate 事实保留；Sprint14 resilience 结论仅限隔离 fixture。未跑通对应 live gate 前，不得标记 real-provider、runtime ready 或 production ready。Services PR 可在主责目录推进业务实现，但不得绕过 Core OpenAPI REST API / Core SDK、Core review 或现有架构门禁。
+> **MODEL-REPOSITORY-REMOTE-IMPORT（2026-09-04）：** 远程模型导入 Task 1–6 及后续完整性/快照修正已完成 local/logic verified：Gateway 202 入口、租户隔离/幂等导入任务与 outbox、公共 HTTPS Hugging Face/ModelScope source、ModelScope 根目录遍历与 branch→40-hex commit 解析、确定性 `model.tar.gz`、租约 worker、fetcher 有界安全解压、archive runtime 目录和 real-k8s-lab worker/config contract。remote-import 增量未新增 v1/protobuf 字段；Gateway 通用默认仍为 `main`，ModelScope 仅在 `main` 返回明确空历史时有界回退一次 `master`，随后固定到 40-hex commit。尚未 live；worker/fetcher 镜像 digest、MinIO/PG Secret、mTLS/workload identity、NetworkPolicy 与真实 PG/MinIO/集群验证是前置。记录：`development-records/model-repository-remote-import.md`；不得标 runtime/production ready。
 > **INFERENCE-ENVOY-AI-GATEWAY-RATELIMIT（2026-08-28）：** 已完成 local/logic verified。Envoy AI Gateway Gateway 级共享全局 600 requests/minute `BackendTrafficPolicy`、Redis Secret 引用配置片段、C40 live-gate Accepted 检查和敏感信息校验均已落地；未执行真实集群限流压力测试，不宣称 runtime ready。
 > **INFERENCE-SERVICE-C41（2026-08-31）：** Envoy AI Gateway 多租户动态发布已完成 local/logic verified：Services v1 不新增 endpoint/field，仅澄清既有 `served_model_name` 与 `invocation_url` 描述；Gateway 已修正既有 policy flat DTO 实现，不是契约新增。AK-only、tenant/model/path 解析、可信头覆盖、`recomputeRoute`、Publisher publication/lifecycle fencing、最小权限清单和红线 live-gate contract 均有本地证据。Task 8 server dry-run 为 10/11 accepted；剩余 BackendTrafficPolicy 是已安装 CRD `int32`/`maximum` schema 自相矛盾。外部 inference-service normal/race 与 repo `make test` 均 EXIT:0；Console schema 三处 description 生成更新纳入隔离 shipping index 后 `make validate-services` EXIT:0，真实 index 保持为空。live status=`not-run`；不得标 runtime/production ready；PG live integration 因 DSN 未设 skip。
+> **MODEL-REPOSITORY-P0-BACKEND（2026-09-01）：** 模型仓库第一后端闭环已完成 local/logic verified：model-service 支持租户隔离的模型/版本注册、过滤列表、版本列表、`Idempotency-Key` replay/conflict、对象存储预签名上传/下载和 size/sha256 验证；Gateway 已接入对应控制面路由，inference catalog 可解析租户自有 ready 对象版本并保留 PVC 兼容。远程 ModelScope/Hugging Face 导入、加密、异步 worker、Console 页面和真实 PG/object-store/cluster live 不在本批次；PG integration 因 DSN 未设 skip，不得标 runtime/production ready。记录：`development-records/model-repository-p0-backend.md`。
+> **ANI-GATEWAY-OPENAI-ROUTE-BOUNDARY（2026-09-07）：** ANI Gateway 已移除旧 `POST /v1/chat/completions` 占位代理，OpenAI chat/embedding 数据面归独立 Envoy AI Gateway；内部 vLLM OpenAI 路径不变。已审批的模型版本列表内部调用已接入，`GET /api/v1/svc/models/{model_id}/versions` live smoke 返回 200。该批次不改 v1/protobuf、不含 Console；Envoy 动态发布和真实模型 chat 成功响应仍未完成 live 验收。记录：`development-records/ani-gateway-openai-route-boundary.md`。
 > **标准状态 marker：** 真实服务器只读验证已完成；Rook-Ceph 正式部署已完成。Sprint 11 执行环境：正式部署执行环境。
 
 > **PLATFORM-COMPONENT-STATUS-A（2026-09-05，2026-09-07 补充决策）：** `LOCAL_VERIFIED + K8s 实测`（分支 feat/component-status）。BOSS 平台健康组件状态只读能力：`GET /platform/components`（22 组件静态注册表三组聚合，K8s REST 读取 + service 组融合 Prometheus `up`/`target_info` scrape_status，15s TTL 缓存，任一组件失败不阻塞 200）+ 组件诊断三接口 metrics/logs/logs-stream（Prometheus cAdvisor 快照、Loki 列表与 SSE 流，错误映射 400/404/503）；契约优先 + authz/Core SDK 生成物零漂移 + 35 个单测全 PASS；K8s 测试环境镜像 `dev-20260905-compdiag` 实测列表/指标/日志/SSE/401/404 全通过。产品决策 2026-09-07：原型 P99/错误率/依赖检查三列裁剪不做，metrics 契约 description 已改为产品边界声明。已知环境边界：并行会话用不带 target_info 埋点的镜像重部署 inference-service/model-service 会令观测 reader fail-closed（service 组 scrape_status=unknown、/platform/services/health 503），恢复带埋点镜像即自愈。详情见 `development-records/platform-component-status-a.md`。
@@ -20,8 +24,9 @@
 > **GATEWAY-GPU-PLATFORM-SCOPE-A（2026-09-07，live verified，hotfix）：** 修复 BOSS root（platform scope）访问 `/api/v1/gpu-specs*`、`/api/v1/gpu-inventory*` 报 403 `token scope not allowed for this path`。GPU 接口为双域共享资源（Console tenant + BOSS platform），V2 boundary 域互斥无法表达，按 `/svc/` 模式在 `scopeAllowedForPath` 放行 `platform||tenant`，角色准入仍由 rbac.go 承担。live 验证（rollout `dev-20260907-gpuscope-a`）：GPU 四端点 200、`/instances` 负向对照仍 403。部署插曲：PG max_connections=100 被 gateway 多 store 连接池打满致新 Pod CrashLoop，已 patch 滚动策略 `maxUnavailable:1`（留在线上，连接池收敛待后续）。后续项：GPU 接口迁移 V2 authz（cluster boundary）+ availability 平台视角语义。记录：`development-records/gateway-gpu-platform-scope-a.md`。
 > **GATEWAY-QUOTA-PLATFORM-SCOPE-A（2026-09-07，live verified，hotfix + 安全修复）：** 修复 BOSS `GET /api/v1/quotas?limit=100` 403，并封堵**已存在的跨租户配额泄露**：`listQuotas` 不注入租户过滤、store 走 `WithPlatformTx` 绕过 RLS 返回全部租户行，而 `scopeAllowedForPath` 末尾默认放行 tenant，导致任意租户 token 可读全平台配额。修法与 GPU 相反：`/api/v1/quotas` 精确匹配仅 platform（对齐 `/admin/*`；精确匹配避免误伤 tenant-only 的 `/quotas/me`），`/gpu-scheduling*` 并入 GPU 双放行分支（handler 按 tenant label 过滤无泄露）。auth_test.go 新增 6 用例。live 验证（`dev-20260907-quotas-a`）：platform /quotas 200（39 租户跨租户确认）、/quotas/me 403；tenant /quotas 403（泄露封堵）、/quotas/me 200、gpu-specs 200。记录：`development-records/gateway-quota-platform-scope-a.md`。
 > **INSTANCE-ORPHAN-GPU-FILTER-A（2026-09-07，live verified，hotfix）：** 修复 `GET /instances?kind=gpu_container` 混入非 GPU 实例。根因：`discoverOrphanDeployments` 对带租户标签且不在 store 的 Deployment 无条件硬编码 `Kind=gpu_container` 生成孤儿记录（`GPUCount>0` 只控制 GPU 字段填充，不控制记录生成），gateway 重启后所有非 GPU Deployment 被当作 gpu_container 回显，列表端 kind 过滤形同虚设。修复：`obs.GPUCount<=0` 直接跳过；`observeOrphan` GPU 探测兼容 `volcano.sh/vgpu-number`。新增 `TestListOrphanDiscoverySkipsNonGPUDeployments`。live 验证（rollout `dev-20260907-orphan-a`）：tenant-a 命名空间 18 个非 GPU Deployment 全部不再回显，3 条孤儿记录经集群核对均携带 `nvidia.com/gpu=1`。行为收紧：非 GPU 未入库实例重启后不再出现在实例列表（对齐"孤儿仅 GPU"既定约定）。记录：`development-records/instance-orphan-gpu-filter-a.md`。
+> **GATEWAY-GPU-V1-ROLLBACK-A（2026-09-08，live verified，hotfix + rebase）：** GPU 接口鉴权暂时回退 V1 链路。背景：生产 gateway 镜像回退致 BOSS GPU 接口 403 复现，且 main（PR #145）已将 v1.yaml 全量 V2 化、GPU 路径标单域 `scope: platform`，部署后 Console（tenant）将 403。V2 boundary 域互斥无法表达 GPU 双域共享，经产品确认回退 V1：v1.yaml 13 个 GPU 操作删除 `x-ani-authz`（classification 同步 `authorized→authenticated`），operation-registry.v1.json / zz_generated_target_operation_registry.go / zz_generated_core_policies.go 全链同步重生成（GPU 全部 `PolicySourceLegacy`），冻结计数 authenticated 9→22、authorized 278→265；`/quotas`+`/quotas/me` 保留 V2（与 V1 行为一致）；运行时 middleware 零改动。同期 `hotfix/network-store-read` rebase 到 origin/main（含修复 rebase 遗留冲突标记）。live 验证（ani-test2 隔离环境 10.10.1.66:30083，镜像 `test2-20260908-b`）：platform token GPU 三端点+/quotas 200、/quotas/me 403；tenant token GPU 三端点+/quotas/me+/instances 200、/quotas 403（泄露封堵保持）；tenant-a/admin Console 登录+核心接口 200。同日再次 rebase 到含 ANI-IAM-PRE930-CONTAINMENT 的最新 main：V2 target registry 基建与 GPU 接口 V2 注解已由 main 整体移除、回退终态由 main 承载，上述 main 既有红门禁已恢复绿，rebase 文档回归已修复，门禁复验全绿。记录：`development-records/gateway-gpu-v1-rollback-a.md`。
+> **GPU-PARTITION-A~D（2026-09-09，live verified，分支 ani-hotfix）：** BOSS 专属集群 GPU 等分切分已落地：`POST /api/v1/gpu-inventory/gpu-partitions`（platform-only exact-match scope + 幂等键，2/4/8）对集群内全部空闲整卡节点统一切分（跨型号，每份显存按节点实际显存派生）；异步任务（task_type=gpu_partition）受控 goroutine 执行节点级 volcano-vgpu-node-config devicesplitcount 更新 → 节点重打标签（gpu-mode/gpu-sharing-policy/gpu-sharing-spec + 清整卡 gpu-spec）→ 重启 device plugin pod → 轮询 `volcano.sh/vgpu-number` 注册收敛，120s 总超时，忙碌节点（节点级持 GPU Pod 判定）执行前重查跳过并记入 result；0 个可切节点 422 NO_IDLE_WHOLECARD_GPUS；GET /tasks/{id} 对 running 超阈值任务做幂等 lazy-resume 重入防 gateway 重启悬挂。ports `GPUPartitionPlanner` + K8s REST adapter 实现；gateway main 经 gpuInventory 类型断言注入（local profile 503）；RBAC nodes 补 patch。router 8 个新测试全通，validate-architecture 通过；切分不创建 GPUSpec（解耦语义）。GET /tasks 两 op 同步移除 `x-ani-authz` 走 legacy 双域（V2 单域无法表达 BOSS+tenant 双侧轮询，同 GATEWAY-GPU-V1-ROLLBACK-A 语义）。live gate PASS（2026-09-09，ani-test2 10.10.1.66:30083，镜像 `test2-20260909-e`）：8 项检查全过——202 受理→completed/100、dev-phys-02 CM devicesplitcount=4 + vgpu/quarter/12285MiB relabel + 插件重注册、tenant 403、忙碌节点（dev-phys-03/kubercloud，node_busy 附阻塞 Pod 名单）正确跳过；执行期间修复 apply goroutine 租户上下文 panic（`detachedTaskContext`）。证据 `development-records/live-evidence/gpu-cluster-partition-live.json`。记录：`development-records/gpu-partition-cluster-split.md`。
 > **INSTANCE-SANDBOX-KATA-STORAGE-A（2026-09-03）：** Kata lab values 同步到 `docker.changqingyun.cn/kubercon/kata-deploy:4.0.0`；当前底座 3/3 Ready，`sandbox-kata` 冒烟通过。Sandbox 新建、clone、restore 的 5Gi RWO workspace PVC 显式使用 `ani-block`，避免无默认 StorageClass 环境持续 Pending。底座 live verified，代码 local/logic verified；待合并和 Gateway rollout 后补产品路径 E2E。sysctl 按任务边界不入库；详情见 `development-records/instance-sandbox-kata-storage-a.md`。
-> **ANI IAM Direct P2 DP2-05（2026-09-06）：** 专用本地 worktree 中的 Console/Tenant Password→Session/Grant→Access Token→CheckPermission→`listInstances` tracer bullet 使用真实 PostgreSQL/Redis、受限 runtime role 和真实 IAM/Gateway 进程验证为 `pass`；Go/No-Go A 已由人工接受为 Go，结果为 `pass`。BOSS/Platform Password Login 与 BOSS caller E2E 为 `not_verified`。本批只形成本地 commit，未 push、部署、切流、删除旧 Auth或启动 DP2-06；详情见 `development-records/DP2-05-target-iam-vertical-slice.md`。
 
 > **INSTANCE-SANDBOX-CHECKPOINT-A（2026-08-02）：** live passed。新 Sandbox `/workspace` 使用 5Gi RBD PVC，CSI VolumeSnapshot create/list/restore/clone、Gateway 重启后 provider list、PG create/restore task、keep_memory/legacy emptyDir 422 和删除级联清理均已在 default 网络验证。Gateway `instance-sandbox-checkpoint-20260802-v1`；evidence：`development-records/live-evidence/instance-sandbox-checkpoint-live-20260802.json`。仅 filesystem checkpoint，不含内存状态；私有 VPC 尚未打通。
 
@@ -157,6 +162,9 @@
 | S06 vector Milvus | production-shaped gate passed | `SPRINT13-VECTOR-MILVUS-A-TRACK`；`validate-vector-store-live-gate`；LIVE PENDING 仅作历史兼容 |
 | S07 instance observability Prometheus | production-shaped gate passed | `SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK`；`validate-instance-observability-live-gate`；Prometheus + kubelet；LIVE PENDING 仅作历史兼容 |
 
+| Services 模型仓库 P0 后端 | local/logic verified | `development-records/model-repository-p0-backend.md`；model-service/Gateway/inference catalog focused gates；PG/object-store live 未执行 |
+| ANI Gateway OpenAI 数据面边界 | local + live Gateway smoke verified | `development-records/ani-gateway-openai-route-boundary.md`；旧 chat 占位路由 404、版本列表 200；独立 Envoy 真实模型调用仍待验证 |
+
 闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
 
 ## Gateway OpenAPI 鉴权四批次（2026-08）
@@ -176,67 +184,6 @@
 **预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。修复后 drift 门禁通过、route coverage 0 error（274 registered, 224 registry）。详见 `development-records/authz-policy-compat-contract-pilot.md`。
 
 **PR5 批次记录：** `development-records/authz-mode-simplify-d.md`（含 2026-08-31 第六版修订章节：删废弃 env 残留检测、改名 config.go、删兼容入口 6 函数、测试归一，12 files +51/−222）。**验证命令：** `go test ./services/ani-gateway/...` + `make gen-gateway-authz`（生成物零漂移）+ `make validate-gateway-authz`（18 tests、283 registered routes 0 errors）+ `make validate-architecture` + `git diff --check`；`make test` 仅 `pkg/adapters/runtime` 的 Windows 预存失败（sandbox symlink 特权 / Python `os.O_DIRECTORY`；origin/main @ `9c7bf2b` worktree 复跑同包同样 FAIL，不在本次改动集）。**本地实测：** `ANI_AUTH_MODE=auth_service`（无任何 policy env）启动正常；public 放行（branding 200）、generated 接口 `/api/v1/admin/quota-meta` 无凭证被 V2 拒绝 401、legacy 无效 token 401；`ANI_AUTH_MODE=dev` 启动正常且 quota-meta 回落 legacy 返回真实数据 200。登录全链路（有 token 200）受数据库角色权限迁移（#124 `ani_app_user`）未应用阻塞，暂缓验证。修订后代码已与方案第六版 §4.1–§4.5 逐项复核一致。
-
-## ANI IAM Direct P2 DP2-02 公网契约冻结（2026-09）
-
-> 独立 Direct P2 工作流，固定 ANI 来源 `0cedae825a489d936cf41815dc27f278f6d3213c`。本批已经人工接受精确 breaking diff，只冻结目标公网 OpenAPI、operation registry/policy、生成器、SDK 和契约测试，不接线运行时、不部署、不切流。
-
-| 项目 | 状态 | 证据 |
-|---|---|---|
-| OpenAPI / registry / breaking / stable errors | `pass` | 295 operations；59 added、0 removed、6 operationId changes；263 machine-readable breaking rows |
-| unique Handler/Owner、authn/authz、Permission、typed obligation | `pass` | target generator 20/20；deterministic `--check` |
-| Console/BOSS schema 与四语言 Core SDK | `pass` | pinned generation；Go/Python/TypeScript smoke；Java source smoke |
-| Java compile/run | `not_verified` | 当前环境无 JDK |
-| Gateway 目标运行时接线与新增 Handler | `not_verified` | 后续 DP2-05 及切换事项实现 |
-
-批次记录：`development-records/DP2-02-public-iam-operation-registry.md`。本地提交不会自动进入主线；未来合入演进中的 ANI 主线时必须重新运行 breaking、生成物、route 和调用方回归。
-
-## ANI IAM Direct P2 DP2-03 IAM/Core 集成契约冻结（2026-09）
-
-> 本批已人工接受精确 Proto/Core contract diff。只冻结独立 ani-iam 的三个目标 gRPC service、Core-owned Tenant Lifecycle/Bootstrap/Snapshot contract、descriptors、pins 和 producer-consumer fixtures；不接线运行时、不创建 NATS、不发布、不部署、不切流。
-
-| 项目 | 状态 | 证据 |
-|---|---|---|
-| IAM Authentication/Authorization/Admin descriptor | `pass` | 3 services / 69 RPC；旧 `auth.v1.AuthService` absent；SHA-256 `df863beb3b095d1f01350c5334d80daf10cdf48083ce0e5663781171aa99a001` |
-| Core Lifecycle/Heartbeat/Bootstrap/Snapshot descriptor | `pass` | 1 read-only service / 2 RPC；无 lifecycle writer；SHA-256 `7dd40f9053b7c1c0c8905decab0f81b07173d0b25651113147bde9a5370d352a` |
-| producer-consumer fixtures / immutable pins | `pass` | 两仓库八组 fixtures byte-identical；pins SHA-256 `33376182b2bcd2f0dd7c84bdf9790d492b6a643560a169e80c0fe63e9113c3b9` |
-| Buf、可复现生成、相关 Go tests/vet、architecture | `pass` | 固定 Buf 1.72.0 / protoc plugins；生成无漂移 |
-| ANI 聚合旧 Auth operationId gate | `fail` | 仍要求 `logout` / `revokeAPIKey`；已接受目标是 `logoutSession` / `revokeIAMAPIKey`，本批不回退 |
-| 运行时 registration、Core/NATS、Gateway mapping/cutover | `not_verified` | 后续 DP2-05 及切换事项验证 |
-
-批次记录：`development-records/DP2-03-iam-core-integration-contracts.md`。本地契约提交不会自动进入演进中的 ANI 主线；未来合入前必须重新执行完整 Proto breaking、生成物、Gateway/Auth 和调用方回归。
-
-## ANI IAM Direct P2 DP2-05 目标纵向链路（2026-09）
-
-> 本批只在独立 ani-iam 与专用 ANI worktree 中验证 Go/No-Go A tracer bullet。工程实现、隔离真实依赖门禁和人工 Go 结论均为 `pass`。只形成本地 commit，未 push 或提交到 ANI 主线，未部署、切流、删除旧 Auth 或启动 DP2-06。
-
-| 项目 | 状态 | 证据 |
-|---|---|---|
-| Password→Session/Grant→Access Token→CheckPermission→`listInstances` | `pass` | 真实 PostgreSQL/Redis、受限 runtime role、真实 IAM 与 Gateway 进程 |
-| Public 0 次 / Authorized 1 次 IAM decision、hostile Header strip | `pass` | DP2-02 固定 registry；`listInstances` 只调用一次 `CheckPermission` |
-| Gateway 401/403/503/504、policy mismatch | `pass` | 真实登录/deny、关闭 endpoint、TLS handshake blackhole、stable fail-closed mapping |
-| Audit transaction、two-Tenant、query mutation、empty replay | `pass` | 完整 real-dependency integration suite |
-| TLS 1.3 mTLS + Gateway DNS/RPC allowlist | `pass` | IAM server/client transport 与 workload identity tests |
-| unified 24h Idempotency Ledger | `not_verified` | 已接受 Direct P2 graph 将完整 ledger 归 DP2-16；本 tracer bullet 不提前实现 |
-| Go/No-Go A 人工接受 | `pass` | 2026-09-06 明确接受 Go；只证明目标最小纵向架构可行，不等于 production ready 或切流授权 |
-
-批次记录：`development-records/DP2-05-target-iam-vertical-slice.md`。不含 OIDC、完整 Refresh/browser、Invitation、完整 Role、API Key、Service Token、Core/NATS、五类调用方整体切换或部署。
-
-## ANI IAM Direct P2 安全合并候选（2026-09）
-
-> 固定来源 a221a7b/573d373/f09a436 已在专用 `codex/direct-p2-safe-merge` worktree 以 `--no-ff --no-commit` 整合到人工接受的 main `bde4ea72b5a91cd43cc271dd44c09ff262c637e5`。默认/disabled 继续旧 Auth；`dp2_05` 仍只是 Password Login 与 `listInstances` 隔离 tracer，不是全 Gateway 切换。Standards/Spec 双轴评审均为 0 findings，Merge-Ready 已于 2026-09-06 人工接受，80-path staged package 与检查点后全部门禁通过；本记录随本地 merge commit 落地。未 push、未部署、未切流，也未启动 DP2-06。
-
-| 项目 | 状态 | 证据 |
-|---|---|---|
-| 默认/disabled、幂等 Refresh Cookie、稳定 429、manifest disabled | `pass` | Gateway full/vet/race 与安全合并回归测试 |
-| OpenAPI/registry/authz、Proto、SDK、Console/BOSS schema | `pass` | 固定工具重生成与幂等/descriptor/contract 门禁 |
-| ANI `make test` / `make validate-architecture` / doc entrypoints | `pass` | 当前未提交候选完整运行 |
-| ANI `make validate-services` | `pass` | Services/SDK/docs idempotence、model/inference tests 与 architecture 完整通过 |
-| Target IAM 架构迁移 | `pass` | Gateway 依赖 `pkg/ports.TargetIAM`；gRPC/mTLS/protobuf 翻译归 `pkg/adapters/iam`，固定生成物归公共 `pkg/generated/pb/iam/v1` |
-| Java compile/run、cluster rollout、production traffic、BOSS caller E2E | `not_verified` | 当前无 JDK；本 Goal 不部署或切流，Console 证据不替代 BOSS |
-| Merge-Ready / local merge commit | `pass` | 双轴评审 0 findings；2026-09-06 人工接受 Merge-Ready；80-path staged diff 已审查并在全部门禁通过后随本地 merge commit 落地，精确 SHA 以 Git history 与最终报告为准 |
-
-批次记录：`development-records/DP2-DIRECT-P2-SAFE-MERGE.md`。本地 merge commit 不授权 push、远端 PR、main merge、部署、切流或后续 IAM ticket。
 
 ## 账密登录模块（2026-07）
 

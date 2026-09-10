@@ -28,6 +28,9 @@ type GPUDeviceClass struct {
 	DriverVersion      string
 	RuntimeVersion     string
 	Capabilities       []string
+	// Shares 是该记录所属物理卡被切分的份数：1 表示整卡，
+	// vGPU 卡为切分份数（如 Volcano devicesplitcount 2/4/8）。
+	Shares int
 }
 
 type GPUNodeClass struct {

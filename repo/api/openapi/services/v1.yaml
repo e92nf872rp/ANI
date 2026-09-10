@@ -180,6 +180,8 @@ components:
         version: { type: string, minLength: 1, maxLength: 128 }
         file_name: { type: string, minLength: 1, maxLength: 255 }
         size_bytes: { type: integer, minimum: 1 }
+        checksum_sha256:
+          { type: string, pattern: '^(sha256:)?[a-fA-F0-9]{64}$', description: "可选的客户端 SHA-256；提供后必须将响应 upload_headers 原样附加到 PUT 请求。" }
 
     ModelUploadURLResponse:
       type: object
@@ -188,6 +190,10 @@ components:
         upload_url: { type: string, format: uri }
         storage_path: { type: string }
         expires_at: { type: string, format: date-time }
+        upload_headers:
+          type: object
+          additionalProperties: { type: string }
+          description: "直传 PUT 必须携带的非敏感请求头；含 x-amz-meta-sha256 时服务端会在版本注册时校验。旧客户端省略 checksum_sha256 时该字段为空，不能依赖 ETag/MD5。"
 
     InferenceService:
       type: object
@@ -199,7 +205,7 @@ components:
         model_version_id:      { type: string, format: uuid, description: 实际部署的不可变模型版本 }
         image_id:              { type: string, description: 创建时从镜像仓库选定的 Registry 镜像 ID；手填 image_ref 时可为缺省 }
         image_ref:             { type: string, nullable: true, description: 创建时解析并冻结的 digest 引用；只读 }
-        served_model_name:     { type: string, description: 集群内 OpenAI-compatible 请求使用的 model 值，不代表公网路由 }
+        served_model_name:     { type: string, description: OpenAI-compatible 请求体中的 model 值；在当前租户的活动推理服务内唯一，创建后不可变 }
         replicas:              { type: integer, minimum: 1, default: 1 }
         ready_replicas:        { type: integer, minimum: 0, default: 0 }
         resources:             { $ref: '#/components/schemas/InferenceServiceResources' }
@@ -214,7 +220,7 @@ components:
         generation:            { type: integer, minimum: 1 }
         observed_generation:   { type: integer, minimum: 0 }
         current_operation_id:  { type: string, format: uuid, nullable: true }
-        invocation_url:        { type: string, format: uri, nullable: true, description: P0 未建设调用网关，固定返回 null }
+        invocation_url:        { type: string, format: uri, nullable: true, description: Envoy AI Gateway 的 OpenAI-compatible 调用地址；仅在工作负载就绪且网关路由发布成功后返回，未发布、停止、失败或删除过程中返回 null }
         endpoint_url:          { type: string, format: uri, nullable: true, deprecated: true, description: v1 兼容字段；P0 固定返回 null，不得返回 ClusterIP 地址 }
         created_at:            { type: string, format: date-time }
         updated_at:            { type: string, format: date-time, nullable: true }
@@ -319,7 +325,7 @@ components:
         model_version_id: { type: string, format: uuid, description: 与 model 指向同一不可变版本 }
         image_id: { type: string, minLength: 1, description: 镜像仓库 Registry 镜像 ID；与 image_ref 至少填一个，同时传入时优先 image_id。创建前固定 digest。 }
         image_ref: { type: string, minLength: 1, description: 用户直接输入的镜像引用；与 image_id 至少填一个，同时传入时优先 image_id。创建前固定 digest。 }
-        served_model_name: { type: string, minLength: 1, description: 默认使用服务 name，创建后不可变 }
+        served_model_name: { type: string, minLength: 1, description: OpenAI-compatible 请求体中的 model 值；默认使用服务 name，在当前租户的活动推理服务内唯一，创建后不可变 }
         replicas: { type: integer, description: 省略时服务按 1 个副本处理 }
         resources: { $ref: '#/components/schemas/InferenceServiceResources' }
         placement_mode: { type: string, enum: [auto, single_node, multi_node], description: 省略时服务按 auto 处理 }
@@ -951,7 +957,42 @@ components:
       properties:
         idempotency_key:  { type: string, format: uuid }
         public_read:      { type: boolean }
-        allowed_user_ids: { type: array, items: { type: string } }
+        allowed_user_ids: { type: array, items: { type: string, format: uuid } }
+
+    KBPermissions:
+      type: object
+      required: [kb_id, public_read, allowed_user_ids, updated_at]
+      description: 知识库访问权限（B4）。对齐 kb_service.proto KBPermissions。
+      properties:
+        kb_id:            { type: string, format: uuid }
+        public_read:      { type: boolean }
+        allowed_user_ids: { type: array, items: { type: string, format: uuid } }
+        updated_at:       { type: string, format: date-time }
+
+    KBAuditLog:
+      type: object
+      required: [id, kb_id, action, created_at]
+      description: |
+        KB 管理面操作审计条目（B8 #21）。对齐 kb_service.proto AuditLogEntry。
+        before_state/after_state 为操作前/后的关键字段快照（JSON 对象）；
+        error_code 为空表示成功。
+      properties:
+        id:            { type: string, format: uuid }
+        kb_id:         { type: string, format: uuid }
+        actor_user_id: { type: string, format: uuid, nullable: true, description: "操作者；null 表示内部系统操作（解析/重建消费者）" }
+        action:        { type: string, description: "kb.create|kb.update|kb.delete|kb.permissions.update|kb.config.update|kb.rebuild|doc.create|doc.parse|doc.delete|doc.reparse" }
+        before_state:  { type: object, nullable: true, additionalProperties: true, description: "操作前关键字段快照；null 表示创建类操作" }
+        after_state:   { type: object, nullable: true, additionalProperties: true, description: "操作后关键字段快照；null 表示删除类操作" }
+        error_code:    { type: string, nullable: true, description: "业务失败码；null 表示成功" }
+        error_msg:     { type: string, nullable: true }
+        created_at:    { type: string, format: date-time }
+
+    KBAuditLogListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/KBAuditLog' } }
+        next_cursor: { type: string, nullable: true }
 
     KBConfig:
       type: object
@@ -1973,6 +2014,13 @@ paths:
     post:
       operationId: getModelUploadURL
       summary: 申请模型文件预签名上传地址
+      description: |
+        申请 MinIO presigned PUT 地址。客户端可在请求中提供 checksum_sha256；
+        此时必须将响应 upload_headers 原样附加到 PUT（至少包含
+        x-amz-meta-sha256），随后创建版本时服务端会重新读取对象并校验大小与
+        SHA-256。例如 curl 必须带上
+        `-H 'x-amz-meta-sha256: sha256:<64 位十六进制摘要>'`。旧客户端可以
+        省略该字段，但不能依赖 ETag/MD5；缺少可信 SHA 元数据的版本注册会被拒绝。
       tags: [Models]
       security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       x-ani-authz:
@@ -2030,6 +2078,9 @@ paths:
       summary: 获取推理服务列表
       tags: [InferenceServices]
       security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string }, description: 下一页游标 }
       responses:
         "200":
           description: 推理服务列表
@@ -2038,13 +2089,14 @@ paths:
               schema:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/InferenceService' } }
+                  next_cursor: { type: string, nullable: true }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createInferenceService
       summary: 部署推理服务
       tags: [InferenceServices]
-      description: 接受后立即返回 pending 资源；current_operation_id 用于查询持久化 operation，P0 不返回可调用 URL。
+      description: 接受后立即返回 pending 资源；current_operation_id 用于查询持久化 operation。工作负载就绪且 Envoy AI Gateway 路由发布成功后，资源的 invocation_url 才返回可调用地址。
       security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       x-ani-async-task-types: [inference_service.create]
       x-ani-async-resource-type: inference_service
@@ -2736,6 +2788,36 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  /knowledge-bases/{kb_id}/audit-logs:
+    get:
+      operationId: listKnowledgeBaseAuditLogs
+      summary: 知识库操作审计日志
+      description: |
+        返回 KB 管理面操作审计轨迹（创建/更新/删除/权限变更/配置变更/
+        重建/文档上传/解析/删除/重解析）。按 created_at DESC, id DESC 键集分页。
+        对齐 SPEC §5 US-002 与 kb-p1-plan §6.4。
+      tags: [KnowledgeBases]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: knowledge_base
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string, description: "created_at|id 复合键降序游标" } }
+      responses:
+        "200":
+          description: 审计日志列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBAuditLogListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /knowledge-bases/{kb_id}/sessions/{session_id}/messages:
     get:
       operationId: listKnowledgeBaseSessionMessages
@@ -2757,6 +2839,24 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
 
   /knowledge-bases/{kb_id}/permissions:
+    get:
+      operationId: getKnowledgeBasePermissions
+      summary: 读取知识库访问权限
+      description: |
+        回显 KB 权限配置（public_read + allowed_user_ids）。
+        无权限记录时返回默认值（public_read=false, allowed_user_ids=[]），而非 404。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 当前权限配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBPermissions' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
     put:
       operationId: updateKnowledgeBasePermissions
       summary: 更新知识库访问权限

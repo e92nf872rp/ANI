@@ -11,7 +11,6 @@ import (
 )
 
 type RegisterOptions struct {
-	TargetIAMClient                       ports.TargetIAM
 	K8sClusterService                     ports.K8sClusterService
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
@@ -58,6 +57,10 @@ type RegisterOptions struct {
 	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
 	// in gpu_spec_resources.go). When nil those handlers return 503.
 	GPUSpecStore ports.GPUSpecStore
+	// GPUPartitionPlanner backs POST /gpu-inventory/gpu-partitions (BOSS
+	// cluster GPU split, gpu_partition_resources.go). When nil the handler
+	// returns 503; the kubernetes_rest inventory adapter implements it.
+	GPUPartitionPlanner ports.GPUPartitionPlanner
 	// MetadataStore enables platform-scoped (RLS-bypass) queries for the
 	// cross-tenant GPUSpecInUse check in gpu_spec_resources.go. When nil
 	// the check falls back to a tenant-scoped instanceStore.List.
@@ -99,7 +102,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 
 	v1 := h.Group("/api/v1")
 	registerBranding(v1)
-	registerAuth(v1, options.TargetIAMClient)
+	registerAuth(v1)
 	registerMetering(v1, options.MeteringService)
 	registerPlatformCapacity(v1, options.PlatformCapacityService)
 	registerComponentStatus(v1, options.ComponentStatusService)
@@ -141,6 +144,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	// GPU spec directory CRUD (POST/DELETE) + reservation management +
 	// tenant self-query endpoints (SPEC §4.3).
 	registerGPUSpecResources(v1, options.GPUSpecStore, options.GPUInventory, options.GPUInstanceStore, options.MetadataStore)
+	// BOSS cluster GPU split (GPU-PARTITION-C): async task accepted + in-process apply.
+	registerGPUPartitionResources(v1, options.GPUPartitionPlanner, options.AsyncTaskStore)
 	registerReservationResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 
 	svc := h.Group("/api/v1/svc")
@@ -167,7 +172,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerTenantList(svc)
 	registerTenantAdmins(svc)
 
-	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
-	h.Group("/v1").POST("/chat/completions", inferenceProxy)
-	h.Group("/v1").GET("/inference/stream", inferenceProxy)
+	// OpenAI-compatible chat traffic is served by the independent Envoy AI
+	// Gateway data plane, not by this control-plane gateway. Keep the legacy
+	// stream placeholder isolated until its ownership is decided separately.
+	h.Group("/v1").GET("/inference/stream", legacyInferenceStream)
 }

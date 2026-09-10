@@ -104,15 +104,26 @@ type Accelerator struct {
 
 // ExecutionProfile 在创建时冻结，后续 catalog/镜像变更不改写已有服务。
 type ExecutionProfile struct {
-	ID             string        `json:"id"`
-	Version        string        `json:"version"`
-	Runtime        string        `json:"runtime"` // vllm | sglang
-	Task           InferenceTask `json:"task,omitempty"`
-	ImageID        string        `json:"image_id,omitempty"`
-	ImageRef       string        `json:"image_ref"`
-	ArtifactRef    string        `json:"artifact_ref"` // pvc://...#/models/...
-	ArtifactDigest string        `json:"artifact_digest"`
-	SecretRef      string        `json:"secret_ref,omitempty"`
+	ID              string                `json:"id"`
+	Version         string                `json:"version"`
+	Runtime         string                `json:"runtime"` // vllm | sglang
+	Task            InferenceTask         `json:"task,omitempty"`
+	ImageID         string                `json:"image_id,omitempty"`
+	ImageRef        string                `json:"image_ref"`
+	ArtifactRef     string                `json:"artifact_ref"` // pvc://...#/models/...
+	ArtifactDigest  string                `json:"artifact_digest"`
+	SecretRef       string                `json:"secret_ref,omitempty"`
+	Materialization *ModelMaterialization `json:"materialization,omitempty"`
+}
+
+// ModelMaterialization is persisted metadata for object-backed model fetch.
+// It deliberately has no signed URL or credential fields.
+type ModelMaterialization struct {
+	TenantID          uuid.UUID `json:"tenant_id"`
+	ModelVersionID    uuid.UUID `json:"model_version_id"`
+	ObjectRef         string    `json:"object_ref"`
+	ExpectedSizeBytes int64     `json:"expected_size_bytes"`
+	SHA256            string    `json:"sha256"`
 }
 
 // EngineEnvVar 是创建时冻结的租户环境变量，不是 shell 赋值。

@@ -76,19 +76,10 @@ curl -H "X-Dev-Tenant-ID: test" http://localhost:8080/api/v1/tasks/00000000-0000
 
 ---
 
-## TASK-CORE-003: 实现 inferenceProxy（OpenAI兼容代理）
+## TASK-CORE-003: ~~实现 inferenceProxy（OpenAI兼容代理）~~ 已取消
 
-**Team**: Core（或 Services 团队接管，依团队分工）  
-**YAML 来源**: 无正式 YAML（`/v1/chat/completions` 是 OpenAI 兼容接口）  
-**Files**:
-- 修改: `repo/services/ani-gateway/internal/router/stubs.go` → 移除 `inferenceProxy` 的 `notImplemented` 调用（保留函数名，更改实现）
+**取消原因**：OpenAI 推理请求的数据面已明确归属独立 Envoy AI Gateway。`ani-gateway`
+只承担控制面，不注册或实现第二套 `/v1/chat/completions` 反向代理；旧占位路由已移除。
 
-**Handler 逻辑**:
-1. 从 request body 提取 `model` 字段
-2. 根据 model 名称查找对应的 InferenceService endpoint_url
-3. 反向代理到 vLLM endpoint（HTTP 代理，转发请求头和 body）
-4. 流式响应透传（保持 SSE/chunked）
-
-**注意**: 此接口依赖 InferenceService 上线，优先级最低。建议作为 TASK-SVC-008/009 完成后的收尾任务。
-
-**前置依赖**: TASK-SVC-008（createInferenceService 有数据）、TASK-SVC-009（getInferenceService 能查到 endpoint_url）
+相关入口、鉴权和限流以 Envoy AI Gateway 的发布流程为准，见
+`docs/superpowers/specs/2026-08-31-envoy-ai-gateway-tenant-aware-dynamic-publication-design.md`。

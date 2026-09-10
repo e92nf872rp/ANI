@@ -23,7 +23,7 @@ services:
       POSTGRES_PASSWORD: ani_dev_password
       POSTGRES_DB: ani
     ports:
-      - "127.0.0.1:5432:5432"
+      - "0.0.0.0:5432:5432"
     volumes:
       - ani-postgres-data:/var/lib/postgresql/data
       - ./init-scripts/postgres:/docker-entrypoint-initdb.d

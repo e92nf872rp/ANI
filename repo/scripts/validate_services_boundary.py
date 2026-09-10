@@ -26,7 +26,7 @@ CORE_PROTECTED_SERVICE_ROOTS = (
     "metering-service",
     "reconcile-worker",
 )
-SERVICES_OWNED_SOURCE_ROOTS = ("model-service", "kb-service", "tenant-service", "inference-service", "platform-settings-service", "envoy-authz-adapter", "pkg")
+SERVICES_OWNED_SOURCE_ROOTS = ("model-service", "model-fetcher", "kb-service", "tenant-service", "inference-service", "platform-settings-service" "envoy-authz-adapter", "pkg")
 DOCS_ONLY_SERVICE_ROOTS = ("docs", "tasks", "prototypes")
 KNOWN_SERVICE_ROOTS = frozenset(
     (*CORE_PROTECTED_SERVICE_ROOTS, *SERVICES_OWNED_SOURCE_ROOTS, *DOCS_ONLY_SERVICE_ROOTS)
@@ -53,6 +53,23 @@ DOCS_ONLY_SOURCE_SUFFIXES = (
 )
 GO_SCAN_ROOTS = tuple(f"services/{service}" for service in SERVICES_OWNED_SOURCE_ROOTS)
 PYTHON_SCAN_ROOTS = ("ai",)
+EXCLUDED_DIRECTORY_NAMES = frozenset(
+    {
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".git",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "bin",
+        "dist",
+        "build",
+        "target",
+    }
+)
 GATEWAY_ROOT = "services/ani-gateway"
 SERVICE_IMPORT_PREFIX = "github.com/kubercloud/ani/services/"
 FORBIDDEN_GO_PREFIXES = (
@@ -203,18 +220,42 @@ def parse_python_imports(path: pathlib.Path) -> list[str]:
     return modules
 
 
+def is_excluded_directory_member(path: pathlib.Path, target_root: pathlib.Path) -> bool:
+    """True when *path* lives under a directory that must never be scanned.
+
+    Virtualenvs and other dependency/vendored trees are third-party content
+    (gitignored, non UTF-8 test fixtures included) and would both crash the
+    UTF-8 source readers and misattribute their imports to the scan roots.
+    """
+    rel_parts = path.relative_to(target_root).parts
+    return any(
+        part in EXCLUDED_DIRECTORY_NAMES or (part.startswith(".") and part not in (".", ".."))
+        for part in rel_parts[:-1]
+    )
+
+
 def iter_source_files(root: pathlib.Path, relative_root: str, suffix: str) -> Iterable[pathlib.Path]:
     target_root = root / relative_root
     if not target_root.exists():
         return []
-    return sorted(path for path in target_root.rglob(f"*{suffix}") if path.is_file())
+    return sorted(
+        path
+        for path in target_root.rglob(f"*{suffix}")
+        if path.is_file() and not is_excluded_directory_member(path, target_root)
+    )
 
 
 def iter_files_with_suffixes(root: pathlib.Path, relative_root: str, suffixes: tuple[str, ...]) -> Iterable[pathlib.Path]:
     target_root = root / relative_root
     if not target_root.exists():
         return []
-    return sorted(path for path in target_root.rglob("*") if path.is_file() and path.suffix in suffixes)
+    return sorted(
+        path
+        for path in target_root.rglob("*")
+        if path.is_file()
+        and path.suffix in suffixes
+        and not is_excluded_directory_member(path, target_root)
+    )
 
 
 def service_name_for_path(path: pathlib.Path, root: pathlib.Path) -> str | None:
@@ -240,7 +281,7 @@ def detect_service_root_classification_findings(root: pathlib.Path) -> list[Find
     if not services_root.exists():
         return findings
 
-    for child in sorted(path for path in services_root.iterdir() if path.is_dir()):
+    for child in sorted(path for path in services_root.iterdir() if path.is_dir() and path.name not in EXCLUDED_DIRECTORY_NAMES):
         rel_path = normalize_path(child, root)
         if child.name not in KNOWN_SERVICE_ROOTS:
             findings.append(

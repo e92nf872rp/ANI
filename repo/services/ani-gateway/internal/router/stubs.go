@@ -18,12 +18,8 @@ func notImplemented(ctx context.Context, c *app.RequestContext) {
 	_ = ctx
 }
 
-// ── OpenAI-Compatible Inference Proxy ─────────────────────────────────────────
-
-// inferenceProxy routes /v1/chat/completions to the correct vLLM service
-// based on X-Model-Name header, then streams the response back via SSE.
-func inferenceProxy(ctx context.Context, c *app.RequestContext) {
-	// TODO: read X-Model-Name header → lookup endpoint_url in Redis/DB
-	// → reverse-proxy to vLLM with SSE streaming
+// legacyInferenceStream is the pre-Envoy stream placeholder. Chat completion
+// traffic is intentionally not registered on this control-plane gateway.
+func legacyInferenceStream(ctx context.Context, c *app.RequestContext) {
 	notImplemented(ctx, c)
 }

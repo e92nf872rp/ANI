@@ -23,12 +23,20 @@ class ServicesBoundaryValidationTest(unittest.TestCase):
     def test_platform_settings_service_is_classified_as_services_owned_source(self) -> None:
         self.assertIn("platform-settings-service", guard.SERVICES_OWNED_SOURCE_ROOTS)
         self.assertIn("services/platform-settings-service", guard.GO_SCAN_ROOTS)
+        
+    def test_model_fetcher_is_a_services_owned_source_root(self) -> None:
+        self.assertIn("model-fetcher", guard.SERVICES_OWNED_SOURCE_ROOTS)
+        self.assertIn("services/model-fetcher", guard.GO_SCAN_ROOTS)
 
     def test_repo_baseline_is_warn_only(self) -> None:
         result = guard.validate_workspace(guard.ROOT, run_spec_split=False)
 
         self.assertEqual(result.error_count, 0)
-        self.assertEqual(result.warning_count, 5)
+        # 4 accepted baseline exceptions remain: the ai/rag-engine pymilvus
+        # entry was removed with the RAG architecture compliance refactor
+        # (issue-028~039); before the .venv scan fix this test could not
+        # reach the assertion at all (UnicodeDecodeError).
+        self.assertEqual(result.warning_count, 4)
 
     def test_unregistered_core_internal_go_import_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -220,6 +228,31 @@ class ServicesBoundaryValidationTest(unittest.TestCase):
         self.assertEqual(result.warning_count, 0)
         self.assertIn("cross_service_internal_go_import", "\n".join(result.errors))
         self.assertIn("services/kb-service/internal/config", "\n".join(result.errors))
+
+    def test_dependency_trees_are_not_scanned(self) -> None:
+        # Regression: ai/rag-engine/.venv ships non UTF-8 joblib test fixtures
+        # that crashed the source readers, and their third-party imports must
+        # never be attributed to the scan roots.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_fixture_layout(root)
+            self._write_baseline(
+                root,
+                """
+                version: 1
+                exceptions: []
+                """,
+            )
+            venv_dir = root / "ai" / "rag-engine" / ".venv" / "lib" / "site-packages"
+            venv_dir.mkdir(parents=True, exist_ok=True)
+            (venv_dir / "provider.py").write_text("import pymilvus\n", encoding="utf-8")
+            # Deliberately non UTF-8 bytes — must never reach the reader.
+            (venv_dir / "vendor_bytes.py").write_bytes(b"import pymilvus  # \xa4\xff")
+
+            result = guard.validate_workspace(root, run_spec_split=False)
+
+        self.assertEqual(result.warning_count, 0)
+        self.assertEqual(result.error_count, 0)
 
     def test_empty_reason_on_exact_path_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

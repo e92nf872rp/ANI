@@ -881,7 +881,7 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		precheck.details["request_fingerprint"] = requestFingerprint
 	}
 	snapshot := vmSnapshotFor(record, request)
-	volume := volumeAttachmentFor(request)
+	volume := volumeAttachmentFor(record.Kind, request)
 	rollback := containerRollbackFor(record, request)
 	opID := ""
 	if s.operations != nil {
@@ -966,7 +966,7 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		}
 		record.Sandbox = &sandbox
 	}
-	if s.lifecycle != nil && record.Kind != ports.WorkloadKindSandbox && usesProviderLifecycle(request.Action) {
+	if s.lifecycle != nil && record.Kind != ports.WorkloadKindSandbox && usesProviderLifecycle(record.Kind, request.Action) {
 		result, err := s.lifecycle.Apply(ctx, request, record)
 		if err != nil {
 			if opID != "" {
@@ -1289,8 +1289,11 @@ func validateLifecycleIntent(record ports.WorkloadInstanceRecord, request ports.
 		if !supportsVolumeBinding(record.Kind) {
 			return fmt.Errorf("%w: volume binding is only supported for vm, container, and gpu_container instances", ports.ErrUnsupported)
 		}
-		if strings.TrimSpace(request.VolumeID) == "" || strings.TrimSpace(request.MountPath) == "" {
-			return fmt.Errorf("%w: volume_id and mount_path are required for attach_volume", ports.ErrInvalid)
+		if strings.TrimSpace(request.VolumeID) == "" {
+			return fmt.Errorf("%w: volume_id is required for attach_volume", ports.ErrInvalid)
+		}
+		if record.Kind != ports.WorkloadKindVM && strings.TrimSpace(request.MountPath) == "" {
+			return fmt.Errorf("%w: mount_path is required for container attach_volume", ports.ErrInvalid)
 		}
 	case ports.WorkloadLifecycleDetachVolume:
 		if !supportsVolumeBinding(record.Kind) {
@@ -2007,13 +2010,14 @@ func terminationProtectedAction(action ports.WorkloadLifecycleAction) bool {
 	}
 }
 
-func usesProviderLifecycle(action ports.WorkloadLifecycleAction) bool {
+func usesProviderLifecycle(kind ports.WorkloadKind, action ports.WorkloadLifecycleAction) bool {
 	switch action {
 	case ports.WorkloadLifecycleSnapshot,
-		ports.WorkloadLifecycleAttachVolume,
-		ports.WorkloadLifecycleDetachVolume,
 		ports.WorkloadLifecycleSetTerminationProtection:
 		return false
+	case ports.WorkloadLifecycleAttachVolume,
+		ports.WorkloadLifecycleDetachVolume:
+		return kind == ports.WorkloadKindVM
 	default:
 		return true
 	}
@@ -2103,7 +2107,7 @@ func sanitizeSnapshotID(value string) string {
 	return value
 }
 
-func volumeAttachmentFor(request ports.WorkloadInstanceLifecycleRequest) *ports.WorkloadStorageAttachment {
+func volumeAttachmentFor(kind ports.WorkloadKind, request ports.WorkloadInstanceLifecycleRequest) *ports.WorkloadStorageAttachment {
 	if request.Action != ports.WorkloadLifecycleAttachVolume {
 		return nil
 	}
@@ -2111,16 +2115,24 @@ func volumeAttachmentFor(request ports.WorkloadInstanceLifecycleRequest) *ports.
 	if volumeID == "" {
 		return nil
 	}
+	name := volumeID
+	mountPath := strings.TrimSpace(request.MountPath)
+	sourceRef := volumeID
+	status := "mounted"
+	if kind == ports.WorkloadKindVM {
+		mountPath = ""
+		status = "attached"
+	}
 	return &ports.WorkloadStorageAttachment{
-		Name:         volumeID,
+		Name:         name,
 		Kind:         ports.StorageAttachmentDataDisk,
 		ResourceType: "volume",
 		ResourceID:   volumeID,
-		MountPath:    strings.TrimSpace(request.MountPath),
+		MountPath:    mountPath,
 		ReadOnly:     request.ReadOnly != nil && *request.ReadOnly,
-		SourceRef:    volumeID,
+		SourceRef:    sourceRef,
 		Required:     true,
-		Status:       "mounted",
+		Status:       status,
 	}
 }
 

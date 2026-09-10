@@ -14,7 +14,7 @@ DEFAULT_MANIFEST = ROOT / "deploy/real-k8s-lab/inference-envoy-ai-gateway-c41.ya
 GATEWAY_NAMESPACE = "ani-aigw"
 SYSTEM_NAMESPACE = "ani-system"
 ADAPTER_IMAGE = "docker.changqingyun.cn/ani/envoy-authz-adapter:c41-20260831"
-PUBLISHER_IMAGE = "docker.changqingyun.cn/ani/inference-gateway-publisher:c41-20260831"
+PUBLISHER_IMAGE = "docker.changqingyun.cn/ani/inference-gateway-publisher@sha256:71b43a4808fb5a036f0d1c7aae3bd21a8ac8b7f607df9ff39c836041c6ea9e65"
 
 EXPECTED_RESOURCES = {
     ("ServiceAccount", "envoy-authz-adapter", GATEWAY_NAMESPACE),
@@ -304,7 +304,7 @@ def validate_publisher(documents: list[dict[str, Any]]) -> None:
         == [
             {
                 "name": "DATABASE_URL",
-                "valueFrom": {"secretKeyRef": {"name": "ani-services-runtime", "key": "database_url"}},
+                "valueFrom": {"secretKeyRef": {"name": "ani-inference-platform-runtime", "key": "database_url"}},
             },
             {"name": "INFERENCE_AI_GATEWAY_PUBLIC_BASE_URL", "value": "https://ai.example.com"},
             {"name": "INFERENCE_AI_GATEWAY_NAMESPACE", "value": "ani-aigw"},

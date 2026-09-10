@@ -109,6 +109,139 @@ func TestCreateBodyStripsArtifactPathFragment(t *testing.T) {
 	}
 }
 
+func TestCreateBodyMaterializesObjectArtifactWithoutSendingObjectArtifact(t *testing.T) {
+	serviceID := uuid.MustParse("05f6f46f-3db8-4551-8497-c46debb4be22")
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	objectRef := "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc-1/model.safetensors"
+	body := createBody(runtime.EnsureRequest{
+		TenantID: tenantID, ServiceID: serviceID, ServedModelName: "tiny-cpu", IdempotencyKey: uuid.New(),
+		Spec: domain.Spec{Replicas: 1, ExecutionProfile: domain.ExecutionProfile{
+			ImageRef: "registry.ani.internal/platform/vllm-openai-cpu@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			// Object-backed creator freezes the descriptor and may clear ArtifactRef.
+			ArtifactRef:     "",
+			Materialization: &domain.ModelMaterialization{TenantID: tenantID, ModelVersionID: versionID, ObjectRef: objectRef, ExpectedSizeBytes: 12, SHA256: "sha256:abc"},
+		}},
+	}, runtime.TopologyPlan{Mode: "single_node", ProfileID: "container-single-node", ProfileVersion: "v1"})
+	if _, ok := body["artifacts"]; ok {
+		t.Fatalf("object artifact must not be sent as Core artifact: %#v", body["artifacts"])
+	}
+	mat, ok := body["model_materialization"].(map[string]any)
+	if !ok {
+		t.Fatalf("model_materialization = %#v", body["model_materialization"])
+	}
+	if mat["object_ref"] != objectRef || mat["tenant_id"] != tenantID.String() || mat["model_version_id"] != versionID.String() || mat["size_bytes"] != int64(12) || mat["checksum_sha256"] != "sha256:abc" {
+		t.Fatalf("materialization = %#v", mat)
+	}
+	if _, signed := mat["signed_url"]; signed {
+		t.Fatal("signed URL must never be sent to Core")
+	}
+}
+
+func TestCreateBodyUsesDeploymentMaterializationConfig(t *testing.T) {
+	t.Setenv("MODEL_SERVICE_GRPC_ADDR", "")
+	t.Setenv("MODEL_FETCHER_IMAGE_REF", "")
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	objectRef := "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc-1/model.safetensors"
+	body := createBodyWithMaterializationConfig(runtime.EnsureRequest{
+		TenantID: tenantID, ServiceID: uuid.New(), ServedModelName: "tiny", IdempotencyKey: uuid.New(),
+		Spec: domain.Spec{Replicas: 1, ExecutionProfile: domain.ExecutionProfile{Materialization: &domain.ModelMaterialization{
+			TenantID: tenantID, ModelVersionID: versionID, ObjectRef: objectRef, ExpectedSizeBytes: 12, SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}}},
+	}, runtime.TopologyPlan{Mode: "single_node", ProfileID: "container-single-node", ProfileVersion: "v1"},
+		"model-service.ani-system.svc.cluster.local:9103",
+		"registry.example/model-fetcher@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	)
+	mat, ok := body["model_materialization"].(map[string]any)
+	if !ok || mat["model_service_grpc_addr"] != "model-service.ani-system.svc.cluster.local:9103" || mat["fetcher_image_ref"] != "registry.example/model-fetcher@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("materialization = %#v", body["model_materialization"])
+	}
+}
+
+func TestCreateBodyUsesVersionDirectoryForImportedArchive(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	objectRef := "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/import-44444444-4444-4444-4444-444444444444/archive/model.tar.gz"
+	body := materializationBodyWithConfig(domain.ModelMaterialization{
+		TenantID: tenantID, ModelVersionID: versionID, ObjectRef: objectRef,
+		ExpectedSizeBytes: 12, SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}, "model-service:9103", "registry.example/model-fetcher@sha256:"+strings.Repeat("b", 64))
+	if got := body["target_path"]; got != "/models/"+versionID.String() {
+		t.Fatalf("target_path = %v, want extracted version directory", got)
+	}
+}
+
+func TestEnsureRejectsObjectArtifactWithoutMaterialization(t *testing.T) {
+	rt := New("http://127.0.0.1:1", "")
+	_, err := rt.Ensure(t.Context(), runtime.EnsureRequest{
+		TenantID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), ServiceID: uuid.New(), IdempotencyKey: uuid.New(),
+		Spec: domain.Spec{Replicas: 1, ExecutionProfile: domain.ExecutionProfile{ArtifactRef: "object://models/tenant/model/version/document/model.safetensors"}},
+	})
+	if err == nil {
+		t.Fatal("object-backed ensure without materialization must fail closed")
+	}
+}
+
+func TestEnsureRejectsObjectMaterializationWithoutFetcherConfiguration(t *testing.T) {
+	t.Setenv("MODEL_SERVICE_GRPC_ADDR", "")
+	t.Setenv("MODEL_FETCHER_IMAGE_REF", "")
+	ref := "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors"
+	rt := New("http://127.0.0.1:1", "")
+	_, err := rt.Ensure(t.Context(), runtime.EnsureRequest{
+		TenantID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), ServiceID: uuid.New(), IdempotencyKey: uuid.New(),
+		Spec: domain.Spec{Replicas: 1, ExecutionProfile: domain.ExecutionProfile{ArtifactRef: ref, Materialization: &domain.ModelMaterialization{
+			TenantID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), ModelVersionID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), ObjectRef: ref, ExpectedSizeBytes: 1,
+			SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}}},
+	})
+	if err == nil {
+		t.Fatal("object-backed ensure without fetcher configuration must fail closed")
+	}
+}
+
+func TestEnsureRejectsNonCanonicalObjectAndPVCMaterialization(t *testing.T) {
+	t.Setenv("MODEL_SERVICE_GRPC_ADDR", "model-service:9090")
+	t.Setenv("MODEL_FETCHER_IMAGE_REF", "registry.local/model-fetcher@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	valid := domain.ModelMaterialization{TenantID: tenantID, ModelVersionID: versionID, ExpectedSizeBytes: 1, SHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	for _, artifact := range []string{
+		"object://models/not-a-tenant/model/version/document/file",
+		"object://user:pass@models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/file",
+		"object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/foo..bar/file",
+		"object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/foo%2e%2ebar/file",
+		"https://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/file",
+		"pvc://vllm-model#/models/qwen",
+	} {
+		t.Run(artifact, func(t *testing.T) {
+			rt := New("http://127.0.0.1:1", "")
+			input := runtime.EnsureRequest{TenantID: tenantID, ServiceID: uuid.New(), IdempotencyKey: uuid.New(), Spec: domain.Spec{Replicas: 1, ExecutionProfile: domain.ExecutionProfile{ArtifactRef: artifact, Materialization: &valid}}}
+			if _, err := rt.Ensure(t.Context(), input); err == nil {
+				t.Fatal("non-canonical object/PVC materialization must fail closed")
+			}
+		})
+	}
+}
+
+func TestEnsureRejectsBareChecksum(t *testing.T) {
+	t.Setenv("MODEL_SERVICE_GRPC_ADDR", "model-service:9090")
+	t.Setenv("MODEL_FETCHER_IMAGE_REF", "registry.local/model-fetcher@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	ref := "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors"
+	rt := New("http://127.0.0.1:1", "")
+	_, err := rt.Ensure(t.Context(), runtime.EnsureRequest{TenantID: tenantID, ServiceID: uuid.New(), IdempotencyKey: uuid.New(), Spec: domain.Spec{Replicas: 1, ExecutionProfile: domain.ExecutionProfile{Materialization: &domain.ModelMaterialization{TenantID: tenantID, ModelVersionID: uuid.New(), ObjectRef: ref, ExpectedSizeBytes: 1, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}})
+	if err == nil {
+		t.Fatal("bare checksum must fail closed")
+	}
+}
+
+func TestValidFetcherImageRejectsMultipleAt(t *testing.T) {
+	if validFetcherImage("registry.local/a@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
+		t.Fatal("fetcher image with multiple @ separators must be rejected")
+	}
+}
+
 func TestProbeHealthAndSmokeUseRuntimeEndpoint(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

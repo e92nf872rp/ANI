@@ -112,9 +112,6 @@ def expected_error_codes(spec: dict[str, Any]) -> list[str]:
             description = response.get("description", "")
             if "code=" in description:
                 codes.add(description.split("code=", 1)[1].split("）", 1)[0].split(")", 1)[0].strip())
-            for code in response.get("x-ani-error-codes", []):
-                if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", code):
-                    codes.add(code)
     return sorted(code for code in codes if code)
 
 

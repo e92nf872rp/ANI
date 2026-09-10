@@ -160,7 +160,7 @@ func reservationViewFromPort(v ports.ReservationView) reservationViewResponse {
 }
 
 // quotaResponseFromView converts a ports.QuotaView (map keyed by resource type)
-// into the Quota response schema ({tenant_id, items: QuotaItem[]}).
+// into the Quota response schema ({tenant_id, items: QuotaItem[], gpu_reservation}).
 // GetMy does not JOIN resource_quota_meta, so unit/display_name/is_discrete
 // are omitted (they are optional in the QuotaItem schema).
 func quotaResponseFromView(v ports.QuotaView) quotaResponse {
@@ -171,9 +171,15 @@ func quotaResponseFromView(v ports.QuotaView) quotaResponse {
 			Total:        total,
 			Used:         v.Used[rt],
 			Reserved:     v.Reserved[rt],
+			Available:    total - v.Used[rt] - v.Reserved[rt],
 		})
 	}
-	return quotaResponse{TenantID: v.TenantID, TenantName: v.TenantName, Items: items}
+	resp := quotaResponse{TenantID: v.TenantID, TenantName: v.TenantName, Items: items}
+	if v.GPUReservation != nil {
+		rv := reservationViewFromPort(*v.GPUReservation)
+		resp.GPUReservation = &rv
+	}
+	return resp
 }
 
 // writeReservationError maps adapter sentinel errors to HTTP three-part errors.

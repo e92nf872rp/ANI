@@ -500,6 +500,40 @@ func (q *PostgresQuota) List(ctx context.Context, req ports.QuotaListRequest) (p
 			return err
 		}
 
+		// 第三步：批量查本页租户的 GPU 预留视图（LEFT JOIN allocations，
+		// 未设置预留时 allocated=0，与 GetReservation 平台路径一致）
+		resRows, err := tx.Query(ctx, `
+			SELECT rq.tenant_id::text, rq.used, rq.reserved, COALESCE(a.allocated_gpu_count, 0)
+			FROM resource_quota rq
+			LEFT JOIN resource_reservation_allocations a ON a.tenant_id = rq.tenant_id
+			WHERE rq.tenant_id::text = ANY($1) AND rq.resource_type = 'gpu_count'
+		`, tenantIDs)
+		if err != nil {
+			return err
+		}
+		for resRows.Next() {
+			var tid string
+			var used, reserved, allocated int64
+			if err := resRows.Scan(&tid, &used, &reserved, &allocated); err != nil {
+				resRows.Close()
+				return err
+			}
+			if v, ok := viewsByTenant[tid]; ok {
+				v.GPUReservation = &ports.ReservationView{
+					TenantID:          tid,
+					AllocatedGPUCount: allocated,
+					Used:              used,
+					Reserved:          reserved,
+					Available:         allocated - used - reserved,
+				}
+			}
+		}
+		if err := resRows.Err(); err != nil {
+			resRows.Close()
+			return err
+		}
+		resRows.Close()
+
 		for _, tid := range order {
 			result.Items = append(result.Items, *viewsByTenant[tid])
 		}
@@ -547,7 +581,31 @@ func (q *PostgresQuota) GetMy(ctx context.Context, tenantID string) (ports.Quota
 			view.Used[ports.ResourceType(rt)] = used
 			view.Reserved[ports.ResourceType(rt)] = reserved
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		// GPU 预留视图：LEFT JOIN allocations，未设置预留（无行）时 allocated=0，
+		// 与 GetReservation 平台路径一致；无 gpu_count 配额行时 GPUReservation 保持 nil。
+		var gpuUsed, gpuReserved, allocated int64
+		resErr := tx.QueryRow(ctx, `
+			SELECT rq.used, rq.reserved, COALESCE(a.allocated_gpu_count, 0)
+			FROM resource_quota rq
+			LEFT JOIN resource_reservation_allocations a ON a.tenant_id = rq.tenant_id
+			WHERE rq.tenant_id = $1 AND rq.resource_type = 'gpu_count'
+		`, tenantID).Scan(&gpuUsed, &gpuReserved, &allocated)
+		if resErr != nil && !errors.Is(resErr, pgx.ErrNoRows) {
+			return resErr
+		}
+		if resErr == nil {
+			view.GPUReservation = &ports.ReservationView{
+				TenantID:          tenantID,
+				AllocatedGPUCount: allocated,
+				Used:              gpuUsed,
+				Reserved:          gpuReserved,
+				Available:         allocated - gpuUsed - gpuReserved,
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return ports.QuotaView{}, err

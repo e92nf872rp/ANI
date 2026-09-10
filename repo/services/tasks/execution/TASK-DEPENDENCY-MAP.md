@@ -47,7 +47,6 @@ TASK-SVC-001 (Model CRUD)
 TASK-SVC-003 (Inference deploy)
   ├─ 被依赖 → SVC-004 (PATCH)
   ├─ 被依赖 → SVC-008 (列表/删除)
-  ├─ 被依赖 → SVC-011 (OpenAI Gateway)
   └─ 被依赖 → SVC-013 (logs/test/policies)
 
 TASK-SVC-005 (Knowledge Base CRUD)
@@ -67,7 +66,7 @@ TASK-SVC-010 (Tenant 基础)
 |---|---|---|
 | **A**（P1） | CORE-003、CORE-005 | SVC-013 |
 | **B**（P2） | CORE-007~009、CORE-011~012 | SVC-014、SVC-015 |
-| **C**（P3） | CORE-006、CORE-010、CORE-013 | SVC-016、SVC-011 |
+| **C**（P3） | CORE-006、CORE-010、CORE-013 | SVC-016 |
 
 与基础 CRUD **可并行**（无硬依赖）：CORE-001、CORE-002、SVC-001、SVC-005、SVC-010
 
@@ -77,7 +76,6 @@ TASK-SVC-010 (Tenant 基础)
 SVC-001 Model ready
   → SVC-003 Inference deploy
     → SVC-013 test/logs/policies
-    → SVC-011 OpenAI proxy
   → SVC-005 KB
     → SVC-006 query
     → SVC-014 citations/sessions

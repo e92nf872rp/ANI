@@ -63,10 +63,19 @@ type KBGRPCClient interface {
 	GetSessionMessages(ctx context.Context, tenantID string, kbID string, sessionID string, limit int32, cursor string) (*kbv1.GetSessionMessagesResponse, error)
 	DeleteSession(ctx context.Context, tenantID string, kbID string, sessionID string) (*emptypb.Empty, error)
 	UpdateKBPermissions(ctx context.Context, tenantID string, kbID string, idempotencyKey string, req *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error)
+	// GetKBPermissions reads the KB permissions row (SPEC §4.3 #19,
+	// kb-p1-plan §2.6): a KB with no permissions row surfaces defaults, not
+	// an error; a missing KB surfaces NOT_FOUND. Single-passthrough shape,
+	// aligned with GetKB.
+	GetKBPermissions(ctx context.Context, tenantID string, kbID string) (*kbv1.KBPermissions, error)
 	// ReparseDocument re-queues an already-ingested document for parsing
 	// (SPEC §5.1 reparse 事件流). It returns an AsyncTaskRef because reparse
 	// is asynchronous; the client polls the task via the tasks API.
 	ReparseDocument(ctx context.Context, tenantID string, kbID string, docID string, idempotencyKey string) (*commonv1.AsyncTaskRef, error)
+	// ListKBAuditLogs reads the KB management-plane audit trail (SPEC §4.1 #21,
+	// kb-p1-plan §6.4): cursor-paginated entries ordered created_at DESC,
+	// id DESC. Flat items+next_cursor shape, aligned with ListKBCitations.
+	ListKBAuditLogs(ctx context.Context, tenantID string, kbID string, limit int32, cursor string) (*kbv1.ListKBAuditLogsResponse, error)
 }
 
 // kbGRPCClient is the production implementation backed by a gRPC ClientConn.
@@ -347,6 +356,15 @@ func (c *kbGRPCClient) UpdateKBPermissions(ctx context.Context, tenantID, kbID, 
 	return c.client.UpdateKBPermissions(callCtx, req)
 }
 
+// GetKBPermissions reads the KB permissions row (SPEC §4.3 #19). The tenant id
+// comes from the Auth middleware; a missing permissions row surfaces the
+// default contract values from kb-service (not an error).
+func (c *kbGRPCClient) GetKBPermissions(ctx context.Context, tenantID, kbID string) (*kbv1.KBPermissions, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.GetKBPermissions(callCtx, &kbv1.GetKBPermissionsRequest{TenantId: tenantID, KbId: kbID})
+}
+
 // ReparseDocument re-queues an already-ingested document for parsing
 // (SPEC §5.1 reparse 事件流). The tenant id comes from the Auth middleware,
 // and the idempotency key is client-generated for replay safety, mirroring
@@ -359,6 +377,19 @@ func (c *kbGRPCClient) ReparseDocument(ctx context.Context, tenantID, kbID, docI
 		KbId:           kbID,
 		DocId:          docID,
 		IdempotencyKey: idempotencyKey,
+	})
+}
+
+// ListKBAuditLogs reads the KB management-plane audit trail (SPEC §4.1 #21).
+// The tenant id comes from the Auth middleware; kb-service enforces the
+// keyset pagination (created_at DESC, id DESC) and the cursor shape.
+func (c *kbGRPCClient) ListKBAuditLogs(ctx context.Context, tenantID, kbID string, limit int32, cursor string) (*kbv1.ListKBAuditLogsResponse, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ListKBAuditLogs(callCtx, &kbv1.ListKBAuditLogsRequest{
+		TenantId: tenantID,
+		KbId:     kbID,
+		Page:     &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor},
 	})
 }
 
