@@ -41,6 +41,7 @@ const (
 	KBService_GetSessionMessages_FullMethodName     = "/kb.v1.KBService/GetSessionMessages"
 	KBService_DeleteSession_FullMethodName          = "/kb.v1.KBService/DeleteSession"
 	KBService_ReparseDocument_FullMethodName        = "/kb.v1.KBService/ReparseDocument"
+	KBService_ListKBAuditLogs_FullMethodName        = "/kb.v1.KBService/ListKBAuditLogs"
 )
 
 // KBServiceClient is the client API for KBService service.
@@ -96,6 +97,9 @@ type KBServiceClient interface {
 	// a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
 	// the NotifyDocumentUploaded event pipeline).
 	ReparseDocument(ctx context.Context, in *ReparseDocumentRequest, opts ...grpc.CallOption) (*v1.AsyncTaskRef, error)
+	// ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
+	// Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
+	ListKBAuditLogs(ctx context.Context, in *ListKBAuditLogsRequest, opts ...grpc.CallOption) (*ListKBAuditLogsResponse, error)
 }
 
 type kBServiceClient struct {
@@ -309,6 +313,15 @@ func (c *kBServiceClient) ReparseDocument(ctx context.Context, in *ReparseDocume
 	return out, nil
 }
 
+func (c *kBServiceClient) ListKBAuditLogs(ctx context.Context, in *ListKBAuditLogsRequest, opts ...grpc.CallOption) (*ListKBAuditLogsResponse, error) {
+	out := new(ListKBAuditLogsResponse)
+	err := c.cc.Invoke(ctx, KBService_ListKBAuditLogs_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KBServiceServer is the server API for KBService service.
 // All implementations must embed UnimplementedKBServiceServer
 // for forward compatibility
@@ -362,6 +375,9 @@ type KBServiceServer interface {
 	// a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
 	// the NotifyDocumentUploaded event pipeline).
 	ReparseDocument(context.Context, *ReparseDocumentRequest) (*v1.AsyncTaskRef, error)
+	// ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
+	// Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
+	ListKBAuditLogs(context.Context, *ListKBAuditLogsRequest) (*ListKBAuditLogsResponse, error)
 	mustEmbedUnimplementedKBServiceServer()
 }
 
@@ -428,6 +444,9 @@ func (UnimplementedKBServiceServer) DeleteSession(context.Context, *DeleteSessio
 }
 func (UnimplementedKBServiceServer) ReparseDocument(context.Context, *ReparseDocumentRequest) (*v1.AsyncTaskRef, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReparseDocument not implemented")
+}
+func (UnimplementedKBServiceServer) ListKBAuditLogs(context.Context, *ListKBAuditLogsRequest) (*ListKBAuditLogsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListKBAuditLogs not implemented")
 }
 func (UnimplementedKBServiceServer) mustEmbedUnimplementedKBServiceServer() {}
 
@@ -805,6 +824,24 @@ func _KBService_ReparseDocument_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KBService_ListKBAuditLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListKBAuditLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).ListKBAuditLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_ListKBAuditLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).ListKBAuditLogs(ctx, req.(*ListKBAuditLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KBService_ServiceDesc is the grpc.ServiceDesc for KBService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -887,6 +924,10 @@ var KBService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReparseDocument",
 			Handler:    _KBService_ReparseDocument_Handler,
+		},
+		{
+			MethodName: "ListKBAuditLogs",
+			Handler:    _KBService_ListKBAuditLogs_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

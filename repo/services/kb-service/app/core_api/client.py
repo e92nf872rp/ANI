@@ -111,6 +111,35 @@ class CoreClient:
             raise _to_error(resp, "createVectorStore")
         return resp.json()
 
+    async def set_knowledge_base_link(
+        self,
+        *,
+        vector_store_id: str,
+        kb_id: str,
+        kb_name: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """PUT /vector-stores/{id}/knowledge-base-link — VS→KB 关联 (SPEC §6.1 CreateKB).
+
+        The Core control plane persists the link in
+        vector_store_knowledge_base_links, so listVectorStores / getVectorStore
+        return knowledge_base_ref for KB-owned vector stores.
+        """
+        body = {
+            "idempotency_key": idempotency_key,
+            "knowledge_base_ref": {
+                "id": kb_id,
+                "name": kb_name,
+                "source": "services_knowledge_base",
+            },
+        }
+        resp = await self._client.put(
+            f"/vector-stores/{vector_store_id}/knowledge-base-link", json=body
+        )
+        if resp.status_code != 200:
+            raise _to_error(resp, "setVectorStoreKnowledgeBaseLink")
+        return resp.json()
+
     async def get_vector_store(self, *, vector_store_id: str) -> dict[str, Any]:
         """GET /vector-stores/{id}."""
         resp = await self._client.get(f"/vector-stores/{vector_store_id}")

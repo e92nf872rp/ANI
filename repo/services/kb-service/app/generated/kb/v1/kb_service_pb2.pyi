@@ -421,6 +421,66 @@ class UpdateKBPermissionsRequest(_message.Message):
     allowed_user_ids: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ..., public_read: _Optional[bool] = ..., allowed_user_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
+class GetKBPermissionsRequest(_message.Message):
+    __slots__ = ("tenant_id", "kb_id")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ...) -> None: ...
+
+class KBPermissions(_message.Message):
+    __slots__ = ("kb_id", "public_read", "allowed_user_ids", "updated_at")
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    PUBLIC_READ_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_USER_IDS_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    kb_id: str
+    public_read: bool
+    allowed_user_ids: _containers.RepeatedScalarFieldContainer[str]
+    updated_at: _timestamp_pb2.Timestamp
+    def __init__(self, kb_id: _Optional[str] = ..., public_read: _Optional[bool] = ..., allowed_user_ids: _Optional[_Iterable[str]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class ListKBAuditLogsRequest(_message.Message):
+    __slots__ = ("tenant_id", "kb_id", "page")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    PAGE_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    page: _common_pb2.CursorPageRequest
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., page: _Optional[_Union[_common_pb2.CursorPageRequest, _Mapping]] = ...) -> None: ...
+
+class AuditLogEntry(_message.Message):
+    __slots__ = ("id", "kb_id", "actor_user_id", "action", "before_state", "after_state", "error_code", "error_msg", "created_at")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_USER_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    BEFORE_STATE_FIELD_NUMBER: _ClassVar[int]
+    AFTER_STATE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MSG_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    kb_id: str
+    actor_user_id: str
+    action: str
+    before_state: str
+    after_state: str
+    error_code: str
+    error_msg: str
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[str] = ..., kb_id: _Optional[str] = ..., actor_user_id: _Optional[str] = ..., action: _Optional[str] = ..., before_state: _Optional[str] = ..., after_state: _Optional[str] = ..., error_code: _Optional[str] = ..., error_msg: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class ListKBAuditLogsResponse(_message.Message):
+    __slots__ = ("items", "next_cursor")
+    ITEMS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    items: _containers.RepeatedCompositeFieldContainer[AuditLogEntry]
+    next_cursor: str
+    def __init__(self, items: _Optional[_Iterable[_Union[AuditLogEntry, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
 class KBChunk(_message.Message):
     __slots__ = ("id", "doc_id", "kb_id", "parent_chunk_id", "chunk_type", "content", "parent_content", "page_number", "content_type", "token_count", "custom_metadata", "created_at", "file_name")
     ID_FIELD_NUMBER: _ClassVar[int]

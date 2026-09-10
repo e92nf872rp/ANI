@@ -41,7 +41,7 @@ async def create_kb(
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
             RETURNING id, tenant_id, name, description, embedding_model,
                       chunk_size, top_k, score_threshold, retrieval_mode,
-                      status, doc_count, created_at, updated_at, vector_store_id
+                      status, 0 AS doc_count, created_at, updated_at, vector_store_id
             """,
             uuid.UUID(tenant_id),
             name,
@@ -96,7 +96,12 @@ async def get_kb(
             """
             SELECT id, tenant_id, name, description, embedding_model,
                    chunk_size, top_k, score_threshold, retrieval_mode,
-                   status, doc_count, created_at, updated_at, vector_store_id
+                   status,
+                   (SELECT count(*) FROM kb_documents d
+                     WHERE d.kb_id = knowledge_bases.id
+                       AND NOT (d.parse_status = 'failed'
+                                AND d.error_message = 'deleted')) AS doc_count,
+                   created_at, updated_at, vector_store_id
               FROM knowledge_bases
              WHERE id = $1 AND status <> 'deleted'
             """,
@@ -128,7 +133,12 @@ async def list_kbs(
                 """
                 SELECT id, tenant_id, name, description, embedding_model,
                        chunk_size, top_k, score_threshold, retrieval_mode,
-                       status, doc_count, created_at, updated_at, vector_store_id
+                       status,
+                       (SELECT count(*) FROM kb_documents d
+                         WHERE d.kb_id = knowledge_bases.id
+                           AND NOT (d.parse_status = 'failed'
+                                    AND d.error_message = 'deleted')) AS doc_count,
+                       created_at, updated_at, vector_store_id
                   FROM knowledge_bases
                  WHERE id > $1 AND status <> 'deleted'
                  ORDER BY id ASC
@@ -142,7 +152,12 @@ async def list_kbs(
                 """
                 SELECT id, tenant_id, name, description, embedding_model,
                        chunk_size, top_k, score_threshold, retrieval_mode,
-                       status, doc_count, created_at, updated_at, vector_store_id
+                       status,
+                       (SELECT count(*) FROM kb_documents d
+                         WHERE d.kb_id = knowledge_bases.id
+                           AND NOT (d.parse_status = 'failed'
+                                    AND d.error_message = 'deleted')) AS doc_count,
+                       created_at, updated_at, vector_store_id
                   FROM knowledge_bases
                  WHERE status <> 'deleted'
                  ORDER BY id ASC
@@ -182,7 +197,12 @@ async def update_kb(
              WHERE id = $1 AND status <> 'deleted'
             RETURNING id, tenant_id, name, description, embedding_model,
                       chunk_size, top_k, score_threshold, retrieval_mode,
-                      status, doc_count, created_at, updated_at, vector_store_id
+                      status,
+                      (SELECT count(*) FROM kb_documents d
+                        WHERE d.kb_id = knowledge_bases.id
+                          AND NOT (d.parse_status = 'failed'
+                                   AND d.error_message = 'deleted')) AS doc_count,
+                      created_at, updated_at, vector_store_id
             """,
             uuid.UUID(kb_id),
             name,
@@ -221,22 +241,4 @@ async def get_kb_status(
         return await conn.fetchval(
             "SELECT status FROM knowledge_bases WHERE id = $1",
             uuid.UUID(kb_id),
-        )
-
-
-async def increment_doc_count(
-    conn: asyncpg.Connection, *, tenant_id: str, kb_id: str, delta: int = 1
-) -> None:
-    """Increment/decrement doc_count atomically (RLS-scoped)."""
-    async with conn.transaction():
-        await set_tenant_context(conn, tenant_id)
-        await conn.execute(
-            """
-            UPDATE knowledge_bases
-               SET doc_count = doc_count + $2,
-                   updated_at = now()
-             WHERE id = $1
-            """,
-            uuid.UUID(kb_id),
-            delta,
         )

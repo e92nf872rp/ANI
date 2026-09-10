@@ -114,6 +114,10 @@ class _MockCoreClient:
             raise CoreAPIError("core down", status_code=503, code="UNAVAILABLE")
         return {"id": _vector_store_name(KB_ID), "name": kwargs["name"]}
 
+    async def set_knowledge_base_link(self, **kwargs):
+        self.calls.append(("set_knowledge_base_link", kwargs))
+        return {"id": kwargs["vector_store_id"]}
+
     async def delete_vector_store(self, **kwargs):
         self.calls.append(("delete_vector_store", kwargs))
         return {"id": kwargs["vector_store_id"]}
@@ -395,6 +399,9 @@ def test_create_kb_poison_key_self_heals():
                     'duplicate key value violates unique constraint '
                     '"async_tasks_tenant_id_idempotency_key_key"'
                 )
+            if "INSERT INTO kb_audit_log" in sql:
+                self.events.append("insert_audit")
+                return {"id": uuid.uuid4()}
             return None
 
         async def fetch(self, sql, *args):

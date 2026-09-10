@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/metadata"
 	kbv1 "github.com/kubercloud/ani/pkg/generated/pb/kb/v1"
 )
 
@@ -24,19 +25,20 @@ var (
 	kbInjectedSSEConfig KbSSEConfig
 )
 
-// registerKnowledgeBases wires the 18 KB endpoints (SPEC §4.1/§4.3 端点表):
+// registerKnowledgeBases wires the 19 KB endpoints (SPEC §4.1/§4.3 端点表):
 //   - 11 P0 gRPC passthrough endpoints routed to kb-service
 //   - 1 SSE streaming query endpoint held by the gateway
 //   - 3 P1 endpoints (citations/sessions/permissions) routed to kb-service;
 //     kb-service returns UNIMPLEMENTED which maps to HTTP 501.
 //   - 3 B2 endpoints (#11 chunks / #17 session messages / #18 session delete)
+//   - 1 B8 endpoint (#21 audit-logs) routed to kb-service (ListKBAuditLogs)
 //
 // Dependencies (client / SSE config) are injected via RegisterWithOptions.
 func registerKnowledgeBases(svc *route.RouterGroup) {
 	registerKnowledgeBasesWithClient(svc, kbInjectedClient, kbInjectedSSEConfig)
 }
 
-// registerKnowledgeBasesWithClient wires the 18 KB endpoints using an explicit
+// registerKnowledgeBasesWithClient wires the 19 KB endpoints using an explicit
 // gRPC client and SSE config, so tests can inject fakes directly.
 //
 // When client is nil the gRPC handlers return 503 UNAVAILABLE so the gateway
@@ -74,6 +76,9 @@ func registerKnowledgeBasesWithClient(svc *route.RouterGroup, client KBGRPCClien
 	// B3 endpoint (SPEC §4.3 #12): reparse a document for a fresh parse run;
 	// 202 AsyncTask + route baseline cleanup (issue-048).
 	svc.POST("/knowledge-bases/:kb_id/documents/:doc_id/reparse", api.reparseKnowledgeBaseDocument)
+	// B8 endpoint (SPEC §4.1 #21, kb-p1-plan §6.4): KB management-plane
+	// audit trail; cursor-paginated, ordered created_at DESC, id DESC.
+	svc.GET("/knowledge-bases/:kb_id/audit-logs", api.listKnowledgeBaseAuditLogs)
 }
 
 // kbAPI holds the injected gRPC client. Handlers read the tenant id from the
@@ -82,6 +87,19 @@ func registerKnowledgeBasesWithClient(svc *route.RouterGroup, client KBGRPCClien
 // cross-tenant isolation (SPEC §7.1).
 type kbAPI struct {
 	client KBGRPCClient
+}
+
+// kbWriteCtx wraps the handler ctx with the authenticated user id in the
+// outgoing gRPC metadata (x-user-id), so kb-service can attribute
+// management-plane audit rows to the acting user (B8 #21, kb-p1-plan §6.3).
+// Mirrors tenantWriteCallCtx in tenant_common.go; empty user ids (dev mode
+// without Auth) are skipped, and kb-service records the internal system
+// actor. Read-only handlers keep the plain ctx — no audit attribution.
+func kbWriteCtx(ctx context.Context, c *app.RequestContext) context.Context {
+	if userID := strings.TrimSpace(instanceUserID(c)); userID != "" {
+		return metadata.AppendToOutgoingContext(ctx, "x-user-id", userID)
+	}
+	return ctx
 }
 
 // ── request body structs ────────────────────────────────────────────────────
@@ -192,7 +210,7 @@ func (a *kbAPI) createKnowledgeBase(ctx context.Context, c *app.RequestContext) 
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key must be a uuid")
 		return
 	}
-	kb, err := a.client.CreateKB(ctx, instanceTenantID(c), req.IdempotencyKey, &kbv1.CreateKBRequest{
+	kb, err := a.client.CreateKB(kbWriteCtx(ctx, c), instanceTenantID(c), req.IdempotencyKey, &kbv1.CreateKBRequest{
 		Name:           req.Name,
 		Description:    req.Description,
 		EmbeddingModel: req.EmbeddingModel,
@@ -242,7 +260,7 @@ func (a *kbAPI) updateKnowledgeBase(ctx context.Context, c *app.RequestContext) 
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key must be a uuid")
 		return
 	}
-	kb, err := a.client.UpdateKB(ctx, instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, req.Name, req.Description)
+	kb, err := a.client.UpdateKB(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, req.Name, req.Description)
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -255,7 +273,7 @@ func (a *kbAPI) deleteKnowledgeBase(ctx context.Context, c *app.RequestContext) 
 		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
-	if _, err := a.client.DeleteKB(ctx, instanceTenantID(c), c.Param("kb_id")); err != nil {
+	if _, err := a.client.DeleteKB(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id")); err != nil {
 		writeKBError(c, err)
 		return
 	}
@@ -315,7 +333,7 @@ func (a *kbAPI) uploadKnowledgeBaseDocument(ctx context.Context, c *app.RequestC
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "file_name and file_type are required")
 		return
 	}
-	resp, err := a.client.GetDocumentUploadURL(ctx, instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.GetDocumentUploadURLRequest{
+	resp, err := a.client.GetDocumentUploadURL(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.GetDocumentUploadURLRequest{
 		FileName:       req.FileName,
 		FileType:       req.FileType,
 		FileSizeBytes:  req.FileSizeBytes,
@@ -348,7 +366,7 @@ func (a *kbAPI) notifyDocumentUploaded(ctx context.Context, c *app.RequestContex
 	if docID == "" {
 		docID = c.Param("doc_id")
 	}
-	taskRef, err := a.client.NotifyDocumentUploaded(ctx, instanceTenantID(c), c.Param("kb_id"), docID, storagePath)
+	taskRef, err := a.client.NotifyDocumentUploaded(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), docID, storagePath)
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -373,7 +391,7 @@ func (a *kbAPI) deleteKnowledgeBaseDocument(ctx context.Context, c *app.RequestC
 		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
-	if _, err := a.client.DeleteDocument(ctx, instanceTenantID(c), c.Param("kb_id"), c.Param("doc_id")); err != nil {
+	if _, err := a.client.DeleteDocument(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), c.Param("doc_id")); err != nil {
 		writeKBError(c, err)
 		return
 	}
@@ -514,7 +532,7 @@ func (a *kbAPI) updateKnowledgeBasePermissions(ctx context.Context, c *app.Reque
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key must be a uuid")
 		return
 	}
-	kb, err := a.client.UpdateKBPermissions(ctx, instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.UpdateKBPermissionsRequest{
+	kb, err := a.client.UpdateKBPermissions(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.UpdateKBPermissionsRequest{
 		PublicRead:     req.PublicRead,
 		AllowedUserIds: req.AllowedUserIDs,
 	})
@@ -666,7 +684,7 @@ func (a *kbAPI) reparseKnowledgeBaseDocument(ctx context.Context, c *app.Request
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key must be a uuid")
 		return
 	}
-	taskRef, err := a.client.ReparseDocument(ctx, instanceTenantID(c), c.Param("kb_id"), c.Param("doc_id"), req.IdempotencyKey)
+	taskRef, err := a.client.ReparseDocument(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), c.Param("doc_id"), req.IdempotencyKey)
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -675,6 +693,46 @@ func (a *kbAPI) reparseKnowledgeBaseDocument(ctx context.Context, c *app.Request
 		TaskID:   taskRef.GetTaskId(),
 		TaskType: taskRef.GetTaskType(),
 		Status:   taskRef.GetStatus(),
+	})
+}
+
+// listKnowledgeBaseAuditLogs handles GET
+// /knowledge-bases/{kb_id}/audit-logs (SPEC §4.1 #21, kb-p1-plan §6.4):
+// cursor-paginated KB management-plane audit trail (created_at DESC, id DESC).
+// before_state/after_state arrive as JSONB strings and are unmarshalled here
+// so the REST contract exposes objects (SPEC §3.2 JSONB 序列化); a missing KB
+// yields 404 (NOT_FOUND via writeKBError).
+func (a *kbAPI) listKnowledgeBaseAuditLogs(ctx context.Context, c *app.RequestContext) {
+	if a.client == nil {
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		return
+	}
+	limit := queryInt(c, "limit", 20)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "limit must be between 1 and 100")
+		return
+	}
+	cursor := string(c.QueryArgs().Peek("cursor"))
+	resp, err := a.client.ListKBAuditLogs(ctx, instanceTenantID(c), c.Param("kb_id"), int32(limit), cursor)
+	if err != nil {
+		writeKBError(c, err)
+		return
+	}
+	items := make([]kbAuditLogJSON, 0, len(resp.GetItems()))
+	for _, entry := range resp.GetItems() {
+		item, err := kbAuditLogToJSON(entry)
+		if err != nil {
+			writeInstanceError(c, http.StatusInternalServerError, "INTERNAL", "failed to serialize audit logs response")
+			return
+		}
+		items = append(items, item)
+	}
+	c.JSON(http.StatusOK, map[string]any{
+		"items":       items,
+		"next_cursor": resp.GetNextCursor(),
 	})
 }
 
@@ -952,6 +1010,54 @@ func kbSessionMessageToJSON(m *kbv1.KBSessionMessage) (kbSessionMessageJSON, err
 		OutputTokens: m.GetOutputTokens(),
 		DurationMs:   m.GetDurationMs(),
 		CreatedAt:    protoTimestampToRFC3339(m.GetCreatedAt()),
+	}, nil
+}
+
+// kbAuditLogJSON mirrors the KBAuditLog schema in services/v1.yaml (SPEC §4.1
+// #21, kb-p1-plan §6.4). before_state/after_state are nullable objects carried
+// as JSONB strings in the proto and exposed as raw JSON here (empty → null,
+// never a quoted string); actor_user_id/error_code/error_msg are nullable —
+// null means "no value" (internal system actor / success), so they serialize
+// as null rather than being omitted.
+type kbAuditLogJSON struct {
+	ID          string          `json:"id"`
+	KbID        string          `json:"kb_id"`
+	ActorUserID any             `json:"actor_user_id"`
+	Action      string          `json:"action"`
+	BeforeState json.RawMessage `json:"before_state"`
+	AfterState  json.RawMessage `json:"after_state"`
+	ErrorCode   any             `json:"error_code"`
+	ErrorMsg    any             `json:"error_msg"`
+	CreatedAt   string          `json:"created_at"`
+}
+
+// kbAuditLogToJSON converts a proto AuditLogEntry to the REST KBAuditLog
+// shape. The before_state/after_state JSONB strings are passed through as raw
+// JSON so the response carries objects (creation entries have before=null,
+// deletion entries after=null — contract nullable, SPEC §3.2). Invalid JSONB
+// surfaces an error — it cannot occur with DB-constrained writes (SPEC §7.2).
+func kbAuditLogToJSON(e *kbv1.AuditLogEntry) (kbAuditLogJSON, error) {
+	if e == nil {
+		return kbAuditLogJSON{}, nil
+	}
+	before, err := jsonbToRaw(e.GetBeforeState())
+	if err != nil {
+		return kbAuditLogJSON{}, fmt.Errorf("audit log %s: %w", e.GetId(), err)
+	}
+	after, err := jsonbToRaw(e.GetAfterState())
+	if err != nil {
+		return kbAuditLogJSON{}, fmt.Errorf("audit log %s: %w", e.GetId(), err)
+	}
+	return kbAuditLogJSON{
+		ID:          e.GetId(),
+		KbID:        e.GetKbId(),
+		ActorUserID: nullableString(e.GetActorUserId()),
+		Action:      e.GetAction(),
+		BeforeState: before,
+		AfterState:  after,
+		ErrorCode:   nullableString(e.GetErrorCode()),
+		ErrorMsg:    nullableString(e.GetErrorMsg()),
+		CreatedAt:   protoTimestampToRFC3339(e.GetCreatedAt()),
 	}, nil
 }
 

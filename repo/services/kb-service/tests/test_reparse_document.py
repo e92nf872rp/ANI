@@ -167,6 +167,8 @@ class _ReparseConn:
             return _task_row()
         if "INSERT INTO outbox_events" in sql:
             return {"id": 1}
+        if "INSERT INTO kb_audit_log" in sql:
+            return {"id": uuid.uuid4()}
         return None
 
     async def fetch(self, sql, *args):

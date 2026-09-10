@@ -121,10 +121,12 @@ class _MockConn:
 
     async def fetchrow(self, sql, *args):
         # Distinguish doc_repo.get_document vs kb_repo.get_kb by the SQL.
-        if "kb_documents" in sql:
-            return self._doc_row
-        if "knowledge_bases" in sql:
+        # Order matters: get_kb embeds a "FROM kb_documents" subquery (live
+        # doc_count), so check the outer "FROM knowledge_bases" first.
+        if "FROM knowledge_bases" in sql:
             return self._kb_row
+        if "FROM kb_documents" in sql:
+            return self._doc_row
         return None
 
     async def execute(self, sql, *args):

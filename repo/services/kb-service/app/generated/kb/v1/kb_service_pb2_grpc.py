@@ -137,6 +137,11 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.SerializeToString,
                 response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
                 _registered_method=True)
+        self.ListKBAuditLogs = channel.unary_unary(
+                '/kb.v1.KBService/ListKBAuditLogs',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.FromString,
+                _registered_method=True)
 
 
 class KBServiceServicer:
@@ -292,6 +297,14 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListKBAuditLogs(self, request, context):
+        """ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
+        Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_KBServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -394,6 +407,11 @@ def add_KBServiceServicer_to_server(servicer, server):
                     servicer.ReparseDocument,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.FromString,
                     response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
+            ),
+            'ListKBAuditLogs': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListKBAuditLogs,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -937,6 +955,33 @@ class KBService:
             '/kb.v1.KBService/ReparseDocument',
             kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.SerializeToString,
             common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListKBAuditLogs(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/ListKBAuditLogs',
+            kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.FromString,
             options,
             channel_credentials,
             insecure,

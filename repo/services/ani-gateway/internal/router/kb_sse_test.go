@@ -156,6 +156,9 @@ func (f *fakeKBRetrieveClient) GetKBPermissions(context.Context, string, string)
 func (f *fakeKBRetrieveClient) ReparseDocument(context.Context, string, string, string, string) (*commonv1.AsyncTaskRef, error) {
 	return nil, nil
 }
+func (f *fakeKBRetrieveClient) ListKBAuditLogs(context.Context, string, string, int32, string) (*kbv1.ListKBAuditLogsResponse, error) {
+	return nil, nil
+}
 
 // fakeRetrieveStream implements kbv1.KBService_RetrieveClient for tests.
 // It replays a canned list of RetrieveEvent messages, then returns io.EOF.

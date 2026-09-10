@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>140</dd></div>
-          <div><dt>Schemas</dt><dd>150</dd></div>
+          <div><dt>Operations</dt><dd>141</dd></div>
+          <div><dt>Schemas</dt><dd>152</dd></div>
         </dl>
       </section>
 
@@ -438,6 +438,14 @@
           <td>更新知识库基础信息（名称/描述）</td>
           <td><code></code></td>
           <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/audit-logs</code></td>
+          <td><code>listKnowledgeBaseAuditLogs</code></td>
+          <td>知识库操作审计日志</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1347,6 +1355,8 @@
         <li><code>InvitationResult</code></li>
         <li><code>InviteAdminRequest</code></li>
         <li><code>InviteMemberRequest</code></li>
+        <li><code>KBAuditLog</code></li>
+        <li><code>KBAuditLogListResponse</code></li>
         <li><code>KBChunk</code></li>
         <li><code>KBChunkListResponse</code></li>
         <li><code>KBCitation</code></li>

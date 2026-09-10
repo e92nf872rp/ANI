@@ -44,6 +44,7 @@ P1_RPCS = [
     "ListKBSessions",
     "UpdateKBPermissions",
     "GetKBPermissions",
+    "ListKBAuditLogs",
 ]
 
 
@@ -296,6 +297,31 @@ def test_update_kb_permissions_bad_allowed_user_id_invalid_argument(stub):
             kb_pb.UpdateKBPermissionsRequest(
                 tenant_id="t", kb_id=str(uuid.uuid4()), idempotency_key=str(uuid.uuid4()),
                 allowed_user_ids=["not-a-uuid"],
+            )
+        )
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_list_kb_audit_logs_b8_wired_not_unimplemented(stub):
+    # B8: without a pool the servicer returns FAILED_PRECONDITION — never
+    # UNIMPLEMENTED (the audit-log read RPC is wired like the B4 pair).
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.ListKBAuditLogs(
+            kb_pb.ListKBAuditLogsRequest(
+                tenant_id="t", kb_id=str(uuid.uuid4()),
+                page=common_pb2.CursorPageRequest(limit=20),
+            )
+        )
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_list_kb_audit_logs_missing_tenant_invalid_argument(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.ListKBAuditLogs(
+            kb_pb.ListKBAuditLogsRequest(
+                tenant_id="", kb_id=str(uuid.uuid4()),
+                page=common_pb2.CursorPageRequest(limit=20),
             )
         )
     assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT

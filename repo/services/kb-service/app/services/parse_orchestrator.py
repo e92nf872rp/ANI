@@ -366,6 +366,9 @@ class ParseOrchestrator:
             #    time (matches legacy embed_service.py _build_text_node metadata):
             #    chunk_id, chunk_type, parent_content, parent_chunk_id,
             #    page_number, content_type, doc_id, file_name.
+            # Core API limits a single insert to 100 documents
+            # (vector_store_service.go InsertDocuments); batches of 100
+            # with a doc-scoped suffix keep idempotency per batch.
             if embed_chunks:
                 documents = [
                     {
@@ -385,11 +388,20 @@ class ParseOrchestrator:
                     }
                     for c, v in zip(embed_chunks, vectors)
                 ]
-                await core.insert_vector_documents(
-                    vector_store_id=vector_store_id,
-                    documents=documents,
-                    idempotency_key=f"parse-{doc_id}",
-                )
+                batch_size = 100
+                for batch_idx in range(0, len(documents), batch_size):
+                    batch = documents[batch_idx:batch_idx + batch_size]
+                    # Batch suffix on every key (even batch 0): the gateway
+                    # idempotency middleware caches responses (including
+                    # 400s) for 24h keyed by request fingerprint — reusing
+                    # the legacy "parse-{doc_id}" key with a different
+                    # (batched) body would hit IDEMPOTENCY_KEY_REUSED.
+                    batch_no = batch_idx // batch_size
+                    await core.insert_vector_documents(
+                        vector_store_id=vector_store_id,
+                        documents=batch,
+                        idempotency_key=f"parse-{doc_id}-b{batch_no}",
+                    )
 
             # 8. Write kb_chunks: parents + children + summaries SEPARATELY
             #    (avoid double-write; Plan §2.1 — "PG kb_chunks 写入" row).

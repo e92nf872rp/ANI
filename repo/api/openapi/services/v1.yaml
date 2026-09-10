@@ -963,6 +963,31 @@ components:
         allowed_user_ids: { type: array, items: { type: string, format: uuid } }
         updated_at:       { type: string, format: date-time }
 
+    KBAuditLog:
+      type: object
+      required: [id, kb_id, action, created_at]
+      description: |
+        KB 管理面操作审计条目（B8 #21）。对齐 kb_service.proto AuditLogEntry。
+        before_state/after_state 为操作前/后的关键字段快照（JSON 对象）；
+        error_code 为空表示成功。
+      properties:
+        id:            { type: string, format: uuid }
+        kb_id:         { type: string, format: uuid }
+        actor_user_id: { type: string, format: uuid, nullable: true, description: "操作者；null 表示内部系统操作（解析/重建消费者）" }
+        action:        { type: string, description: "kb.create|kb.update|kb.delete|kb.permissions.update|kb.config.update|kb.rebuild|doc.create|doc.parse|doc.delete|doc.reparse" }
+        before_state:  { type: object, nullable: true, additionalProperties: true, description: "操作前关键字段快照；null 表示创建类操作" }
+        after_state:   { type: object, nullable: true, additionalProperties: true, description: "操作后关键字段快照；null 表示删除类操作" }
+        error_code:    { type: string, nullable: true, description: "业务失败码；null 表示成功" }
+        error_msg:     { type: string, nullable: true }
+        created_at:    { type: string, format: date-time }
+
+    KBAuditLogListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/KBAuditLog' } }
+        next_cursor: { type: string, nullable: true }
+
     KBConfig:
       type: object
       description: |
@@ -2730,6 +2755,36 @@ paths:
         - { name: session_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: 已删除（幂等：会话不存在也返回 204） }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /knowledge-bases/{kb_id}/audit-logs:
+    get:
+      operationId: listKnowledgeBaseAuditLogs
+      summary: 知识库操作审计日志
+      description: |
+        返回 KB 管理面操作审计轨迹（创建/更新/删除/权限变更/配置变更/
+        重建/文档上传/解析/删除/重解析）。按 created_at DESC, id DESC 键集分页。
+        对齐 SPEC §5 US-002 与 kb-p1-plan §6.4。
+      tags: [KnowledgeBases]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: knowledge_base
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string, description: "created_at|id 复合键降序游标" } }
+      responses:
+        "200":
+          description: 审计日志列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBAuditLogListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
