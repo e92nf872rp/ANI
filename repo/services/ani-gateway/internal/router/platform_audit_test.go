@@ -57,8 +57,7 @@ func TestPlatformAuditResponseNotNullGroupsAndPassthrough(t *testing.T) {
 
 func TestPlatformAuditRegisterOptionsWiresService(t *testing.T) {
 	// 过渡方案不再有 local 回退：注入什么就透传什么。
-	var injected ports.PlatformAuditService // 用 fake 最小实现验证透传
-	injected = &fakePlatformAuditService{}
+	var injected ports.PlatformAuditService = &fakePlatformAuditService{} // 用 fake 最小实现验证透传
 	options := RegisterOptions{PlatformAuditService: injected}
 	if options.PlatformAuditService == nil {
 		t.Fatal("PlatformAuditService = nil, want injected service")
