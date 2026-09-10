@@ -524,6 +524,7 @@ public final class ApiClient {
     public static final List<String> CURSOR_PAGINATION_OPERATIONS = Collections.unmodifiableList(Arrays.asList(
         "listGpuContainers",
         "listInferencePolicyEvents",
+        "listInferenceServices",
         "getInferenceServiceLogs",
         "listIntegrations",
         "listKnowledgeBaseAuditLogs",

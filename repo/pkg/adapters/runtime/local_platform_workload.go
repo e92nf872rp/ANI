@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -71,7 +72,7 @@ func (s *LocalPlatformWorkloadService) Capabilities(context.Context) (ports.Plat
 }
 
 func (s *LocalPlatformWorkloadService) Create(_ context.Context, tenantID string, spec ports.PlatformWorkloadCreateSpec) (ports.PlatformWorkloadRecord, error) {
-	if err := validatePlatformWorkloadCreate(spec); err != nil {
+	if err := validatePlatformWorkloadCreate(spec, tenantID); err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	if err := admitPlatformWorkloadTopology(defaultPlatformWorkloadCapabilities(), spec); err != nil {
@@ -257,7 +258,7 @@ func (s *LocalPlatformWorkloadService) lookup(tenantID, workloadID string) (loca
 	return item, nil
 }
 
-func validatePlatformWorkloadCreate(spec ports.PlatformWorkloadCreateSpec) error {
+func validatePlatformWorkloadCreate(spec ports.PlatformWorkloadCreateSpec, tenantIDs ...string) error {
 	if _, err := uuid.Parse(strings.TrimSpace(spec.IdempotencyKey)); err != nil {
 		return fmt.Errorf("%w: idempotency_key must be a uuid", ports.ErrInvalid)
 	}
@@ -302,7 +303,132 @@ func validatePlatformWorkloadCreate(spec ports.PlatformWorkloadCreateSpec) error
 	if strings.TrimSpace(spec.Metadata.OwnerRef) == "" {
 		return fmt.Errorf("%w: metadata.owner_ref is required", ports.ErrInvalid)
 	}
+	if err := validatePlatformWorkloadMaterialization(spec); err != nil {
+		return err
+	}
+	if spec.ModelMaterialization != nil && len(tenantIDs) > 0 {
+		expected, expectedErr := uuid.Parse(strings.TrimSpace(tenantIDs[0]))
+		actual, actualErr := uuid.Parse(strings.TrimSpace(spec.ModelMaterialization.TenantID))
+		if expectedErr != nil || actualErr != nil || expected != actual {
+			return fmt.Errorf("%w: materialization tenant_id does not match workload tenant", ports.ErrInvalid)
+		}
+	}
 	return nil
+}
+
+func validatePlatformWorkloadMaterialization(spec ports.PlatformWorkloadCreateSpec) error {
+	if spec.ModelMaterialization == nil {
+		for _, artifact := range spec.Artifacts {
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(artifact.ObjectRef)), "object://") {
+				return fmt.Errorf("%w: object artifacts require model_materialization", ports.ErrInvalid)
+			}
+		}
+		return nil
+	}
+	if len(spec.Artifacts) > 0 {
+		return fmt.Errorf("%w: model_materialization is mutually exclusive with artifacts", ports.ErrInvalid)
+	}
+	if spec.Topology.Mode == "leader_worker" {
+		return fmt.Errorf("%w: object materialization is not supported for leader_worker without RWX model storage", ports.ErrInvalid)
+	}
+	mat := spec.ModelMaterialization
+	tenantID, err := uuid.Parse(strings.TrimSpace(mat.TenantID))
+	if err != nil || tenantID == uuid.Nil {
+		return fmt.Errorf("%w: materialization tenant_id must be a uuid", ports.ErrInvalid)
+	}
+	versionID, err := uuid.Parse(strings.TrimSpace(mat.ModelVersionID))
+	if err != nil || versionID == uuid.Nil {
+		return fmt.Errorf("%w: materialization model_version_id must be a uuid", ports.ErrInvalid)
+	}
+	if !canonicalPlatformWorkloadObjectRef(mat.ObjectRef, mat.TenantID) {
+		return fmt.Errorf("%w: materialization object_ref must be canonical", ports.ErrInvalid)
+	}
+	if mat.SizeBytes < 1 || !platformWorkloadSHA256(mat.ChecksumSHA256) {
+		return fmt.Errorf("%w: materialization size/checksum is invalid", ports.ErrInvalid)
+	}
+	targetPath := platformWorkloadMaterializationTargetPath(mat)
+	targetValid := safePlatformWorkloadTargetPath(targetPath, mat.ModelVersionID)
+	if platformWorkloadArchiveObjectRef(mat.ObjectRef) {
+		targetValid = safeArchivePlatformWorkloadTargetPath(targetPath, mat.ModelVersionID)
+	}
+	if strings.TrimSpace(mat.ModelServiceGRPCAddr) == "" || strings.Count(strings.TrimSpace(mat.FetcherImageRef), "@") != 1 || !platformWorkloadImageRE.MatchString(strings.TrimSpace(mat.FetcherImageRef)) || !targetValid {
+		return fmt.Errorf("%w: materialization runtime configuration is invalid", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func canonicalPlatformWorkloadObjectRef(value, tenant string) bool {
+	u, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || u.Scheme != "object" || u.Host != "models" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 5 {
+		return false
+	}
+	parsedTenant, err := uuid.Parse(parts[0])
+	expectedTenant, tenantErr := uuid.Parse(strings.TrimSpace(tenant))
+	if err != nil || tenantErr != nil || parsedTenant != expectedTenant {
+		return false
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil {
+		return false
+	}
+	decodedPath, _ := url.PathUnescape(u.EscapedPath())
+	if strings.Contains(u.Path, "..") || strings.Contains(decodedPath, "..") {
+		return false
+	}
+	for _, part := range parts[2:] {
+		if strings.TrimSpace(part) == "" || part == "." || part == ".." || strings.Contains(part, "\\") {
+			return false
+		}
+	}
+	return true
+}
+
+func safePlatformWorkloadTargetPath(value string, versionIDs ...string) bool {
+	path := strings.TrimSpace(value)
+	if !strings.HasPrefix(path, "/models/") || strings.Contains(path, "\\") || strings.Contains(path, "..") {
+		return false
+	}
+	decoded, err := url.PathUnescape(path)
+	if err != nil || strings.Contains(decoded, "..") {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(decoded, "/models/"), "/")
+	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return false
+	}
+	if len(versionIDs) > 0 && strings.TrimSpace(versionIDs[0]) != "" && !strings.EqualFold(parts[0], strings.TrimSpace(versionIDs[0])) {
+		return false
+	}
+	return true
+}
+
+func safeArchivePlatformWorkloadTargetPath(value string, versionID string) bool {
+	target := strings.TrimSpace(value)
+	if !strings.HasPrefix(target, "/models/") || strings.Contains(target, "\\") || strings.Contains(target, "..") {
+		return false
+	}
+	decoded, err := url.PathUnescape(target)
+	if err != nil || decoded != target {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(decoded, "/models/"), "/")
+	return len(parts) == 1 && parts[0] == strings.TrimSpace(versionID) && parts[0] != ""
+}
+
+func platformWorkloadSHA256(value string) bool {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
+		return false
+	}
+	for _, ch := range value[len("sha256:"):] {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func validatePlatformWorkloadTopology(spec ports.PlatformWorkloadCreateSpec) error {

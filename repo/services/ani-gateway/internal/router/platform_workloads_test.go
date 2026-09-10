@@ -149,6 +149,24 @@ func TestPlatformWorkloadSpecFromRequestMapsAcceleratorMemory(t *testing.T) {
 	}
 }
 
+func TestPlatformWorkloadSpecFromRequestMapsModelMaterialization(t *testing.T) {
+	spec, err := platformWorkloadSpecFromRequest(platformWorkloadCreateRequest{
+		ModelMaterialization: &platformWorkloadModelMaterializationRequest{
+			TenantID: "11111111-1111-1111-1111-111111111111", ModelVersionID: "33333333-3333-3333-3333-333333333333",
+			ObjectRef: "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors",
+			SizeBytes: 12, ChecksumSHA256: "sha256:abc", ModelServiceGRPCAddr: "model-service:9090",
+			FetcherImageRef: "registry.local/model-fetcher@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TargetPath: "/models/model.safetensors",
+		},
+	})
+	if err != nil {
+		t.Fatalf("spec from request: %v", err)
+	}
+	mat := spec.ModelMaterialization
+	if mat == nil || mat.ObjectRef == "" || mat.TenantID != "11111111-1111-1111-1111-111111111111" || mat.SizeBytes != 12 || mat.FetcherImageRef == "" {
+		t.Fatalf("materialization = %+v", mat)
+	}
+}
+
 func TestPlatformWorkloadHTTPRejectsZeroAcceleratorMemory(t *testing.T) {
 	h := setupPlatformWorkloadTestServer(t)
 	tenant := "11111111-1111-1111-1111-111111111111"

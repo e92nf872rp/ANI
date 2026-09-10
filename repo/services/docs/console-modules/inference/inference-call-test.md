@@ -100,7 +100,7 @@
 ## 待补边界
 
 - `422` 的 `code` 枚举（如 `SERVICE_NOT_RUNNING`）— 待 Services 在 YAML description 举例
-- 流式测试 — 本页仅非流式 JSON；流式走 Gateway `/v1/chat/completions`
+- 流式测试 — 本页仅非流式 JSON；外部流式调用走独立 Envoy AI Gateway `/v1/chat/completions`
 - 测试历史持久化 — **当前 YAML 未声明** list test history API
 
 ## 与推理服务主模块的关系
@@ -112,6 +112,6 @@
 ## 验收标准
 
 - [ ] 路径与 schema 名称与 `services/v1.yaml` 一致
-- [ ] 不把 Gateway `/v1/chat/completions` 写成本页主路径
+- [ ] 不把 `ani-gateway` 控制面写成 OpenAI `/v1/chat/completions` 数据面
 - [ ] 标注 handler 仍为 stub（契约已声明 ≠ 已实现）
 - [ ] 接口冻结规则逐 operation 列出成功码与错误码

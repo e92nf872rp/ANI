@@ -1,9 +1,15 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -226,6 +232,252 @@ func TestMinIOObjectStoreBuildsTenantScopedSignedUploadAndDownloadURLs(t *testin
 	}
 }
 
+func TestMinIOPutObjectStreamsBodyAndSignsTrustedSHA256Metadata(t *testing.T) {
+	content := bytes.Repeat([]byte("m"), 256*1024)
+	digest := sha256.Sum256(content)
+	checksum := hex.EncodeToString(digest[:])
+	reader := &gatedReadReader{data: content, ready: make(chan struct{})}
+	var gotBody []byte
+	var gotMetadata string
+	var gotAuthorization string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		close(reader.ready)
+		if r.ContentLength != int64(len(content)) {
+			t.Fatalf("content length = %d, want %d", r.ContentLength, len(content))
+		}
+		gotMetadata = r.Header.Get("x-amz-meta-sha256")
+		gotAuthorization = r.Header.Get("Authorization")
+		var err error
+		gotBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		return minIOTestResponse(http.StatusOK), nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{
+		Endpoint: "http://minio.test", AccessKeyID: "minio", SecretAccessKey: "secret", Region: "us-east-1", HTTPClient: client, Now: fixedMinIOTestClock,
+	})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	metadata, err := store.PutObject(context.Background(), ports.PutObjectInput{
+		Ref:  ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("model"), ObjectKey: "import/model.tar.gz"},
+		Body: reader, SizeBytes: int64(len(content)), ContentType: "application/gzip", Checksum: "sha256:" + checksum,
+	})
+	if err != nil {
+		t.Fatalf("PutObject() error = %v", err)
+	}
+	if !bytes.Equal(gotBody, content) {
+		t.Fatalf("uploaded body differs: got %d bytes, want %d", len(gotBody), len(content))
+	}
+	if gotMetadata != checksum {
+		t.Fatalf("x-amz-meta-sha256 = %q, want bare canonical checksum", gotMetadata)
+	}
+	if !strings.Contains(gotAuthorization, "x-amz-meta-sha256") {
+		t.Fatalf("Authorization = %q, want signed checksum metadata", gotAuthorization)
+	}
+	if metadata.SizeBytes != int64(len(content)) || metadata.Checksum != "sha256:"+checksum {
+		t.Fatalf("metadata = %#v, want size/checksum from input", metadata)
+	}
+}
+
+func TestMinIOPutObjectRejectsBodyWhenDeclaredSHA256IsForged(t *testing.T) {
+	content := []byte("right")
+	digest := sha256.Sum256(content)
+	deleted := false
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.Method {
+		case http.MethodPut:
+			if _, err := io.ReadAll(r.Body); err != nil {
+				return nil, err
+			}
+			return minIOTestResponse(http.StatusOK), nil
+		case http.MethodDelete:
+			deleted = true
+			return minIOTestResponse(http.StatusOK), nil
+		default:
+			return minIOTestResponse(http.StatusNotFound), nil
+		}
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{Endpoint: "http://minio.test", AccessKeyID: "minio", SecretAccessKey: "secret", HTTPClient: client, Now: fixedMinIOTestClock})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	_, err = store.PutObject(context.Background(), ports.PutObjectInput{
+		Ref:  ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("model"), ObjectKey: "forged.bin"},
+		Body: bytes.NewReader([]byte("wrong")), SizeBytes: int64(len("wrong")), Checksum: "sha256:" + hex.EncodeToString(digest[:]),
+	})
+	if err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("PutObject() error = %v, want checksum mismatch", err)
+	}
+	if !deleted {
+		t.Fatal("forged object was not scheduled for cleanup")
+	}
+}
+
+func TestMinIOVerifyObjectRejectsPresignedPayloadWithForgedMetadata(t *testing.T) {
+	content := []byte("right")
+	digest := sha256.Sum256(content)
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			return minIOTestResponse(http.StatusNotFound), nil
+		}
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			ContentLength: int64(len("wrong")),
+			Header: http.Header{
+				"Content-Length":    []string{fmt.Sprint(len("wrong"))},
+				"X-Amz-Meta-Sha256": []string{"sha256:" + hex.EncodeToString(digest[:])},
+			},
+			Body: io.NopCloser(strings.NewReader("wrong")),
+		}, nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{Endpoint: "http://minio.test", AccessKeyID: "minio", SecretAccessKey: "secret", HTTPClient: client, Now: fixedMinIOTestClock})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	err = store.VerifyObject(context.Background(), ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("model"), ObjectKey: "presigned.bin"}, int64(len(content)), "sha256:"+hex.EncodeToString(digest[:]))
+	if err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("VerifyObject() error = %v, want checksum mismatch", err)
+	}
+}
+
+func TestMinIOPutObjectDoesNotRetryNonReplayableBody(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		_, _ = io.Copy(io.Discard, r.Body)
+		return minIOTestResponse(http.StatusServiceUnavailable), nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{
+		Endpoints: []string{"http://minio-a.test", "http://minio-b.test"}, AccessKeyID: "minio", SecretAccessKey: "secret", Region: "us-east-1", HTTPClient: client, Now: fixedMinIOTestClock,
+	})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	_, err = store.PutObject(context.Background(), ports.PutObjectInput{
+		Ref:  ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("model"), ObjectKey: "model.bin"},
+		Body: strings.NewReader("model"), SizeBytes: int64(len("model")), Checksum: "sha256:" + strings.Repeat("ab", 32),
+	})
+	if err == nil {
+		t.Fatal("PutObject() error = nil, want service unavailable")
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want one attempt for non-replayable body", requests)
+	}
+}
+
+func TestMinIOPutObjectRejectsInvalidChecksumBeforeRequest(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		return minIOTestResponse(http.StatusOK), nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{Endpoint: "http://minio.test", AccessKeyID: "minio", SecretAccessKey: "secret", HTTPClient: client, Now: fixedMinIOTestClock})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	_, err = store.PutObject(context.Background(), ports.PutObjectInput{
+		Ref: ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("model"), ObjectKey: "model.bin"}, Body: strings.NewReader("model"), SizeBytes: 5, Checksum: "md5:bad",
+	})
+	if err == nil {
+		t.Fatal("PutObject() error = nil, want invalid checksum")
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want no request for invalid checksum", requests)
+	}
+}
+
+func TestMinIOPutObjectRejectsShortBodyAfterStreaming(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		return minIOTestResponse(http.StatusOK), nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{Endpoint: "http://minio.test", AccessKeyID: "minio", SecretAccessKey: "secret", HTTPClient: client, Now: fixedMinIOTestClock})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	_, err = store.PutObject(context.Background(), ports.PutObjectInput{
+		Ref: ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("model"), ObjectKey: "model.bin"}, Body: strings.NewReader("tiny"), SizeBytes: 5,
+	})
+	if err == nil || !strings.Contains(err.Error(), "size mismatch") {
+		t.Fatalf("PutObject() error = %v, want body size mismatch", err)
+	}
+}
+
+func TestMinIOPutObjectPreservesUnknownSizeStreaming(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.ContentLength != 0 {
+			t.Fatalf("content length = %d, want unknown length", r.ContentLength)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if string(body) != "legacy-stream" {
+			t.Fatalf("body = %q", body)
+		}
+		return minIOTestResponse(http.StatusOK), nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{Endpoint: "http://minio.test", AccessKeyID: "minio", SecretAccessKey: "secret", HTTPClient: client, Now: fixedMinIOTestClock})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	metadata, err := store.PutObject(context.Background(), ports.PutObjectInput{
+		Ref: ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("model"), ObjectKey: "legacy.bin"}, Body: strings.NewReader("legacy-stream"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject() error = %v", err)
+	}
+	if metadata.SizeBytes != int64(len("legacy-stream")) {
+		t.Fatalf("metadata size = %d, want %d", metadata.SizeBytes, len("legacy-stream"))
+	}
+}
+
+type gatedReadReader struct {
+	data     []byte
+	position int
+	ready    chan struct{}
+}
+
+func (r *gatedReadReader) Read(p []byte) (int, error) {
+	select {
+	case <-r.ready:
+	default:
+		return 0, fmt.Errorf("body consumed before transport started")
+	}
+	if r.position >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.position:])
+	r.position += n
+	return n, nil
+}
+
+func TestMinIOObjectStoreSignsChecksumUploadHeader(t *testing.T) {
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{
+		Endpoint: "https://minio.example:9000", AccessKeyID: "minio", SecretAccessKey: "secret", Region: "us-east-1", Now: fixedMinIOTestClock,
+	})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	checksum := "sha256:" + strings.Repeat("ab", 32)
+	signed, err := store.SignedUploadURLWithHeaders(context.Background(), ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("models-a"), ObjectKey: "model.bin"}, time.Minute, map[string]string{"x-amz-meta-sha256": checksum})
+	if err != nil {
+		t.Fatalf("SignedUploadURLWithHeaders() error = %v", err)
+	}
+	parsed, err := url.Parse(signed.URL)
+	if err != nil {
+		t.Fatalf("parse signed URL: %v", err)
+	}
+	if got := parsed.Query().Get("X-Amz-SignedHeaders"); got != "host;x-amz-meta-sha256" {
+		t.Fatalf("signed headers = %q, want host;x-amz-meta-sha256", got)
+	}
+	if signed.Headers["x-amz-meta-sha256"] != checksum {
+		t.Fatalf("returned headers = %#v, want checksum metadata", signed.Headers)
+	}
+}
+
 func TestMinIOObjectStoreUsesPublicEndpointOnlyForSignedURLs(t *testing.T) {
 	t.Parallel()
 
@@ -393,5 +645,107 @@ func minIOTestResponse(statusCode int) *http.Response {
 		StatusCode: statusCode,
 		Header:     http.Header{},
 		Body:       io.NopCloser(strings.NewReader("")),
+	}
+}
+
+func TestMetadataFromResponseUsesS3SHA256Checksum(t *testing.T) {
+	store := &MinIOObjectStore{now: fixedMinIOTestClock}
+	response := minIOTestResponse(http.StatusOK)
+	response.ContentLength = 37
+	response.Header.Set("X-Amz-Checksum-Sha256", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	response.Header.Set("ETag", "\"etag-md5\"")
+
+	metadata := store.metadataFromResponse(ports.ObjectRef{BucketClass: "model"}, response)
+	if metadata.Checksum == "etag-md5" {
+		t.Fatalf("checksum used ETag instead of S3 SHA-256 checksum: %#v", metadata)
+	}
+	if metadata.Checksum != strings.Repeat("00", 32) {
+		t.Fatalf("checksum = %q, want hex SHA-256 bytes", metadata.Checksum)
+	}
+}
+
+func TestMetadataFromResponseUsesModelUploadSHA256Metadata(t *testing.T) {
+	store := &MinIOObjectStore{now: fixedMinIOTestClock}
+	response := minIOTestResponse(http.StatusOK)
+	response.ContentLength = 37
+	response.Header.Set("X-Amz-Meta-Sha256", "sha256:"+strings.Repeat("ab", 32))
+	response.Header.Set("ETag", "\"0123456789abcdef0123456789abcdef\"")
+	metadata := store.metadataFromResponse(ports.ObjectRef{BucketClass: "model"}, response)
+	if metadata.Checksum != strings.Repeat("ab", 32) {
+		t.Fatalf("checksum = %q, want model upload SHA-256 metadata", metadata.Checksum)
+	}
+}
+
+func TestMetadataFromResponseDoesNotFallbackToETagWhenSHA256HeaderIsInvalid(t *testing.T) {
+	store := &MinIOObjectStore{now: fixedMinIOTestClock}
+	response := minIOTestResponse(http.StatusOK)
+	response.Header.Set("X-Amz-Meta-Sha256", "not-a-digest")
+	response.Header.Set("ETag", "\"0123456789abcdef0123456789abcdef\"")
+	metadata := store.metadataFromResponse(ports.ObjectRef{BucketClass: "model"}, response)
+	if metadata.Checksum != "" {
+		t.Fatalf("checksum = %q, want empty rather than untrusted ETag fallback", metadata.Checksum)
+	}
+}
+
+func TestMetadataFromResponseFallsBackToETagWithoutChecksumHeader(t *testing.T) {
+	store := &MinIOObjectStore{now: fixedMinIOTestClock}
+	response := minIOTestResponse(http.StatusOK)
+	response.Header.Set("ETag", "\"etag-md5\"")
+	metadata := store.metadataFromResponse(ports.ObjectRef{BucketClass: "model"}, response)
+	if metadata.Checksum != "etag-md5" {
+		t.Fatalf("checksum = %q, want ETag fallback", metadata.Checksum)
+	}
+}
+
+func TestStatObjectRequestsS3ChecksumMetadata(t *testing.T) {
+	var checksumMode string
+	var authorization string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		checksumMode = r.Header.Get("x-amz-checksum-mode")
+		authorization = r.Header.Get("Authorization")
+		response := minIOTestResponse(http.StatusOK)
+		response.ContentLength = 37
+		response.Header.Set("ETag", "\"etag-md5\"")
+		return response, nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{
+		Endpoint:        "http://minio.test",
+		AccessKeyID:     "minio",
+		SecretAccessKey: "secret",
+		Region:          "us-east-1",
+		HTTPClient:      client,
+		Now:             fixedMinIOTestClock,
+	})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	if _, err := store.StatObject(context.Background(), ports.ObjectRef{TenantID: "tenant-a", BucketClass: "model", ObjectKey: "model.bin"}); err != nil {
+		t.Fatalf("StatObject() error = %v", err)
+	}
+	if checksumMode != "ENABLED" {
+		t.Fatalf("x-amz-checksum-mode = %q, want ENABLED", checksumMode)
+	}
+	if !strings.Contains(authorization, "SignedHeaders=host;x-amz-checksum-mode;x-amz-content-sha256;x-amz-date") {
+		t.Fatalf("authorization = %q, want checksum-mode in signed headers", authorization)
+	}
+}
+
+func TestStatObjectDoesNotTreat64HexETagAsSHA256(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		response := minIOTestResponse(http.StatusOK)
+		response.ContentLength = 12
+		response.Header.Set("ETag", `"`+strings.Repeat("ab", 32)+`"`)
+		return response, nil
+	})}
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{Endpoint: "http://minio.test", AccessKeyID: "minio", SecretAccessKey: "secret", Region: "us-east-1", HTTPClient: client, Now: fixedMinIOTestClock})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+	metadata, err := store.StatObject(context.Background(), ports.ObjectRef{TenantID: "tenant-a", BucketClass: ports.BucketClass("model"), ObjectKey: "model.bin"})
+	if err != nil {
+		t.Fatalf("StatObject() error = %v", err)
+	}
+	if metadata.Checksum != "" {
+		t.Fatalf("checksum = %q, want empty without authoritative SHA-256 header", metadata.Checksum)
 	}
 }

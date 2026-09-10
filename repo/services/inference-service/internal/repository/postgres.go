@@ -127,10 +127,11 @@ SELECT service.id, service.tenant_id, service.name, service.model_version_id,
        service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined,
        service.publication_desired, service.publication_generation,
        service.publication_observed_generation, service.publication_phase,
-       COALESCE(service.publication_last_error, ''), service.publication_updated_at
+       COALESCE(service.publication_last_error, ''), service.publication_updated_at,
+       COALESCE(service.invocation_url, '')
 FROM inference_services AS service
 WHERE service.tenant_id = $1 AND service.deleted_at IS NULL
-ORDER BY service.created_at, service.id
+ORDER BY service.created_at DESC, service.id DESC
 `
 
 const cancelOperationSQL = `
@@ -2010,7 +2011,7 @@ func scanPublicService(row pgx.Row) (service domain.Service, err error) {
 		&service.DeletedAt, &service.LegacyQuarantined,
 		&service.Publication.Desired, &service.Publication.Generation,
 		&service.Publication.ObservedGeneration, &service.Publication.Phase,
-		&service.Publication.LastError, &service.Publication.UpdatedAt)
+		&service.Publication.LastError, &service.Publication.UpdatedAt, &service.InvocationURL)
 	if err != nil {
 		return service, err
 	}

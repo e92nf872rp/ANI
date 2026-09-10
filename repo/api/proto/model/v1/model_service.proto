@@ -24,6 +24,9 @@ service ModelService {
   // ListModels returns a cursor-paginated list of models for the tenant.
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
 
+  // ListModelVersions returns cursor-paginated versions for one tenant-owned model.
+  rpc ListModelVersions(ListModelVersionsRequest) returns (ListModelVersionsResponse);
+
   // DeleteModel soft-deletes a model. Fails if any InferenceService references it.
   rpc DeleteModel(DeleteModelRequest) returns (google.protobuf.Empty);
 
@@ -51,6 +54,7 @@ message CreateModelRequest {
   string display_name = 3;
   string description  = 4;
   repeated string capabilities = 5; // text-generation | embedding | speech-to-text | ocr
+  string idempotency_key = 6; // caller supplied replay key
 }
 
 message GetModelRequest {
@@ -72,11 +76,25 @@ message ListModelsRequest {
   string tenant_id = 1;
   string status    = 2;   // filter by status; empty = all
   common.v1.CursorPageRequest page = 3;
+  string keyword   = 4;   // name/display name search
+  string source    = 5;   // upload | huggingface | modelscope | builtin
+  string capability = 6;  // one required capability, when set
 }
 
 message ListModelsResponse {
   repeated Model models           = 1;
   common.v1.CursorPageMeta meta   = 2;
+}
+
+message ListModelVersionsRequest {
+  string tenant_id = 1;
+  string model_id  = 2;
+  common.v1.CursorPageRequest page = 3;
+}
+
+message ListModelVersionsResponse {
+  repeated ModelVersion versions = 1;
+  common.v1.CursorPageMeta meta = 2;
 }
 
 message DeleteModelRequest {
@@ -97,6 +115,7 @@ message CreateModelVersionRequest {
   bool   is_encrypted  = 8;
   string encrypt_algo  = 9;    // sm4 | zuc | aes256gcm
   string encrypt_hint  = 10;   // user-defined password hint; NOT the key itself
+  string idempotency_key = 11;  // caller supplied replay key
 }
 
 message GetUploadURLRequest {
@@ -105,12 +124,22 @@ message GetUploadURLRequest {
   string version    = 3;
   string file_name  = 4;
   int64  size_bytes = 5;
+  string idempotency_key = 6;
+  // Optional client-computed SHA-256. When supplied, the response includes
+  // the required x-amz-meta-sha256 PUT header. Legacy callers may omit this
+  // field, but CreateModelVersion still rejects missing/MD5-only object
+  // metadata rather than silently accepting an ETag.
+  string checksum_sha256 = 7;
 }
 
 message GetUploadURLResponse {
   string upload_url  = 1;   // presigned PUT URL (valid 60 minutes)
   string storage_path = 2;  // MinIO path — pass this to CreateModelVersion
   string doc_id       = 3;  // model_version_id pre-reserved
+  google.protobuf.Timestamp expires_at = 4;
+  // Headers that MUST be sent with the direct PUT. When checksum_sha256 was
+  // supplied, this contains x-amz-meta-sha256 with the canonical SHA-256.
+  map<string, string> upload_headers = 5;
 }
 
 message ImportModelRequest {

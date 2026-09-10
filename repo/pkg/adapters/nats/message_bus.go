@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -17,6 +18,9 @@ type MessageBus struct {
 
 	// msgFactory 用于创建 ports.Message，生产路径为 nil（使用默认实现），测试路径可注入 mock factory。
 	msgFactory func(*natsgo.Msg) ports.Message
+	// inProgress is injectable so the long-handler ack heartbeat can be tested
+	// without a live JetStream connection.
+	inProgress func(*natsgo.Msg) error
 
 	logger *slog.Logger
 }
@@ -91,9 +95,48 @@ func (b *MessageBus) Subscribe(opts ports.SubscribeOptions, handler ports.Messag
 				}
 			}
 		}()
+		var stopHeartbeat func()
+		if opts.AckWait > 0 {
+			stop := make(chan struct{})
+			done := make(chan struct{})
+			var once sync.Once
+			interval := opts.AckWait / 3
+			if interval <= 0 {
+				interval = opts.AckWait
+			}
+			go func() {
+				defer close(done)
+				ticker := time.NewTicker(interval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-stop:
+						return
+					case <-ticker.C:
+						inProgress := b.inProgress
+						if inProgress == nil {
+							inProgress = func(message *natsgo.Msg) error { return message.InProgress() }
+						}
+						if err := inProgress(msg); err != nil && b.logger != nil {
+							b.logger.Warn("message ack deadline renewal failed", "subject", msg.Subject, "err", err)
+						}
+					}
+				}
+			}()
+			stopHeartbeat = func() {
+				once.Do(func() {
+					close(stop)
+					<-done
+				})
+			}
+			defer stopHeartbeat()
+		} else {
+			stopHeartbeat = func() {}
+		}
 		// 每条消息独立上下文：不绑定 Subscribe 调用方 ctx，
 		// 避免订阅 ctx 取消时正在处理的消息被中断；业务侧需 timeout 自行 WithTimeout
 		if err := handler(context.Background(), pMsg); err != nil {
+			stopHeartbeat()
 			if b.logger != nil {
 				b.logger.Warn("handler returned error, nacking for redelivery",
 					"subject", msg.Subject, "err", err)
@@ -106,6 +149,7 @@ func (b *MessageBus) Subscribe(opts ports.SubscribeOptions, handler ports.Messag
 			}
 			return
 		}
+		stopHeartbeat()
 		if err := msg.Ack(); err != nil {
 			if b.logger != nil {
 				b.logger.Error("ack failed after handler success",

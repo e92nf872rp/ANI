@@ -171,28 +171,34 @@ func TestPublishRejectsStaleRouteParentAndNeverUsesDatabaseGenerationForKubernet
 	}
 }
 
-func TestPublishRejectsWrongRouteControllerAndTopLevelRouteStatus(t *testing.T) {
+func TestPublishRejectsWrongRouteControllerAndAcceptsAIGatewayRouteConditions(t *testing.T) {
 	for name, mutate := range map[string]func(Object){
 		"wrong controller": func(route Object) {
 			route.Status["parents"].([]any)[0].(map[string]any)["controllerName"] = "other-controller"
 		},
 		"top level only": func(route Object) {
 			delete(route.Status, "parents")
-			route.Status["conditions"] = []any{map[string]any{"type": "Accepted", "status": "True", "observedGeneration": route.Generation}}
+			route.Status["conditions"] = []any{map[string]any{"type": "Accepted", "status": "True"}}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target := reconcilerTarget()
 			objects := publishObjects(target)
 			mutate(objects[KindAIGatewayRoute])
+			if name == "top level only" {
+				objects[KindAIServiceBackend].Status["conditions"] = []any{map[string]any{"type": "Accepted", "status": "True"}}
+			}
 			store := &publicationStoreFake{target: target, claimed: true}
 			kube := &kubeFake{objects: objects, applyErr: map[Kind]error{}, deleteErr: map[Kind]error{}, keepAfterDelete: map[Kind]bool{}, getQueue: map[Kind][]Object{}}
 			_, err := testReconciler(store, kube).RunOnce(context.Background())
+			if name == "top level only" {
+				if err != nil || len(store.complete) != 1 || len(store.failed) != 0 {
+					t.Fatalf("err=%v complete=%v failed=%v", err, store.complete, store.failed)
+				}
+				return
+			}
 			if err == nil || len(store.complete) != 0 || len(store.failed) != 1 {
 				t.Fatalf("err=%v complete=%v failed=%v", err, store.complete, store.failed)
-			}
-			if name == "top level only" && store.failed[0] != "GATEWAY_ROUTE_STATUS_UNSUPPORTED" {
-				t.Fatalf("reason=%q", store.failed[0])
 			}
 			if name == "wrong controller" && store.failed[0] != "GATEWAY_ROUTE_STATUS_STALE" {
 				t.Fatalf("reason=%q", store.failed[0])

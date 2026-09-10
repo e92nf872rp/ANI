@@ -2,8 +2,11 @@ package repo
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,23 +23,61 @@ type ModelRepo interface {
 	List(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]*Model, int64, string, error)
 	SoftDelete(ctx context.Context, tx pgx.Tx, tenantID, modelID uuid.UUID) error
 	CreateVersion(ctx context.Context, tx pgx.Tx, req CreateVersionReq) (*ModelVersion, error)
+	CreateImport(ctx context.Context, tx pgx.Tx, req CreateImportRequest) (*ImportTask, bool, error)
 	ListVersions(ctx context.Context, pool *pgxpool.Pool, tenantID, modelID uuid.UUID) ([]*ModelVersion, error)
 }
 
 type PostgresModelRepo struct{}
 
+// ErrModelInUse is returned when an active inference service still references
+// a version belonging to the model being deleted.
+var ErrModelInUse = errors.New("model is referenced by an inference service")
+
 func NewPostgresModelRepo() *PostgresModelRepo {
 	return &PostgresModelRepo{}
 }
 
+// ReserveMutation persists an idempotency key before an external side effect
+// such as issuing a signed upload URL. The returned UUID is the stable
+// resource/document identifier for this request.
+func (r *PostgresModelRepo) ReserveMutation(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, scope, key, requestHash string, resourceID uuid.UUID) (uuid.UUID, bool, error) {
+	tx, err := beginTenantTx(ctx, pool)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	defer rollback(ctx, tx)
+	existingID, replay, err := claimModelMutation(ctx, tx, tenantID, scope, key, requestHash)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	if replay {
+		if err := tx.Commit(ctx); err != nil {
+			return uuid.Nil, false, fmt.Errorf("model mutation replay commit: %w", err)
+		}
+		return existingID, true, nil
+	}
+	if resourceID == uuid.Nil {
+		return uuid.Nil, false, fmt.Errorf("model mutation resource id is required")
+	}
+	if err := recordModelMutation(ctx, tx, tenantID, scope, key, requestHash, resourceID); err != nil {
+		return uuid.Nil, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, false, fmt.Errorf("model mutation commit: %w", err)
+	}
+	return resourceID, false, nil
+}
+
 type CreateModelReq struct {
-	TenantID     uuid.UUID
-	Name         string
-	DisplayName  string
-	Description  string
-	Capabilities []string
-	Source       string
-	SourceRepoID string
+	TenantID       uuid.UUID
+	Name           string
+	DisplayName    string
+	Description    string
+	Capabilities   []string
+	Source         string
+	SourceRepoID   string
+	IdempotencyKey string
+	RequestHash    string
 }
 
 type CreateVersionReq struct {
@@ -50,13 +91,18 @@ type CreateVersionReq struct {
 	IsEncrypted    bool
 	EncryptAlgo    string
 	EncryptHint    string
+	IdempotencyKey string
+	RequestHash    string
 }
 
 type ListFilter struct {
-	TenantID uuid.UUID
-	Status   string
-	Cursor   string
-	Limit    int
+	TenantID   uuid.UUID
+	Status     string
+	Source     string
+	Capability string
+	Keyword    string
+	Cursor     string
+	Limit      int
 }
 
 type Model struct {
@@ -97,6 +143,19 @@ func (r *PostgresModelRepo) Create(ctx context.Context, tx pgx.Tx, req CreateMod
 	if req.Source == "" {
 		req.Source = "upload"
 	}
+	if req.IdempotencyKey != "" {
+		resourceID, replay, err := claimModelMutation(ctx, tx, req.TenantID, "model.create", req.IdempotencyKey, req.RequestHash)
+		if err != nil {
+			return nil, err
+		}
+		if replay {
+			model, err := getModelByQuery(ctx, tx, getModelByIDSQL, resourceID, req.TenantID)
+			if err != nil {
+				return nil, fmt.Errorf("modelRepo.Create replay: %w", err)
+			}
+			return model, nil
+		}
+	}
 
 	model := &Model{}
 	err := tx.QueryRow(ctx, `
@@ -112,6 +171,11 @@ func (r *PostgresModelRepo) Create(ctx context.Context, tx pgx.Tx, req CreateMod
 		Scan(modelScanDest(model)...)
 	if err != nil {
 		return nil, fmt.Errorf("modelRepo.Create insert: %w", err)
+	}
+	if req.IdempotencyKey != "" {
+		if err := recordModelMutation(ctx, tx, req.TenantID, "model.create", req.IdempotencyKey, req.RequestHash, model.ID); err != nil {
+			return nil, err
+		}
 	}
 	return model, nil
 }
@@ -231,6 +295,13 @@ func (r *PostgresModelRepo) SoftDelete(ctx context.Context, tx pgx.Tx, tenantID,
 	if err := types.SetDBTenant(ctx, tx); err != nil {
 		return fmt.Errorf("modelRepo.SoftDelete set tenant: %w", err)
 	}
+	var inUse bool
+	if err := tx.QueryRow(ctx, modelInUseSQL, modelID, tenantID).Scan(&inUse); err != nil {
+		return fmt.Errorf("modelRepo.SoftDelete reference check: %w", err)
+	}
+	if inUse {
+		return fmt.Errorf("%w: MODEL_IN_USE", ErrModelInUse)
+	}
 	tag, err := tx.Exec(ctx, softDeleteModelSQL, modelID, tenantID)
 	if err != nil {
 		return fmt.Errorf("modelRepo.SoftDelete update: %w", err)
@@ -244,6 +315,19 @@ func (r *PostgresModelRepo) SoftDelete(ctx context.Context, tx pgx.Tx, tenantID,
 func (r *PostgresModelRepo) CreateVersion(ctx context.Context, tx pgx.Tx, req CreateVersionReq) (*ModelVersion, error) {
 	if err := types.SetDBTenant(ctx, tx); err != nil {
 		return nil, fmt.Errorf("modelRepo.CreateVersion set tenant: %w", err)
+	}
+	if req.IdempotencyKey != "" {
+		resourceID, replay, err := claimModelMutation(ctx, tx, req.TenantID, "model.version:"+req.ModelID.String(), req.IdempotencyKey, req.RequestHash)
+		if err != nil {
+			return nil, err
+		}
+		if replay {
+			version := &ModelVersion{}
+			if err := tx.QueryRow(ctx, getModelVersionForReplaySQL, resourceID, req.TenantID).Scan(versionScanDest(version)...); err != nil {
+				return nil, fmt.Errorf("modelRepo.CreateVersion replay: %w", err)
+			}
+			return version, nil
+		}
 	}
 	version := &ModelVersion{}
 	err := tx.QueryRow(ctx, createModelVersionSQL, req.ModelID, req.TenantID, req.ModelID, req.Version,
@@ -262,6 +346,11 @@ func (r *PostgresModelRepo) CreateVersion(ctx context.Context, tx pgx.Tx, req Cr
 	}
 	if err := requireRowsAffected(tag.RowsAffected(), "modelRepo.CreateVersion", req.ModelID); err != nil {
 		return nil, err
+	}
+	if req.IdempotencyKey != "" {
+		if err := recordModelMutation(ctx, tx, req.TenantID, "model.version:"+req.ModelID.String(), req.IdempotencyKey, req.RequestHash, version.ID); err != nil {
+			return nil, err
+		}
 	}
 	return version, nil
 }
@@ -302,6 +391,47 @@ const softDeleteModelSQL = `
 	UPDATE models
 	SET status='deleted', updated_at=NOW()
 	WHERE id=$1 AND tenant_id=$2 AND status <> 'deleted'
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM inference_services AS inference
+		JOIN model_versions AS version ON version.id=inference.model_version_id
+		WHERE version.model_id=$1
+		  AND inference.tenant_id=$2
+		  AND inference.deleted_at IS NULL
+	  )
+`
+
+const modelInUseSQL = `
+	SELECT EXISTS (
+		SELECT 1
+		FROM inference_services AS inference
+		JOIN model_versions AS version ON version.id=inference.model_version_id
+		WHERE version.model_id=$1
+		  AND inference.tenant_id=$2
+		  AND inference.deleted_at IS NULL
+	)
+`
+
+const claimModelMutationSQL = `
+	SELECT resource_id, request_hash
+	FROM model_mutation_idempotency
+	WHERE tenant_id=$1 AND operation_scope=$2 AND idempotency_key=$3
+	FOR UPDATE
+`
+
+const recordModelMutationSQL = `
+	INSERT INTO model_mutation_idempotency
+		(tenant_id, operation_scope, idempotency_key, request_hash, resource_id)
+	VALUES ($1, $2, $3, $4, $5)
+`
+
+const getModelVersionForReplaySQL = `
+	SELECT v.id, v.model_id, v.version, v.format, v.is_encrypted, COALESCE(v.encrypt_algo, ''),
+		COALESCE(v.encrypt_hint, ''), COALESCE(v.size_bytes, 0), COALESCE(v.checksum_sha256, ''),
+		v.storage_path, v.created_at
+	FROM model_versions AS v
+	JOIN models AS m ON m.id=v.model_id
+	WHERE v.id=$1 AND m.tenant_id=$2 AND m.status <> 'deleted'
 `
 
 const createModelVersionSQL = `
@@ -346,6 +476,18 @@ func buildListModelsFilter(filter ListFilter) (string, []any, error) {
 	if filter.Status != "" {
 		args = append(args, filter.Status)
 		where += fmt.Sprintf(" AND status=$%d", len(args))
+	}
+	if filter.Source != "" {
+		args = append(args, filter.Source)
+		where += fmt.Sprintf(" AND source=$%d", len(args))
+	}
+	if filter.Capability != "" {
+		args = append(args, filter.Capability)
+		where += fmt.Sprintf(" AND $%d=ANY(capabilities)", len(args))
+	}
+	if filter.Keyword != "" {
+		args = append(args, "%"+strings.ReplaceAll(strings.ReplaceAll(filter.Keyword, "%", "\\%"), "_", "\\_")+"%")
+		where += fmt.Sprintf(" AND (name ILIKE $%d ESCAPE CHR(92) OR display_name ILIKE $%d ESCAPE CHR(92))", len(args), len(args))
 	}
 	if filter.Cursor != "" {
 		createdAt, id, err := types.DecodeCursor(filter.Cursor)
@@ -443,6 +585,56 @@ func versionScanDest(v *ModelVersion) []any {
 		&v.ID, &v.ModelID, &v.Version, &v.Format, &v.IsEncrypted, &v.EncryptAlgo,
 		&v.EncryptHint, &v.SizeBytes, &v.ChecksumSHA256, &v.StoragePath, &v.CreatedAt,
 	}
+}
+
+// ModelMutationHash creates the stable hash used to distinguish an idempotent
+// replay from accidental reuse of a key for a different request.
+func ModelMutationHash(tenantID uuid.UUID, parts ...string) string {
+	hash := sha256.New()
+	hash.Write([]byte(tenantID.String()))
+	for _, part := range parts {
+		hash.Write([]byte{0})
+		hash.Write([]byte(strings.TrimSpace(part)))
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func claimModelMutation(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, scope, key, requestHash string) (uuid.UUID, bool, error) {
+	if strings.TrimSpace(key) == "" || strings.TrimSpace(requestHash) == "" {
+		return uuid.Nil, false, fmt.Errorf("model mutation idempotency key and request hash are required")
+	}
+	lockKey := modelMutationLockKey(tenantID, scope, key)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		return uuid.Nil, false, fmt.Errorf("model mutation idempotency lock: %w", err)
+	}
+	var resourceID uuid.UUID
+	var existingHash string
+	err := tx.QueryRow(ctx, claimModelMutationSQL, tenantID, scope, key).Scan(&resourceID, &existingHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("model mutation idempotency lookup: %w", err)
+	}
+	if existingHash != requestHash {
+		return uuid.Nil, false, fmt.Errorf("%w: idempotency key reused with a different request", types.ErrConflict)
+	}
+	return resourceID, true, nil
+}
+
+// modelMutationLockKey is passed as PostgreSQL text to hashtextextended.
+// PostgreSQL text values cannot contain NUL bytes, so use a non-NUL unit
+// separator while retaining tenant/scope/key boundaries for deterministic
+// transaction-local advisory locking.
+func modelMutationLockKey(tenantID uuid.UUID, scope, key string) string {
+	return tenantID.String() + "\x1f" + scope + "\x1f" + key
+}
+
+func recordModelMutation(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, scope, key, requestHash string, resourceID uuid.UUID) error {
+	if _, err := tx.Exec(ctx, recordModelMutationSQL, tenantID, scope, key, requestHash, resourceID); err != nil {
+		return fmt.Errorf("model mutation idempotency record: %w", err)
+	}
+	return nil
 }
 
 func beginTenantTx(ctx context.Context, pool *pgxpool.Pool) (pgx.Tx, error) {

@@ -426,3 +426,65 @@ func TestPersistRecordsDBNilReturnsError(t *testing.T) {
 		t.Errorf("db=nil 且 persistFn=nil 时 persistRecords 应返回错误")
 	}
 }
+
+// --- StopStale 兜底清理 ---
+
+// tickerCount 返回进程内 ticker 数量，需在锁外使用。
+func (s *meteringCollectionService) tickerCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.tickers)
+}
+
+func TestStopStaleStopsNonActiveTickers(t *testing.T) {
+	svc := testService(nil, nil)
+
+	// 无 GPU（gpuCount=0）避免 StopCollection 的 collectFullLifetime 产生 GPU 记录。
+	_ = svc.StartCollection(context.Background(), gpuContainerSpec("inst-020", "tenant-n", 60, 0))
+	_ = svc.StartCollection(context.Background(), gpuContainerSpec("inst-021", "tenant-n", 60, 0))
+
+	// 仅 inst-020 仍是 running。
+	active := map[string]bool{"inst-020": true}
+	if err := svc.StopStale(context.Background(), active); err != nil {
+		t.Fatalf("StopStale 返回错误: %v", err)
+	}
+
+	if got := svc.tickerCount(); got != 1 {
+		t.Fatalf("StopStale 后 ticker 数量 = %d, 期望 1（仅保留 running 实例）", got)
+	}
+
+	svc.mu.Lock()
+	_, kept := svc.tickers["inst-020"]
+	_, stopped := svc.tickers["inst-021"]
+	svc.mu.Unlock()
+	if !kept {
+		t.Errorf("running 实例 inst-020 的 ticker 应保留")
+	}
+	if stopped {
+		t.Errorf("非 running 实例 inst-021 的 ticker 应被停止")
+	}
+}
+
+func TestStopStaleKeepsActiveTickers(t *testing.T) {
+	svc := testService(nil, nil)
+
+	_ = svc.StartCollection(context.Background(), gpuContainerSpec("inst-022", "tenant-o", 60, 0))
+
+	// 全部实例都 running → 不停止任何采集。
+	active := map[string]bool{"inst-022": true}
+	if err := svc.StopStale(context.Background(), active); err != nil {
+		t.Fatalf("StopStale 返回错误: %v", err)
+	}
+
+	if got := svc.tickerCount(); got != 1 {
+		t.Errorf("全部 active 时 ticker 数量 = %d, 期望 1", got)
+	}
+}
+
+func TestStopStaleNoTickersNoop(t *testing.T) {
+	svc := testService(nil, nil)
+
+	if err := svc.StopStale(context.Background(), map[string]bool{}); err != nil {
+		t.Fatalf("无 ticker 时 StopStale 应返回 nil, 实际: %v", err)
+	}
+}

@@ -705,6 +705,7 @@ public final class ApiClient {
         "PlatformWorkloadLogEntry",
         "PlatformWorkloadLogListResponse",
         "PlatformWorkloadMetadata",
+        "PlatformWorkloadModelMaterialization",
         "PlatformWorkloadNetwork",
         "PlatformWorkloadPort",
         "PlatformWorkloadResources",

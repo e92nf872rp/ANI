@@ -160,7 +160,7 @@ func (p *publisherProcess) runOnce(ctx context.Context) {
 		return
 	}
 	if _, err := p.reconciler.RunOnce(ctx); err != nil {
-		slog.Warn("publisher reconciliation failed", "reason", "GATEWAY_RECONCILIATION_FAILED")
+		slog.Warn("publisher reconciliation failed", "reason", "GATEWAY_RECONCILIATION_FAILED", "err", err)
 	}
 }
 

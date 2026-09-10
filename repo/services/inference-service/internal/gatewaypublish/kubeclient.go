@@ -341,7 +341,10 @@ func validManagedSpec(kind Kind, value any, name string, tenantID, serviceID uui
 			return false
 		}
 		port, ok := fqdn["port"].(int)
-		return ok && fqdn["hostname"] == runtimeServiceHost(serviceID, tenantID) && port > 0 && port <= 65535
+		hostname, hostnameOK := fqdn["hostname"].(string)
+		expectedHost := runtimeServiceHost(serviceID, tenantID)
+		shortHost := strings.TrimSuffix(expectedHost, ".cluster.local")
+		return ok && hostnameOK && (hostname == expectedHost || hostname == shortHost) && port > 0 && port <= 65535
 	case KindAIServiceBackend:
 		backendRef, refOK := spec["backendRef"].(map[string]any)
 		schema, schemaOK := spec["schema"].(map[string]any)

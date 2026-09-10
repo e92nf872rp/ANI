@@ -202,6 +202,45 @@ func TestHandlerPanicNoCrash(t *testing.T) {
 	}()
 }
 
+func TestSubscribeRenewsAckDeadlineWhileHandlerIsRunning(t *testing.T) {
+	js := newFakeJS()
+	bus := NewMessageBus(js, nil)
+	bus.msgFactory = func(natsMsg *natsgo.Msg) ports.Message {
+		return newFakeMessage(natsMsg.Subject, natsMsg.Data, nil)
+	}
+	var mu sync.Mutex
+	inProgressCalls := 0
+	bus.inProgress = func(*natsgo.Msg) error {
+		mu.Lock()
+		inProgressCalls++
+		mu.Unlock()
+		return nil
+	}
+	release := make(chan struct{})
+	if _, err := bus.Subscribe(ports.SubscribeOptions{
+		Subject: "event.long", AckWait: 30 * time.Millisecond,
+	}, func(context.Context, ports.Message) error {
+		<-release
+		return nil
+	}); err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		js.triggerCall(&natsgo.Msg{Subject: "event.long"})
+		close(done)
+	}()
+	time.Sleep(25 * time.Millisecond)
+	close(release)
+	<-done
+	mu.Lock()
+	got := inProgressCalls
+	mu.Unlock()
+	if got == 0 {
+		t.Fatal("long handler did not renew its JetStream ack deadline")
+	}
+}
+
 // =============================================================================
 // helpers
 // =============================================================================

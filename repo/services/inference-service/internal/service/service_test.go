@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,69 @@ func TestCreateResolvesReadyModelAndPersistsPendingOperation(t *testing.T) {
 	}
 	if resource.ID == uuid.Nil || operation.ID == uuid.Nil || store.calls != 1 || catalogPort.calls != 1 {
 		t.Fatalf("create did not complete once: resource=%+v operation=%+v", resource, operation)
+	}
+}
+
+func TestCreatePersistsObjectMaterializationWithoutSignedURL(t *testing.T) {
+	tenantID := uuid.MustParse("40000000-0000-0000-0000-000000000004")
+	version := readyVersion()
+	version.Materialization = &catalog.ModelMaterialization{
+		TenantID: tenantID, ModelVersionID: version.ID, ObjectRef: version.ArtifactRef,
+		ExpectedSizeBytes: 12, SHA256: "sha256:model",
+	}
+	store := &storeStub{create: func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
+		mat := resource.DesiredSpec.ExecutionProfile.Materialization
+		if mat == nil || mat.TenantID != tenantID || mat.ModelVersionID != version.ID || mat.ObjectRef != version.ArtifactRef || mat.ExpectedSizeBytes != 12 || mat.SHA256 != "sha256:model" {
+			t.Fatalf("materialization not frozen: %+v", mat)
+		}
+		if strings.Contains(string(resource.ModelSnapshot), "signed") || strings.Contains(string(resource.ModelSnapshot), "url") {
+			t.Fatalf("sensitive URL persisted: %s", resource.ModelSnapshot)
+		}
+		return repository.CreateResult{Service: resource, Operation: operation}, nil
+	}}
+	_, _, err := NewCreator(store, &catalogStub{resolved: version}, time.Now).Create(context.Background(), tenantID, validInput())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+}
+
+func TestCreateCarriesObjectMaterializationAndFallbackReferenceToRuntime(t *testing.T) {
+	tenantID := uuid.MustParse("40000000-0000-0000-0000-000000000004")
+	version := readyVersion()
+	version.Materialization = &catalog.ModelMaterialization{
+		TenantID: tenantID, ModelVersionID: version.ID, ObjectRef: version.ArtifactRef,
+		ExpectedSizeBytes: 12, SHA256: "sha256:model",
+	}
+	store := &storeStub{create: func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
+		return repository.CreateResult{Service: resource, Operation: operation}, nil
+	}}
+	rt := runtimefake.New()
+	_, _, err := NewCreator(store, &catalogStub{resolved: version}, time.Now).WithRuntime(rt).
+		Create(context.Background(), tenantID, validInput())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(rt.EnsureCalls) != 1 {
+		t.Fatalf("Ensure calls = %d, want 1", len(rt.EnsureCalls))
+	}
+	profile := rt.EnsureCalls[0].Spec.ExecutionProfile
+	if profile.Materialization == nil || profile.Materialization.ObjectRef != version.ArtifactRef || profile.ArtifactRef != version.ArtifactRef {
+		t.Fatalf("runtime boundary lost object materialization/reference: %+v", profile)
+	}
+}
+
+func TestCreateKeepsPVCArtifactWithoutMaterialization(t *testing.T) {
+	tenantID := uuid.MustParse("40000000-0000-0000-0000-000000000004")
+	version := readyVersion()
+	version.ArtifactRef = "pvc://vllm-model#/models/qwen"
+	store := &storeStub{create: func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
+		if resource.DesiredSpec.ExecutionProfile.Materialization != nil || resource.DesiredSpec.ExecutionProfile.ArtifactRef != version.ArtifactRef {
+			t.Fatalf("PVC materialization compatibility broken: %+v", resource.DesiredSpec.ExecutionProfile)
+		}
+		return repository.CreateResult{Service: resource, Operation: operation}, nil
+	}}
+	if _, _, err := NewCreator(store, &catalogStub{resolved: version}, time.Now).Create(context.Background(), tenantID, validInput()); err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
 }
 

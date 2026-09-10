@@ -243,6 +243,10 @@ func (c *conditionalStartService) StopCollection(ctx context.Context, resourceRe
 	return nil
 }
 
+func (c *conditionalStartService) StopStale(ctx context.Context, activeRefs map[string]bool) error {
+	return nil
+}
+
 // --- AC: WithPlatformTx 返回 error 时 Rebuild 返回 error ---
 
 func TestRebuildWithPlatformTxError(t *testing.T) {

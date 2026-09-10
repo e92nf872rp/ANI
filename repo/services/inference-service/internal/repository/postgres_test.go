@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -433,6 +434,40 @@ func TestListSQLExcludesTombstonesAndInternalEndpointProjection(t *testing.T) {
 	}
 	if strings.Contains(sql, "runtime_endpoint") || strings.Contains(sql, "runtime_ref") {
 		t.Fatalf("list projection exposes internal runtime data: %s", sql)
+	}
+	if !strings.Contains(sql, "coalesce(service.invocation_url, '')") {
+		t.Fatalf("list SQL omits the public invocation URL: %s", sql)
+	}
+}
+
+func TestScanPublicServicePreservesInvocationURL(t *testing.T) {
+	for _, invocationURL := range []string{"https://ai.example.test/v1/chat/completions", ""} {
+		t.Run(invocationURL, func(t *testing.T) {
+			resource := domain.Service{
+				ID: uuid.New(), TenantID: uuid.New(), Name: "chat", ModelVersionID: uuid.New(),
+				ServedModelName: "chat-model", ModelSnapshot: json.RawMessage(`{}`),
+				InvocationURL: invocationURL, CreatedAt: time.Now().UTC(),
+			}
+			got, err := scanPublicService(accessPolicyRow{values: []any{
+				resource.ID, resource.TenantID, resource.Name, resource.ModelVersionID,
+				resource.ServedModelName, resource.ModelSnapshot, resource.Status, resource.StatusReason,
+				resource.StatusMessage, resource.DesiredState, resource.Generation, resource.ObservedGeneration,
+				[]byte(`{}`), []byte(`{}`), resource.ReadyReplicas, resource.CurrentOperationID,
+				resource.CreatedAt, resource.UpdatedAt, resource.DeletedAt, resource.LegacyQuarantined,
+				resource.Publication.Desired, resource.Publication.Generation,
+				resource.Publication.ObservedGeneration, resource.Publication.Phase,
+				resource.Publication.LastError, resource.Publication.UpdatedAt, resource.InvocationURL,
+			}})
+			if err != nil {
+				t.Fatalf("scan public service: %v", err)
+			}
+			if got.InvocationURL != invocationURL {
+				t.Fatalf("invocation URL = %q, want %q", got.InvocationURL, invocationURL)
+			}
+			if got.RuntimeRef != uuid.Nil || got.RuntimeEndpoint != "" {
+				t.Fatal("list projection exposes internal runtime data")
+			}
+		})
 	}
 }
 

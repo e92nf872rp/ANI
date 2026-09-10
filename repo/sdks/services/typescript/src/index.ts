@@ -502,6 +502,7 @@ export const idempotencyOperations = [
 export const cursorPaginationOperations = [
   "listGpuContainers",
   "listInferencePolicyEvents",
+  "listInferenceServices",
   "getInferenceServiceLogs",
   "listIntegrations",
   "listKnowledgeBaseAuditLogs",

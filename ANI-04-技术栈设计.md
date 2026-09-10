@@ -103,13 +103,15 @@ KubeOVN 是基于 OVN（Open Virtual Network）构建的 K8s 网络方案，国�
 **选型：vLLM**
 
 ```
-客户端请求 → ANI 推理网关（Go）→ vLLM 推理集群（Python）→ 返回结果
+客户端请求 → Envoy AI Gateway（独立数据面）→ vLLM 推理集群（Python）→ 返回结果
 ```
 
 - vLLM 是当前 LLM 推理吞吐量最高的开源引擎，支持 PagedAttention、连续批处理
-- 原生支持 OpenAI 兼容 API（`/v1/chat/completions`），客户现有系统无缝切换
+- vLLM 原生支持 OpenAI 兼容 API（`/v1/chat/completions`）；公网入口由独立
+  Envoy AI Gateway 提供，ANI Gateway 仅承担控制面
 - 支持 Qwen2.5、DeepSeek-V3/R1、GLM-4 等国内主流模型
-- **推理网关（自研，Go）**：负责鉴权、限流、模型路由、调用审计，轻薄层，不碰推理逻辑
+- **推理数据面（Envoy AI Gateway）**：负责 OpenAI 请求解析、鉴权扩展、限流、
+  模型路由和调用转发；ANI Gateway 不重复代理推理流量
 
 **语音转写：Faster-Whisper**（Whisper 的高性能推理版本，Python，CPU/GPU 都能跑）
 

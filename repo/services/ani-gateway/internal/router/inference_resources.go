@@ -205,11 +205,35 @@ func listInferenceServices(ctx context.Context, c *app.RequestContext) {
 		writeInferenceGRPCError(c, err)
 		return
 	}
-	items := make([]map[string]any, 0, len(resp.GetItems()))
-	for _, item := range resp.GetItems() {
+	all := resp.GetItems()
+	limit := 50
+	if raw := string(c.QueryArgs().Peek("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	start := 0
+	if raw := string(c.QueryArgs().Peek("cursor")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			start = n
+		}
+	}
+	if start > len(all) {
+		start = len(all)
+	}
+	end := start + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	items := make([]map[string]any, 0, end-start)
+	for _, item := range all[start:end] {
 		items = append(items, inferenceServiceJSON(item))
 	}
-	c.JSON(http.StatusOK, map[string]any{"items": items})
+	out := map[string]any{"items": items, "next_cursor": nil}
+	if end < len(all) {
+		out["next_cursor"] = strconv.Itoa(end)
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func createInferenceService(ctx context.Context, c *app.RequestContext) {

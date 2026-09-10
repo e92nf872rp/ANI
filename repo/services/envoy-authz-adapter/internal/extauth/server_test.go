@@ -65,6 +65,10 @@ func validHeaders() map[string]string {
 	return map[string]string{"authorization": "Bearer " + validAPIKey, "x-ai-eg-model": "ani-qwen3"}
 }
 
+func publicHeaders() map[string]string {
+	return map[string]string{"authorization": "Bearer " + validAPIKey}
+}
+
 func TestCheckDenials(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -206,6 +210,38 @@ func TestCheckAllowsAuthenticatedPrincipalAndOverwritesSpoofedHeaders(t *testing
 		if header.GetHeader().GetValue() == checker.decision.LeaseID {
 			t.Fatal("success response injects policy lease ID")
 		}
+	}
+}
+
+func TestCheckAcceptsPublicOpenAIModelBodyWithoutInternalHeaders(t *testing.T) {
+	validator := &fakeValidator{principal: &commonv1.TenantContext{TenantId: "tenant-a", ApiKeyId: "key-a"}}
+	checker := &fakeChecker{decision: AccessDecision{HTTPStatus: http.StatusOK, InferenceServiceID: "service-a"}}
+	request := checkRequest("/v1/chat/completions", publicHeaders())
+	request.Attributes.GetRequest().GetHttp().Body = `{"model":"qwen2.5-0.5b-instruct-61d5c628","messages":[]}`
+	response, err := New(validator).WithAccessChecker(checker).Check(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := response.GetStatus().GetCode(); got != int32(codes.OK) {
+		t.Fatalf("response status = %d, want %d", got, codes.OK)
+	}
+	if checker.model != "qwen2.5-0.5b-instruct-61d5c628" {
+		t.Fatalf("checker model = %q", checker.model)
+	}
+}
+
+func TestCheckRejectsPublicRequestWithoutModel(t *testing.T) {
+	validator := &fakeValidator{principal: &commonv1.TenantContext{TenantId: "tenant-a", ApiKeyId: "key-a"}}
+	checker := &fakeChecker{decision: AccessDecision{HTTPStatus: http.StatusOK, InferenceServiceID: "service-a"}}
+	request := checkRequest("/v1/chat/completions", publicHeaders())
+	request.Attributes.GetRequest().GetHttp().Body = `{"messages":[]}`
+	response, err := New(validator).WithAccessChecker(checker).Check(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDeniedHTTPStatus(t, response, http.StatusBadRequest)
+	if checker.calls != 0 {
+		t.Fatalf("checker calls = %d, want 0", checker.calls)
 	}
 }
 

@@ -3,6 +3,7 @@ package modelsvc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -188,17 +189,67 @@ func TestResolveUnavailableIsNotMappedToNotFound(t *testing.T) {
 	}
 }
 
-func TestResolveObjectStoreArtifactIsIncompatible(t *testing.T) {
+func TestResolveObjectStoreArtifactIsCompatibleWhenTenantBound(t *testing.T) {
 	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	resp := readyResponse(tenantID, modelID, versionID, "safetensors", "ready", []string{"text-generation"}, false, "")
-	resp.Version.StoragePath = "object://models/qwen/v1"
+	resp.Version.StoragePath = "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc-1/model.safetensors"
+	resp.Version.ChecksumSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	cat := mustCatalog(t, &stubClient{resp: resp})
 
-	_, err := cat.Resolve(context.Background(), tenantID, versionID)
-	if !errors.Is(err, catalog.ErrNoCompatibleProfile) {
-		t.Fatalf("err = %v", err)
+	got, err := cat.Resolve(context.Background(), tenantID, versionID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.ArtifactRef != resp.Version.StoragePath || got.CPUProfile == nil || got.GPUProfile == nil {
+		t.Fatalf("resolved object artifact = %+v", got)
+	}
+	if got.Materialization == nil {
+		t.Fatal("object-backed version must produce materialization descriptor")
+	}
+	if got.Materialization.TenantID != tenantID || got.Materialization.ModelVersionID != versionID ||
+		got.Materialization.ObjectRef != resp.Version.StoragePath || got.Materialization.ExpectedSizeBytes != 12 ||
+		got.Materialization.SHA256 != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("materialization = %+v", got.Materialization)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", got.Materialization), "signed") {
+		t.Fatal("materialization must not contain a signed URL")
+	}
+	resp.Version.StoragePath = "object://models/33333333-3333-3333-3333-333333333333/22222222-2222-2222-2222-222222222222/v1/doc-1/model.safetensors"
+	if _, err := cat.Resolve(context.Background(), tenantID, versionID); !errors.Is(err, catalog.ErrNoCompatibleProfile) {
+		t.Fatalf("cross-tenant object err = %v", err)
+	}
+}
+
+func TestResolveObjectStoreRejectsMissingChecksumOrSize(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	for _, mutate := range []func(*modelv1.ModelVersion){
+		func(v *modelv1.ModelVersion) { v.SizeBytes = 0 },
+		func(v *modelv1.ModelVersion) { v.ChecksumSha256 = "" },
+	} {
+		resp := readyResponse(tenantID, modelID, versionID, "safetensors", "ready", nil, false, "")
+		resp.Version.StoragePath = "object://models/" + tenantID.String() + "/" + modelID.String() + "/v1/doc-1/model.safetensors"
+		mutate(resp.Version)
+		cat := mustCatalog(t, &stubClient{resp: resp})
+		if _, err := cat.Resolve(context.Background(), tenantID, versionID); !errors.Is(err, catalog.ErrNoCompatibleProfile) {
+			t.Fatalf("missing object metadata error = %v", err)
+		}
+	}
+}
+
+func TestResolveObjectStoreRejectsUserinfoInReference(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	resp := readyResponse(tenantID, modelID, versionID, "safetensors", "ready", nil, false, "")
+	resp.Version.StoragePath = "object://AK:SECRET@models/" + tenantID.String() + "/" + modelID.String() + "/v1/doc-1/model.safetensors"
+	resp.Version.ChecksumSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	cat := mustCatalog(t, &stubClient{resp: resp})
+	if _, err := cat.Resolve(context.Background(), tenantID, versionID); !errors.Is(err, catalog.ErrNoCompatibleProfile) {
+		t.Fatalf("userinfo object reference error = %v", err)
 	}
 }
 

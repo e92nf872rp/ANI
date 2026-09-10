@@ -1064,6 +1064,7 @@
   "cursorPaginationOperations": [
     "listGpuContainers",
     "listInferencePolicyEvents",
+    "listInferenceServices",
     "getInferenceServiceLogs",
     "listIntegrations",
     "listKnowledgeBaseAuditLogs",

@@ -684,3 +684,313 @@ func TestCollectAll_NilLogger(t *testing.T) {
 		t.Fatalf("expected 1 record, got %d", len(records))
 	}
 }
+
+// --- VM 实例采集（kubevirt_vmi_* 指标）测试 ---
+
+// capturePromServer 捕获查询字符串并返回固定标量值的 Prometheus mock server。
+func capturePromServer(t *testing.T, captured *string, scalar string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*captured = r.URL.Query().Get("query")
+		resp := map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "vector",
+				"result": []map[string]any{
+					{
+						"metric": map[string]string{},
+						"value":  []any{1718294400, scalar},
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+func TestKubeletCPUCollector_VMQueryUsesKubevirtVMI(t *testing.T) {
+	var capturedQuery string
+	server := capturePromServer(t, &capturedQuery, "0.5")
+	defer server.Close()
+
+	c := NewKubeletCPUCollector(server.URL, nil)
+	spec := ports.CollectionSpec{
+		ResourceRef:  "inst-vm-cpu",
+		TenantID:     "tenant-vm",
+		WorkloadKind: "vm",
+		WorkloadName: "demo-vm",
+		IntervalSec:  60,
+	}
+	records, err := c.Collect(context.Background(), spec, "2026-09-09T08:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	// 0.5 核 × 60s = 30 cpu_seconds
+	if records[0].TotalQuantity != 30 {
+		t.Errorf("expected quantity 30, got %f", records[0].TotalQuantity)
+	}
+	// VM 分支必须使用 kubevirt_vmi_cpu_usage_seconds_total 且按 name（VMI 名）精确匹配
+	if !strings.Contains(capturedQuery, "kubevirt_vmi_cpu_usage_seconds_total") {
+		t.Errorf("expected query to use kubevirt_vmi_cpu_usage_seconds_total, got: %s", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, `name="demo-vm"`) {
+		t.Errorf("expected query to match name=demo-vm, got: %s", capturedQuery)
+	}
+	if strings.Contains(capturedQuery, "container_cpu_usage_seconds_total") {
+		t.Errorf("VM query should not use container_cpu_usage_seconds_total, got: %s", capturedQuery)
+	}
+}
+
+func TestKubeletMemCollector_VMQueryUsesKubevirtVMI(t *testing.T) {
+	var capturedQuery string
+	server := capturePromServer(t, &capturedQuery, "1073741824") // 1 GiB
+	defer server.Close()
+
+	c := NewKubeletMemCollector(server.URL, nil)
+	spec := ports.CollectionSpec{
+		ResourceRef:  "inst-vm-mem",
+		TenantID:     "tenant-vm",
+		WorkloadKind: "vm",
+		WorkloadName: "demo-vm",
+		IntervalSec:  60,
+	}
+	records, err := c.Collect(context.Background(), spec, "2026-09-09T08:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	// 1 GiB × 60s = 60 gib_seconds
+	if records[0].TotalQuantity != 60 {
+		t.Errorf("expected quantity 60, got %f", records[0].TotalQuantity)
+	}
+	// VM 分支必须使用 kubevirt_vmi_memory_resident_bytes 且按 name（VMI 名）精确匹配
+	if !strings.Contains(capturedQuery, "kubevirt_vmi_memory_resident_bytes") {
+		t.Errorf("expected query to use kubevirt_vmi_memory_resident_bytes, got: %s", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, `name="demo-vm"`) {
+		t.Errorf("expected query to match name=demo-vm, got: %s", capturedQuery)
+	}
+	if strings.Contains(capturedQuery, "container_memory_working_set_bytes") {
+		t.Errorf("VM query should not use container_memory_working_set_bytes, got: %s", capturedQuery)
+	}
+}
+
+func TestKubeletCPUCollector_NonVMStillUsesContainerMetric(t *testing.T) {
+	var capturedQuery string
+	server := capturePromServer(t, &capturedQuery, "0.5")
+	defer server.Close()
+
+	c := NewKubeletCPUCollector(server.URL, nil)
+	spec := ports.CollectionSpec{
+		ResourceRef:  "inst-container",
+		TenantID:     "tenant-c",
+		WorkloadKind: "container",
+		WorkloadName: "web-app",
+		IntervalSec:  60,
+	}
+	_, err := c.Collect(context.Background(), spec, "2026-09-09T08:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 非 VM 分支保持 container_* + pod 正则匹配
+	if !strings.Contains(capturedQuery, "container_cpu_usage_seconds_total") {
+		t.Errorf("expected container_cpu_usage_seconds_total for non-VM, got: %s", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, `pod=~"^web-app(-.*)?$"`) {
+		t.Errorf("expected pod matcher ^web-app(-.*)?$, got: %s", capturedQuery)
+	}
+}
+
+// --- sandbox 实例采集（kata 兼容查询）测试 ---
+
+// sandboxPromServer 模拟 Prometheus 对 sandbox 采集查询的响应：
+// 记录所有查询到 captured；kataEmpty=true 时 kata 相关查询返回空结果（模拟 runc sandbox），
+// 否则 kata 与标准查询都返回 scalar（kata_guest_meminfo item="mem_total" 返回 memTotalScalar，
+// 为空时与 scalar 相同，便于构造 total-available 差值）。
+func sandboxPromServer(t *testing.T, captured *[]string, kataEmpty bool, scalar string, memTotalScalar ...string) *httptest.Server {
+	t.Helper()
+	memTotal := scalar
+	if len(memTotalScalar) > 0 && memTotalScalar[0] != "" {
+		memTotal = memTotalScalar[0]
+	}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		q := r.URL.Query().Get("query")
+		if q == "" {
+			t.Errorf("missing query param")
+		}
+		*captured = append(*captured, q)
+		results := []map[string]any{}
+		if !kataEmpty || !strings.Contains(q, "kata") {
+			value := scalar
+			if strings.Contains(q, `item="mem_total"`) {
+				value = memTotal
+			}
+			results = append(results, map[string]any{
+				"metric": map[string]string{},
+				"value":  []any{1718294400, value},
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "vector",
+				"result":     results,
+			},
+		})
+	}))
+}
+
+func TestKubeletCPUCollector_SandboxKataSelector(t *testing.T) {
+	var captured []string
+	server := sandboxPromServer(t, &captured, false, "0.5")
+	defer server.Close()
+
+	c := NewKubeletCPUCollector(server.URL, nil)
+	spec := ports.CollectionSpec{
+		ResourceRef:  "inst-sandbox-cpu",
+		TenantID:     "tenant-sb",
+		WorkloadKind: "sandbox",
+		WorkloadName: "demo-sandbox",
+		IntervalSec:  60,
+	}
+	records, err := c.Collect(context.Background(), spec, "2026-09-09T08:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	// 0.5 核 × 60s = 30 cpu_seconds
+	if records[0].TotalQuantity != 30 {
+		t.Errorf("expected quantity 30, got %f", records[0].TotalQuantity)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("kata 命中时只应发出 kata 查询, 实际 %d 个查询: %v", len(captured), captured)
+	}
+	// kata 选择器：container="" 命中 kata cAdvisor series，排除 kata_overhead
+	if !strings.Contains(captured[0], `container=""`) {
+		t.Errorf("expected kata selector container=\"\" , got: %s", captured[0])
+	}
+	if !strings.Contains(captured[0], `id!~"/kata_overhead/.*"`) {
+		t.Errorf("expected exclude kata_overhead, got: %s", captured[0])
+	}
+	// sandbox 分支不应使用标准容器过滤（container!=""）
+	if strings.Contains(captured[0], `container!=""`) {
+		t.Errorf("sandbox kata query should not use container!=\"\" filter, got: %s", captured[0])
+	}
+}
+
+func TestKubeletCPUCollector_SandboxFallsBackToStandard(t *testing.T) {
+	var captured []string
+	// kataEmpty=true：kata 查询查空 → 应 fallback 到标准 container 查询
+	server := sandboxPromServer(t, &captured, true, "0.5")
+	defer server.Close()
+
+	c := NewKubeletCPUCollector(server.URL, nil)
+	spec := ports.CollectionSpec{
+		ResourceRef:  "inst-sandbox-cpu-fb",
+		TenantID:     "tenant-sb",
+		WorkloadKind: "sandbox",
+		WorkloadName: "demo-sandbox",
+		IntervalSec:  60,
+	}
+	records, err := c.Collect(context.Background(), spec, "2026-09-09T08:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if len(captured) != 2 {
+		t.Fatalf("kata 查空时应发出 kata + fallback 两个查询, 实际 %d: %v", len(captured), captured)
+	}
+	// 第二个查询是标准 container 选择器
+	if !strings.Contains(captured[1], `container!=""`) || !strings.Contains(captured[1], `container!="POD"`) {
+		t.Errorf("fallback 查询应使用标准 container 过滤, got: %s", captured[1])
+	}
+}
+
+func TestKubeletMemCollector_SandboxUsesKataGuestMeminfo(t *testing.T) {
+	var captured []string
+	// mem_total=1 GiB, mem_available=0.5 GiB → used=0.5 GiB × 60s = 30 gib_seconds
+	server := sandboxPromServer(t, &captured, false, "536870912", "1073741824")
+	defer server.Close()
+
+	c := NewKubeletMemCollector(server.URL, nil)
+	spec := ports.CollectionSpec{
+		ResourceRef:  "inst-sandbox-mem",
+		TenantID:     "tenant-sb",
+		WorkloadKind: "sandbox",
+		WorkloadName: "demo-sandbox",
+		IntervalSec:  60,
+	}
+	records, err := c.Collect(context.Background(), spec, "2026-09-09T08:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].TotalQuantity != 30 {
+		t.Errorf("expected quantity 30 (0.5 GiB × 60s), got %f", records[0].TotalQuantity)
+	}
+	if len(captured) != 2 {
+		t.Fatalf("kata 内存应查询 mem_total + mem_available 两个指标, 实际 %d: %v", len(captured), captured)
+	}
+	if !strings.Contains(captured[0], "kata_guest_meminfo") || !strings.Contains(captured[0], `item="mem_total"`) {
+		t.Errorf("expected kata_guest_meminfo mem_total, got: %s", captured[0])
+	}
+	if !strings.Contains(captured[1], "kata_guest_meminfo") || !strings.Contains(captured[1], `item="mem_available"`) {
+		t.Errorf("expected kata_guest_meminfo mem_available, got: %s", captured[1])
+	}
+	// kata-monitor series 用 cri_namespace / cri_name 过滤
+	if !strings.Contains(captured[0], `cri_namespace="ani-tenant-tenant-sb"`) {
+		t.Errorf("expected cri_namespace filter, got: %s", captured[0])
+	}
+	if !strings.Contains(captured[0], `cri_name=~"^demo-sandbox(-.*)?$"`) {
+		t.Errorf("expected cri_name matcher, got: %s", captured[0])
+	}
+}
+
+func TestKubeletMemCollector_SandboxFallsBackToWorkingSet(t *testing.T) {
+	var captured []string
+	// kataEmpty=true：kata_guest_meminfo 查空 → 应 fallback 到 container working_set
+	server := sandboxPromServer(t, &captured, true, "1073741824")
+	defer server.Close()
+
+	c := NewKubeletMemCollector(server.URL, nil)
+	spec := ports.CollectionSpec{
+		ResourceRef:  "inst-sandbox-mem-fb",
+		TenantID:     "tenant-sb",
+		WorkloadKind: "sandbox",
+		WorkloadName: "demo-sandbox",
+		IntervalSec:  60,
+	}
+	records, err := c.Collect(context.Background(), spec, "2026-09-09T08:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	// 1 GiB × 60s = 60 gib_seconds
+	if records[0].TotalQuantity != 60 {
+		t.Errorf("expected quantity 60, got %f", records[0].TotalQuantity)
+	}
+	if len(captured) != 3 {
+		t.Fatalf("kata 查空时应发出 2 个 kata 查询 + 1 个 fallback, 实际 %d: %v", len(captured), captured)
+	}
+	if !strings.Contains(captured[2], "container_memory_working_set_bytes") {
+		t.Errorf("fallback 查询应使用 container_memory_working_set_bytes, got: %s", captured[2])
+	}
+}

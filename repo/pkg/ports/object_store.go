@@ -63,3 +63,21 @@ type ObjectStore interface {
 	SignedUploadURL(ctx context.Context, ref ObjectRef, ttl time.Duration) (SignedURL, error)
 	SignedDownloadURL(ctx context.Context, ref ObjectRef, ttl time.Duration) (SignedURL, error)
 }
+
+// ObjectStoreUploadHeaders is an optional capability for presigned PUTs that
+// require immutable request metadata to be covered by the SigV4 signature.
+// Implementations that do not support it must not be used for checksum-bound
+// model uploads.
+type ObjectStoreUploadHeaders interface {
+	ObjectStore
+	SignedUploadURLWithHeaders(ctx context.Context, ref ObjectRef, ttl time.Duration, headers map[string]string) (SignedURL, error)
+}
+
+// ObjectStoreContentVerifier is an optional capability for control-plane
+// registration of presigned uploads. Implementations must stream the object,
+// compute SHA-256 from the bytes returned by the store, and compare both the
+// declared size and checksum; metadata/ETag alone is not proof of content.
+type ObjectStoreContentVerifier interface {
+	ObjectStore
+	VerifyObject(ctx context.Context, ref ObjectRef, expectedSize int64, expectedChecksum string) error
+}

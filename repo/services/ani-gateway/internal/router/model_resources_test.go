@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol"
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	modelv1 "github.com/kubercloud/ani/pkg/generated/pb/model/v1"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"google.golang.org/grpc/codes"
@@ -21,20 +22,34 @@ import (
 )
 
 type fakeModelClient struct {
-	lastTenantID string
-	lastModelID  string
-	lastCreate   *modelv1.CreateModelRequest
-	lastVersion  *modelv1.CreateModelVersionRequest
-	listResp     *modelv1.ListModelsResponse
-	createResp   *modelv1.Model
-	getResp      *modelv1.Model
-	versionResp  *modelv1.ModelVersion
-	err          error
+	lastTenantID    string
+	lastModelID     string
+	lastCreate      *modelv1.CreateModelRequest
+	lastVersion     *modelv1.CreateModelVersionRequest
+	lastUpload      *modelv1.GetUploadURLRequest
+	lastImport      *modelv1.ImportModelRequest
+	listResp        *modelv1.ListModelsResponse
+	createResp      *modelv1.Model
+	getResp         *modelv1.Model
+	versionResp     *modelv1.ModelVersion
+	versionListResp *modelv1.ListModelVersionsResponse
+	uploadResp      *modelv1.GetUploadURLResponse
+	importResp      *commonv1.AsyncTaskRef
+	listStatus      string
+	listSource      string
+	listCapability  string
+	listKeyword     string
+	err             error
 }
 
-func (f *fakeModelClient) ListModels(_ context.Context, tenantID, _ string, _ int32, _ string) (*modelv1.ListModelsResponse, error) {
+func (f *fakeModelClient) ListModels(_ context.Context, tenantID, status, source, capability, keyword string, _ int32, _ string) (*modelv1.ListModelsResponse, error) {
 	f.lastTenantID = tenantID
+	f.listStatus, f.listSource, f.listCapability, f.listKeyword = status, source, capability, keyword
 	return f.listResp, f.err
+}
+func (f *fakeModelClient) ListModelVersions(_ context.Context, tenantID, modelID string, _ int32, _ string) (*modelv1.ListModelVersionsResponse, error) {
+	f.lastTenantID, f.lastModelID = tenantID, modelID
+	return f.versionListResp, f.err
 }
 func (f *fakeModelClient) CreateModel(_ context.Context, tenantID string, req *modelv1.CreateModelRequest) (*modelv1.Model, error) {
 	f.lastTenantID = tenantID
@@ -53,6 +68,16 @@ func (f *fakeModelClient) CreateModelVersion(_ context.Context, tenantID string,
 	f.lastTenantID = tenantID
 	f.lastVersion = req
 	return f.versionResp, f.err
+}
+func (f *fakeModelClient) GetUploadURL(_ context.Context, tenantID string, req *modelv1.GetUploadURLRequest) (*modelv1.GetUploadURLResponse, error) {
+	f.lastTenantID = tenantID
+	f.lastUpload = req
+	return f.uploadResp, f.err
+}
+func (f *fakeModelClient) ImportModel(_ context.Context, tenantID string, req *modelv1.ImportModelRequest) (*commonv1.AsyncTaskRef, error) {
+	f.lastTenantID = tenantID
+	f.lastImport = req
+	return f.importResp, f.err
 }
 
 func setupModelTestServer(t *testing.T, client ModelServiceClient) *server.Hertz {
@@ -111,7 +136,7 @@ func TestModelRoutesRequireClient(t *testing.T) {
 }
 
 func TestCreateModelAndLocalPVCVersion(t *testing.T) {
-	client := &fakeModelClient{createResp: sampleModel(), versionResp: sampleModelVersion(), getResp: sampleModel()}
+	client := &fakeModelClient{createResp: sampleModel(), versionResp: sampleModelVersion(), getResp: sampleModel(), versionListResp: &modelv1.ListModelVersionsResponse{Versions: []*modelv1.ModelVersion{sampleModelVersion()}}}
 	h := setupModelTestServer(t, client)
 	tenant := "11111111-1111-1111-1111-111111111111"
 
@@ -122,6 +147,9 @@ func TestCreateModelAndLocalPVCVersion(t *testing.T) {
 	if client.lastTenantID != tenant || client.lastCreate.GetName() != "qwen" {
 		t.Fatalf("create forwarded %+v tenant=%s", client.lastCreate, client.lastTenantID)
 	}
+	if client.lastCreate.GetIdempotencyKey() == "" {
+		t.Fatal("create idempotency key was not forwarded")
+	}
 
 	version := performModel(h, http.MethodPost, "/api/v1/svc/models/22222222-2222-2222-2222-222222222222/versions", `{"idempotency_key":"55555555-5555-5555-5555-555555555555","version":"v1","format":"safetensors","storage_path":"pvc://vllm-model#/models/qwen","checksum_sha256":"abc","size_bytes":12}`, tenant)
 	if version.StatusCode() != http.StatusCreated {
@@ -129,6 +157,9 @@ func TestCreateModelAndLocalPVCVersion(t *testing.T) {
 	}
 	if client.lastVersion.GetStoragePath() != "pvc://vllm-model#/models/qwen" {
 		t.Fatalf("storage_path = %q", client.lastVersion.GetStoragePath())
+	}
+	if client.lastVersion.GetIdempotencyKey() == "" {
+		t.Fatal("version idempotency key was not forwarded")
 	}
 
 	listed := performModel(h, http.MethodGet, "/api/v1/svc/models/22222222-2222-2222-2222-222222222222/versions", "", tenant)
@@ -145,6 +176,40 @@ func TestCreateModelAndLocalPVCVersion(t *testing.T) {
 	}
 }
 
+func TestModelListFiltersAndUploadURLRoute(t *testing.T) {
+	client := &fakeModelClient{
+		listResp:   &modelv1.ListModelsResponse{},
+		uploadResp: &modelv1.GetUploadURLResponse{UploadUrl: "https://object.invalid/put", StoragePath: "object://models/tenant/model/v1/doc/file", DocId: "doc", UploadHeaders: map[string]string{"x-amz-meta-sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}},
+	}
+	h := setupModelTestServer(t, client)
+	tenant := "11111111-1111-1111-1111-111111111111"
+	resp := performModel(h, http.MethodGet, "/api/v1/svc/models?status=ready&source=upload&capability=embedding&keyword=qwen&limit=10", "", tenant)
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.listStatus != "ready" || client.listSource != "upload" || client.listCapability != "embedding" || client.listKeyword != "qwen" {
+		t.Fatalf("filters = %q/%q/%q/%q", client.listStatus, client.listSource, client.listCapability, client.listKeyword)
+	}
+	resp = performModel(h, http.MethodPost, "/api/v1/svc/models/22222222-2222-2222-2222-222222222222/upload-url", `{"idempotency_key":"upload-1","version":"v1","file_name":"model.safetensors","size_bytes":10,"checksum_sha256":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}`, tenant)
+	if resp.StatusCode() != http.StatusCreated {
+		t.Fatalf("upload URL status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastUpload == nil || client.lastUpload.GetIdempotencyKey() != "upload-1" || client.lastUpload.GetModelId() == "" {
+		t.Fatalf("upload request = %+v", client.lastUpload)
+	}
+	if client.lastUpload.GetChecksumSha256() == "" {
+		t.Fatal("upload checksum was not forwarded")
+	}
+	var uploadBody map[string]any
+	if err := json.Unmarshal(resp.Body(), &uploadBody); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	headers, _ := uploadBody["upload_headers"].(map[string]any)
+	if headers["x-amz-meta-sha256"] != "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" {
+		t.Fatalf("upload_headers = %#v", uploadBody["upload_headers"])
+	}
+}
+
 func TestCreateModelVersionRejectsObjectStorePath(t *testing.T) {
 	h := setupModelTestServer(t, &fakeModelClient{versionResp: sampleModelVersion()})
 	resp := performModel(h, http.MethodPost, "/api/v1/svc/models/22222222-2222-2222-2222-222222222222/versions", `{"idempotency_key":"55555555-5555-5555-5555-555555555555","version":"v1","format":"safetensors","storage_path":"object://models/qwen/v1","checksum_sha256":"abc","size_bytes":12}`, "11111111-1111-1111-1111-111111111111")
@@ -153,18 +218,106 @@ func TestCreateModelVersionRejectsObjectStorePath(t *testing.T) {
 	}
 }
 
-func TestImportModelReturnsNotImplemented(t *testing.T) {
-	h := setupModelTestServer(t, &fakeModelClient{})
-	resp := performModel(h, http.MethodPost, "/api/v1/svc/models/import", `{"source":"huggingface","repo_id":"Qwen/Qwen2.5-7B-Instruct","idempotency_key":"k1"}`, "11111111-1111-1111-1111-111111111111")
-	if resp.StatusCode() != http.StatusNotImplemented {
+func TestImportModelHuggingFaceReturnsAcceptedAndLocation(t *testing.T) {
+	client := &fakeModelClient{importResp: &commonv1.AsyncTaskRef{TaskId: "task-hf"}}
+	h := setupModelTestServer(t, client)
+	tenant := "11111111-1111-1111-1111-111111111111"
+	resp := performModel(h, http.MethodPost, "/api/v1/svc/models/import", `{"source":" huggingface ","repo_id":" Qwen/Qwen3-0.6B ","revision":" main ","idempotency_key":" import-hf ","webhook_url":" https://example.invalid/hook "}`, tenant)
+	if resp.StatusCode() != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
 	}
-	var body map[string]any
-	if err := json.Unmarshal(resp.Body(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
+	if got := string(resp.Header.Get("Location")); got != "/api/v1/tasks/task-hf" {
+		t.Fatalf("Location = %q", got)
 	}
-	if body["code"] != "FEATURE_NOT_AVAILABLE" {
-		t.Fatalf("body = %#v", body)
+	if client.lastTenantID != tenant || client.lastImport == nil {
+		t.Fatalf("forwarded tenant/request = %q/%+v", client.lastTenantID, client.lastImport)
+	}
+	if got := client.lastImport.GetSource(); got != "huggingface" {
+		t.Fatalf("source = %q", got)
+	}
+	if got := client.lastImport.GetRepoId(); got != "Qwen/Qwen3-0.6B" {
+		t.Fatalf("repo_id = %q", got)
+	}
+	if got := client.lastImport.GetRevision(); got != "main" {
+		t.Fatalf("revision = %q", got)
+	}
+	if got := client.lastImport.GetIdempotencyKey(); got != "import-hf" {
+		t.Fatalf("idempotency_key = %q", got)
+	}
+	if got := client.lastImport.GetWebhookUrl(); got != "https://example.invalid/hook" {
+		t.Fatalf("webhook_url = %q", got)
+	}
+}
+
+func TestImportModelModelScopeDefaultsRevision(t *testing.T) {
+	client := &fakeModelClient{importResp: &commonv1.AsyncTaskRef{TaskId: "task-ms"}}
+	h := setupModelTestServer(t, client)
+	resp := performModel(h, http.MethodPost, "/api/v1/svc/models/import", `{"source":"modelscope","repo_id":"Qwen/Qwen3-0.6B","idempotency_key":"import-ms"}`, "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if got := string(resp.Header.Get("Location")); got != "/api/v1/tasks/task-ms" {
+		t.Fatalf("Location = %q", got)
+	}
+	if client.lastImport == nil || client.lastImport.GetRevision() != "main" {
+		t.Fatalf("request = %+v", client.lastImport)
+	}
+}
+
+func TestImportModelRejectsMissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "source", body: `{"repo_id":"Qwen/Qwen3-0.6B","idempotency_key":"k"}`},
+		{name: "repo_id", body: `{"source":"huggingface","idempotency_key":"k"}`},
+		{name: "idempotency_key", body: `{"source":"huggingface","repo_id":"Qwen/Qwen3-0.6B"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeModelClient{importResp: &commonv1.AsyncTaskRef{TaskId: "unexpected"}}
+			h := setupModelTestServer(t, client)
+			resp := performModel(h, http.MethodPost, "/api/v1/svc/models/import", tt.body, "11111111-1111-1111-1111-111111111111")
+			if resp.StatusCode() != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+			}
+			if client.lastImport != nil {
+				t.Fatalf("invalid request was forwarded: %+v", client.lastImport)
+			}
+		})
+	}
+}
+
+func TestImportModelRejectsUnsupportedSource(t *testing.T) {
+	client := &fakeModelClient{importResp: &commonv1.AsyncTaskRef{TaskId: "unexpected"}}
+	h := setupModelTestServer(t, client)
+	resp := performModel(h, http.MethodPost, "/api/v1/svc/models/import", `{"source":"github","repo_id":"Qwen/Qwen3-0.6B","idempotency_key":"k"}`, "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastImport != nil {
+		t.Fatalf("unsupported source was forwarded: %+v", client.lastImport)
+	}
+}
+
+func TestImportModelRejectsCredentialField(t *testing.T) {
+	client := &fakeModelClient{importResp: &commonv1.AsyncTaskRef{TaskId: "unexpected"}}
+	h := setupModelTestServer(t, client)
+	resp := performModel(h, http.MethodPost, "/api/v1/svc/models/import", `{"source":"huggingface","repo_id":"Qwen/Qwen3-0.6B","idempotency_key":"k","token":"secret"}`, "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastImport != nil {
+		t.Fatalf("credential-bearing request was forwarded: %+v", client.lastImport)
+	}
+}
+
+func TestImportModelMapsGRPCError(t *testing.T) {
+	client := &fakeModelClient{err: status.Error(codes.Unavailable, "downstream unavailable")}
+	h := setupModelTestServer(t, client)
+	resp := performModel(h, http.MethodPost, "/api/v1/svc/models/import", `{"source":"huggingface","repo_id":"Qwen/Qwen3-0.6B","idempotency_key":"k"}`, "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
 	}
 }
 

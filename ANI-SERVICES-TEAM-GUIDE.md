@@ -61,7 +61,11 @@
 | `registerInferenceServices()` | `GET/POST/PATCH/DELETE /api/v1/svc/inference-services/:service_id`、日志流 | `inference-service`（待建） |
 | `registerKnowledgeBases()` | 知识库 CRUD、文档管理、向量查询、流式查询 | `kb-service` |
 | `registerTasks()` | `GET/DELETE /api/v1/tasks/:task_id` | `task-service` |
-| `inferenceProxy` | `POST /v1/chat/completions`、`GET /v1/inference/stream`（OpenAI 兼容） | `inference-service` |
+
+OpenAI 兼容推理调用不由 `ani-gateway` 提供。`/v1/chat/completions` 和
+`/v1/embeddings` 由独立的 Envoy AI Gateway 数据面承载；`ani-gateway`
+仅负责 Services 控制面。遗留的 `GET /v1/inference/stream` 占位路由暂不作为
+产品接口使用，待单独决策。
 
 **开发规范（ani-gateway 内）：**
 

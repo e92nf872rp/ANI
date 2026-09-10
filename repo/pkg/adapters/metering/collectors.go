@@ -64,14 +64,35 @@ func NewKubeletCPUCollector(prometheusURL string, httpClient *http.Client) Kubel
 }
 
 // Collect 查询 Prometheus 获取 CPU 使用核数（rate），乘以 IntervalSec 得到周期内 CPU 秒数。
+// 按 WorkloadKind 分三路：
+//   - vm：pod 名是 virt-launcher-<name>-<hash>，container_* 指标匹配不上，
+//     改用 KubeVirt 的 kubevirt_vmi_cpu_usage_seconds_total（name 标签即 VMI 名）。
+//   - sandbox：kata pod 的宿主机 cAdvisor series 无 container 标签，container!="" 过滤会排除，
+//     改用 container="" 命中 kata series 并排除 kata_overhead shim/qemu 开销（语义同监控接口
+//     getMetricsForSandbox）；kata 查询查空（runc sandbox）时 fallback 标准 container 选择器。
+//   - 其他（container/gpu_container/...）：标准 container 查询。
+//
+// Counter 语义与容器一致，rate(...[IntervalSec]) 得到瞬时核数，乘以 IntervalSec 得到周期累计。
 func (c KubeletCPUCollector) Collect(ctx context.Context, spec ports.CollectionSpec, period string) ([]ports.MeteringUsageRecord, error) {
 	namespace := tenantNamespace(spec.TenantID)
-	podMatcher := promQLPodMatcher(spec.WorkloadName)
 	interval := strconv.Itoa(spec.IntervalSec)
-	// sum(rate(...)) 先对每条时间序列计算速率，再聚合多副本 pod 的 CPU 核数，
-	// 乘以 IntervalSec 得到周期内累计 CPU 秒数。
-	query := fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{namespace=%q,pod=~%q,container!="",container!="POD"}[%ss]))`, namespace, podMatcher, interval)
-	cores, err := c.queryPrometheusScalar(ctx, query)
+	podMatcher := promQLPodMatcher(spec.WorkloadName)
+	var cores float64
+	var err error
+	switch spec.WorkloadKind {
+	case "vm":
+		query := fmt.Sprintf(`sum(rate(kubevirt_vmi_cpu_usage_seconds_total{namespace=%q,name=%q}[%ss]))`, namespace, spec.WorkloadName, interval)
+		cores, err = c.queryPrometheusScalar(ctx, query)
+	case "sandbox":
+		kataQuery := fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{namespace=%q,pod=~%q,container="",id!~"/kata_overhead/.*"}[%ss]))`, namespace, podMatcher, interval)
+		standardQuery := fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{namespace=%q,pod=~%q,container!="",container!="POD"}[%ss]))`, namespace, podMatcher, interval)
+		cores, err = c.queryScalarOrFallback(ctx, kataQuery, standardQuery)
+	default:
+		// sum(rate(...)) 先对每条时间序列计算速率，再聚合多副本 pod 的 CPU 核数，
+		// 乘以 IntervalSec 得到周期内累计 CPU 秒数。
+		query := fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{namespace=%q,pod=~%q,container!="",container!="POD"}[%ss]))`, namespace, podMatcher, interval)
+		cores, err = c.queryPrometheusScalar(ctx, query)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("kubelet_cpu: %w", err)
 	}
@@ -84,6 +105,20 @@ func (c KubeletCPUCollector) Collect(ctx context.Context, spec ports.CollectionS
 		Unit:          "cpu_second",
 		Period:        period,
 	}}, nil
+}
+
+// queryScalarOrFallback 先执行 primary 查询，查空/出错时执行 fallback 查询。
+// 供 sandbox kata 场景使用：kata 查询命中时排除 kata_overhead 等 shim 开销，
+// kata 查询查空（如 runc sandbox）时回退到标准 container 选择器。
+func (c KubeletCPUCollector) queryScalarOrFallback(ctx context.Context, primary, fallback string) (float64, error) {
+	value, err := c.queryPrometheusScalar(ctx, primary)
+	if err == nil {
+		return value, nil
+	}
+	if fallback == "" {
+		return 0, err
+	}
+	return c.queryPrometheusScalar(ctx, fallback)
 }
 
 // KubeletMemCollector 采集内存 Gauge 瞬时占用加权时长。
@@ -108,11 +143,43 @@ func NewKubeletMemCollector(prometheusURL string, httpClient *http.Client) Kubel
 }
 
 // Collect 查询 Prometheus 获取内存工作集字节数，转换为 GiB-秒。
+// 按 WorkloadKind 分三路：
+//   - vm：pod 名是 virt-launcher-<name>-<hash>，container_* 指标匹配不上，
+//     改用 KubeVirt 的 kubevirt_vmi_memory_resident_bytes（RSS 驻留内存，最接近 working set 语义）。
+//   - sandbox：kata pod 的业务容器真实内存在 guest 内、宿主机 cAdvisor 不可见，
+//     改用 kata-monitor 暴露的 kata_guest_meminfo（guest 内 /proc/meminfo）：
+//     used = mem_total - mem_available（语义同监控接口 getMetricsForSandbox）；
+//     kata 查询查空（runc sandbox）时 fallback 标准 container working_set。
+//   - 其他（container/gpu_container/...）：标准 container 查询。
 func (c KubeletMemCollector) Collect(ctx context.Context, spec ports.CollectionSpec, period string) ([]ports.MeteringUsageRecord, error) {
 	namespace := tenantNamespace(spec.TenantID)
 	podMatcher := promQLPodMatcher(spec.WorkloadName)
-	query := fmt.Sprintf(`sum(container_memory_working_set_bytes{namespace=%q,pod=~%q,container!="",container!="POD"})`, namespace, podMatcher)
-	bytes, err := c.queryPrometheusScalar(ctx, query)
+	var bytes float64
+	var err error
+	switch spec.WorkloadKind {
+	case "vm":
+		query := fmt.Sprintf(`sum(kubevirt_vmi_memory_resident_bytes{namespace=%q,name=%q})`, namespace, spec.WorkloadName)
+		bytes, err = c.queryPrometheusScalar(ctx, query)
+	case "sandbox":
+		// kata 路径：kata-monitor series 无 namespace/pod 标签，
+		// 用 cri_namespace（=租户 namespace）与 cri_name（=pod 名）过滤。
+		// mem_total / mem_available 必须同时命中才算 kata 场景，否则视为 runc sandbox。
+		memTotal, totalErr := c.queryPrometheusScalar(ctx, fmt.Sprintf(`sum(kata_guest_meminfo{item="mem_total",cri_namespace=%q,cri_name=~%q})`, namespace, podMatcher))
+		memAvail, availErr := c.queryPrometheusScalar(ctx, fmt.Sprintf(`sum(kata_guest_meminfo{item="mem_available",cri_namespace=%q,cri_name=~%q})`, namespace, podMatcher))
+		if totalErr == nil && availErr == nil {
+			bytes = memTotal - memAvail
+			if bytes < 0 {
+				bytes = 0
+			}
+		} else {
+			// runc sandbox fallback：标准 container working_set 查询。
+			query := fmt.Sprintf(`sum(container_memory_working_set_bytes{namespace=%q,pod=~%q,container!="",container!="POD"})`, namespace, podMatcher)
+			bytes, err = c.queryPrometheusScalar(ctx, query)
+		}
+	default:
+		query := fmt.Sprintf(`sum(container_memory_working_set_bytes{namespace=%q,pod=~%q,container!="",container!="POD"})`, namespace, podMatcher)
+		bytes, err = c.queryPrometheusScalar(ctx, query)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("kubelet_mem: %w", err)
 	}

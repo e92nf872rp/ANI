@@ -22,11 +22,14 @@ import (
 // GetModelVersion is intentionally absent: it is an internal lookup for
 // inference-service, not a tenant HTTP API.
 type ModelServiceClient interface {
-	ListModels(ctx context.Context, tenantID, status string, limit int32, cursor string) (*modelv1.ListModelsResponse, error)
+	ListModels(ctx context.Context, tenantID, status, source, capability, keyword string, limit int32, cursor string) (*modelv1.ListModelsResponse, error)
+	ListModelVersions(ctx context.Context, tenantID, modelID string, limit int32, cursor string) (*modelv1.ListModelVersionsResponse, error)
 	CreateModel(ctx context.Context, tenantID string, req *modelv1.CreateModelRequest) (*modelv1.Model, error)
 	GetModel(ctx context.Context, tenantID, modelID string) (*modelv1.Model, error)
 	DeleteModel(ctx context.Context, tenantID, modelID string) (*emptypb.Empty, error)
 	CreateModelVersion(ctx context.Context, tenantID string, req *modelv1.CreateModelVersionRequest) (*modelv1.ModelVersion, error)
+	GetUploadURL(ctx context.Context, tenantID string, req *modelv1.GetUploadURLRequest) (*modelv1.GetUploadURLResponse, error)
+	ImportModel(ctx context.Context, tenantID string, req *modelv1.ImportModelRequest) (*commonv1.AsyncTaskRef, error)
 }
 
 type modelGRPCClient struct {
@@ -54,14 +57,23 @@ func (c *modelGRPCClient) callCtx(ctx context.Context) (context.Context, context
 	return context.WithTimeout(ctx, c.timeout)
 }
 
-func (c *modelGRPCClient) ListModels(ctx context.Context, tenantID, status string, limit int32, cursor string) (*modelv1.ListModelsResponse, error) {
+func (c *modelGRPCClient) ListModels(ctx context.Context, tenantID, status, source, capability, keyword string, limit int32, cursor string) (*modelv1.ListModelsResponse, error) {
 	callCtx, cancel := c.callCtx(ctx)
 	defer cancel()
 	return c.client.ListModels(callCtx, &modelv1.ListModelsRequest{
-		TenantId: tenantID,
-		Status:   status,
-		Page:     &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor},
+		TenantId:   tenantID,
+		Status:     status,
+		Source:     source,
+		Capability: capability,
+		Keyword:    keyword,
+		Page:       &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor},
 	})
+}
+
+func (c *modelGRPCClient) ListModelVersions(ctx context.Context, tenantID, modelID string, limit int32, cursor string) (*modelv1.ListModelVersionsResponse, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ListModelVersions(callCtx, &modelv1.ListModelVersionsRequest{TenantId: tenantID, ModelId: modelID, Page: &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor}})
 }
 
 func (c *modelGRPCClient) CreateModel(ctx context.Context, tenantID string, req *modelv1.CreateModelRequest) (*modelv1.Model, error) {
@@ -94,6 +106,26 @@ func (c *modelGRPCClient) CreateModelVersion(ctx context.Context, tenantID strin
 	callCtx, cancel := c.callCtx(ctx)
 	defer cancel()
 	return c.client.CreateModelVersion(callCtx, req)
+}
+
+func (c *modelGRPCClient) GetUploadURL(ctx context.Context, tenantID string, req *modelv1.GetUploadURLRequest) (*modelv1.GetUploadURLResponse, error) {
+	if req == nil {
+		req = &modelv1.GetUploadURLRequest{}
+	}
+	req.TenantId = tenantID
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.GetUploadURL(callCtx, req)
+}
+
+func (c *modelGRPCClient) ImportModel(ctx context.Context, tenantID string, req *modelv1.ImportModelRequest) (*commonv1.AsyncTaskRef, error) {
+	if req == nil {
+		req = &modelv1.ImportModelRequest{}
+	}
+	req.TenantId = tenantID
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ImportModel(callCtx, req)
 }
 
 func writeModelUnavailable(c *app.RequestContext) {
@@ -129,6 +161,8 @@ func mapModelGRPCError(err error) (int, string, string) {
 		return http.StatusNotFound, "NOT_FOUND", firstNonEmpty(message, "model not found")
 	case codes.AlreadyExists:
 		return http.StatusConflict, "CONFLICT", firstNonEmpty(message, "model already exists")
+	case codes.FailedPrecondition:
+		return http.StatusConflict, firstNonEmpty(message, "CONFLICT"), "model is still referenced by an inference service"
 	case codes.Unimplemented:
 		return http.StatusNotImplemented, "FEATURE_NOT_AVAILABLE", firstNonEmpty(message, "model feature is not available")
 	case codes.Unauthenticated:

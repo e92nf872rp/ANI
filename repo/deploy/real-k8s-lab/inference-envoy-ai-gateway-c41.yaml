@@ -164,6 +164,8 @@ spec:
       - authorization
       - x-ai-eg-model
       - accept
+    bodyToExtAuth:
+      maxRequestBytes: 1048576
     grpc:
       backendRefs:
         - name: envoy-authz-adapter
@@ -201,7 +203,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: inference-gateway-publisher
-          image: docker.changqingyun.cn/ani/inference-gateway-publisher:c41-20260831
+          image: docker.changqingyun.cn/ani/inference-gateway-publisher@sha256:71b43a4808fb5a036f0d1c7aae3bd21a8ac8b7f607df9ff39c836041c6ea9e65
           imagePullPolicy: Always
           ports:
             - name: health
@@ -211,7 +213,7 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: ani-services-runtime
+                  name: ani-inference-platform-runtime
                   key: database_url
             - name: INFERENCE_AI_GATEWAY_PUBLIC_BASE_URL
               value: https://ai.example.com

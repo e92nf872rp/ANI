@@ -23,7 +23,7 @@ repo/
 │   ├── ani-gateway/            # 统一 HTTP 入口（Core API / Services API 路由）
 │   ├── auth-service/           # Core 认证授权服务（JWT/RBAC/OIDC/API Key）
 │   ├── task-service/           # Core 异步任务/outbox/worker mutation
-│   ├── model-service/          # ANI Services 早期逻辑，不属于 Core；6.15-6.20 后按新定义删除或覆盖
+│   ├── model-service/          # ANI Services 模型仓库后端（租户隔离模型/版本与对象存储控制面）
 │   ├── kb-service/             # ANI Services 空骨架，不属于 Core；6.15-6.20 后按新定义建设
 │   └── metering-service/       # 平台计量服务骨架
 │

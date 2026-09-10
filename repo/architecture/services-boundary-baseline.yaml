@@ -14,6 +14,27 @@ exceptions:
     owner: ANI Services 团队
     reason: model-service 配置仍直接返回 Core `bootstrap.Config`，属于 Services 冻结前保留的现存类型耦合事实
     disposition: 受控解冻时迁移为 Services 自有配置类型；迁移前仅作为精确存量例外告警，不得扩散到新文件
+  - path: services/model-service/cmd/model-import-worker/main.go
+    rule: core_internal_go_import
+    import: github.com/kubercloud/ani/pkg/bootstrap
+    status: accepted_baseline
+    owner: ANI Services 团队
+    reason: remote model-import worker 进程入口复用现有 Core bootstrap 连接装配，保持与 model-service 主进程一致
+    disposition: 仅限进程入口 wiring；后续 Services boundary 收敛时迁移为自有启动与依赖装配
+  - path: services/model-service/cmd/model-import-worker/main.go
+    rule: core_internal_go_import
+    import: github.com/kubercloud/ani/pkg/ports
+    status: accepted_baseline
+    owner: ANI Services 团队
+    reason: remote model-import worker 使用共享 MessageBus/ObjectStore ports 完成异步导入闭环
+    disposition: 仅限 worker adapter wiring；不得扩散到其他 Services 业务代码，后续迁移为公开 Services ports
+  - path: services/model-service/internal/importer/worker.go
+    rule: core_internal_go_import
+    import: github.com/kubercloud/ani/pkg/ports
+    status: accepted_baseline
+    owner: ANI Services 团队
+    reason: remote model-import worker domain orchestration 依赖共享 ObjectStore port 以复用现有对象存储边界
+    disposition: 仅限 importer worker；后续 Services boundary 收敛时迁移为 Services 自有 port
   - path: services/inference-service/main.go
     rule: core_internal_go_import
     import: github.com/kubercloud/ani/pkg/bootstrap

@@ -36,6 +36,9 @@ func TestLaunchUsesSameEntryForCPUAndGPU(t *testing.T) {
 	if !containsArg(cpuArgs, "--enforce-eager") || !containsArg(gpuArgs, "--enforce-eager") {
 		t.Fatalf("enforce-eager cpu=%v gpu=%v", cpuArgs, gpuArgs)
 	}
+	if containsArg(cpuArgs, "--device") || containsArg(gpuArgs, "--device") {
+		t.Fatalf("device should be auto-detected by the image: cpu=%v gpu=%v", cpuArgs, gpuArgs)
+	}
 }
 
 func TestLaunchVLLMEmbeddingUsesPoolingEmbedCLI(t *testing.T) {
@@ -56,11 +59,11 @@ func TestLaunchVLLMEmbeddingUsesPoolingEmbedCLI(t *testing.T) {
 					ArtifactRef: "pvc://vllm-model#/models/bge-m3",
 				},
 			}, "bge-m3")
-			if !containsPair(args, "--runner", "pooling") || !containsPair(args, "--convert", "embed") {
+			if !containsPair(args, "--task", "embed") {
 				t.Fatalf("embedding args = %#v", args)
 			}
-			if containsArg(args, "--task") {
-				t.Fatalf("embedding args use removed vLLM --task flag: %#v", args)
+			if containsArg(args, "--runner") || containsArg(args, "--convert") {
+				t.Fatalf("embedding args use unsupported legacy flags: %#v", args)
 			}
 		})
 	}
@@ -102,7 +105,7 @@ func TestLaunchVLLMEmbeddingPreservesFrozenTenantCommand(t *testing.T) {
 	}
 }
 
-func TestLaunchLeaderVLLMEmbeddingUsesPoolingEmbedCLI(t *testing.T) {
+func TestLaunchLeaderVLLMEmbeddingUsesTaskCLI(t *testing.T) {
 	_, args := LaunchLeader(domain.Spec{
 		PlacementMode: "multi_node",
 		Accelerator:   &domain.Accelerator{SpecID: "gpu-a100", CountPerReplica: 2},
@@ -112,7 +115,7 @@ func TestLaunchLeaderVLLMEmbeddingUsesPoolingEmbedCLI(t *testing.T) {
 			ArtifactRef: "pvc://vllm-model#/models/bge-m3",
 		},
 	}, "bge-m3")
-	if len(args) != 1 || !strings.Contains(args[0], "--runner pooling") || !strings.Contains(args[0], "--convert embed") || strings.Contains(args[0], "--task") {
+	if len(args) != 1 || !strings.Contains(args[0], "--task embed") || strings.Contains(args[0], "--runner pooling") || strings.Contains(args[0], "--convert embed") {
 		t.Fatalf("leader embedding args = %#v", args)
 	}
 }

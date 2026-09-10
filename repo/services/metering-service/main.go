@@ -39,6 +39,13 @@ func main() {
 			"err", err)
 	}
 
+	// 2. 启动周期 reconcile（每 5 分钟），以 DB running 实例集校准进程内 ticker，
+	//    停止已删除/失败/停止实例的泄漏采集（事件驱动停止链路缺失时的兜底自愈）。
+	reconcileCtx, cancelReconcile := context.WithCancel(context.Background())
+	defer cancelReconcile()
+	reconciler := internal.NewReconciler(deps.Ports.Metadata, meteringSvc, logger, 5*time.Minute)
+	go reconciler.Run(reconcileCtx)
+
 	// 2. 后订阅 NATS（DeliverAll 回放补齐崩溃窗口，MaxInflight=1 串行消费保证顺序）。
 	//    Subscribe 失败时 os.Exit(1)，K8s 自动重启。
 	sub, err := deps.Ports.MessageBus.Subscribe(ports.SubscribeOptions{

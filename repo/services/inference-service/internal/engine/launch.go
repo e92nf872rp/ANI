@@ -70,8 +70,14 @@ func launchVLLM(spec domain.Spec, servedModelName string) (command []string, arg
 		"--host", "0.0.0.0",
 		"--port", defaultListenPort,
 	}
+	maxModelLen := "1024"
 	if domain.NormalizeInferenceTask(spec.ExecutionProfile.Task) == domain.InferenceTaskEmbed {
-		server = append(server, "--runner", "pooling", "--convert", "embed")
+		// vLLM 0.8.x selects the pooling/embedding execution path via --task.
+		// The older --runner pooling/--convert embed flags are not accepted by
+		// the vLLM image used by the platform.
+		server = append(server, "--task", "embed")
+		// BGE-small-zh-v1.5 declares max_position_embeddings=512.
+		maxModelLen = "512"
 	}
 	if spec.Accelerator == nil {
 		command = []string{"env"}
@@ -80,7 +86,7 @@ func launchVLLM(spec domain.Spec, servedModelName string) (command []string, arg
 			"OMP_NUM_THREADS=4",
 			"HF_HOME=/tmp/hf",
 		}, server...)
-		args = append(args, "--dtype", "float32", "--max-model-len", "1024", "--max-num-seqs", "1", "--enforce-eager")
+		args = append(args, "--dtype", "float32", "--max-model-len", maxModelLen, "--max-num-seqs", "1", "--enforce-eager")
 		return command, args
 	}
 	if spec.Accelerator.CountPerReplica > 1 {

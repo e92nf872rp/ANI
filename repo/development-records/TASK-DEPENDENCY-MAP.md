@@ -57,7 +57,7 @@
 
 | 任务 ID | 描述 | 前置依赖 |
 |---------|------|---------|
-| TASK-CORE-003 | inferenceProxy（/v1/chat/completions） | TASK-SVC-008、TASK-SVC-009 |
+| TASK-CORE-003 | ~~inferenceProxy（/v1/chat/completions）~~ 已取消，数据面归属 Envoy AI Gateway | — |
 
 ---
 

@@ -38,6 +38,36 @@ spec:
               value: auth_service
             - name: AUTH_SERVICE_ADDR
               value: ani-auth-service.ani-system.svc.cluster.local:9101
+            # Object-backed model materialization is configured through the
+            # non-secret ConfigMap. Signed URLs and object-store credentials
+            # are requested only by the tenant fetcher at runtime.
+            - name: MODEL_SERVICE_GRPC_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: ani-inference-materialization
+                  key: model_service_grpc_addr
+                  optional: false
+            - name: MODEL_FETCHER_GRPC_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: ani-inference-materialization
+                  key: model_fetcher_grpc_addr
+                  optional: false
+            - name: MODEL_FETCHER_IMAGE_REF
+              valueFrom:
+                configMapKeyRef:
+                  name: ani-inference-materialization
+                  key: model_fetcher_image_ref
+                  optional: false
+            # MinIO HTTP is an explicit lab-only opt-in. Keep production
+            # shaped gateways fail-closed unless an operator deliberately
+            # changes this value for a controlled in-cluster endpoint.
+            - name: MODEL_FETCHER_ALLOW_INSECURE_HTTP
+              valueFrom:
+                configMapKeyRef:
+                  name: ani-inference-materialization
+                  key: model_fetcher_allow_insecure_http
+                  optional: false
             - name: KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE
               value: /var/run/secrets/kubernetes.io/serviceaccount/token
             - name: KUBERNETES_SERVICE_ACCOUNT_CA_FILE

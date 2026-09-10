@@ -552,14 +552,12 @@ test_api("Gateway List Tenant Roles", "GET", f"{GATEWAY}/api/v1/svc/tenant/roles
 test_api("Gateway Get Tenant SSO", "GET", f"{GATEWAY}/api/v1/svc/tenant/sso")
 test_api("Gateway List Tenant Webhooks", "GET", f"{GATEWAY}/api/v1/svc/tenant/webhooks")
 
-# ── 3.24 OpenAI-compatible proxy ──────────────────────────────────────────
-print("\n  -- OpenAI-Compatible Proxy --")
-chat_body = {
-    "model": "Qwen3.6-35B-A3B",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "stream": False,
-}
-test_api("Gateway Chat Completions (proxy)", "POST", f"{GATEWAY}/v1/chat/completions", body=chat_body)
+# ── 3.24 OpenAI-compatible data plane ─────────────────────────────────────
+# OpenAI traffic is intentionally not part of the ANI Gateway control-plane
+# smoke. Use the independently configured Envoy AI Gateway endpoint for chat
+# and embeddings tests.
+print("\n  -- OpenAI-Compatible Data Plane --")
+print("  [SKIP] Configure and test the independent Envoy AI Gateway endpoint separately")
 
 # ════════════════════════════════════════════════════════════════════════
 # Summary

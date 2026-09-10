@@ -6,12 +6,6 @@ purpose: >-
   /api/v1/svc 路由注册之间的已知差异。新增差异或失效条目阻断 PR。
 exceptions:
   - kind: spec_not_in_code
-    method: POST
-    path: /models/{model_id}/upload-url
-    status: accepted_baseline
-    owner: ANI Services
-    reason: 模型仓库 P0 contract-only 阶段已声明预签名上传地址，Gateway handler 将在后端实现批次注册。
-  - kind: spec_not_in_code
     method: GET
     path: /model-import-tasks/{task_id}
     status: accepted_baseline

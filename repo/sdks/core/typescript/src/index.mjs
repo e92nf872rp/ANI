@@ -683,6 +683,7 @@ export const schemas = [
   "PlatformWorkloadLogEntry",
   "PlatformWorkloadLogListResponse",
   "PlatformWorkloadMetadata",
+  "PlatformWorkloadModelMaterialization",
   "PlatformWorkloadNetwork",
   "PlatformWorkloadPort",
   "PlatformWorkloadResources",

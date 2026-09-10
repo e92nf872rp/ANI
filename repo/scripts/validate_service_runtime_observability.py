@@ -43,8 +43,10 @@ ALLOWED_RUNTIMEADMIN_IMPORTERS = {
 }
 FORBIDDEN_PREFIXES = (
     "repo/services/reconcile-worker/",
-    "repo/services/envoy-authz-adapter/",
 )
+# envoy-authz-adapter 的调用鉴权与限流属于独立 Services 业务，允许正常迭代。
+# 它仍不属于七服务观测清单；inventory、Prometheus whitelist 与 runtimeadmin
+# importer 校验继续禁止其被隐式纳入本批观测范围。
 # kb-service 禁改规则（OBS-RUNTIME-P0，#141 引入）已解除：kb-service 是 ANI Services
 # 活跃开发目录（CLAUDE.md），契约层（PR #134）已在 main，实现批次 `issue-043`~`048`
 # 合法落地；可观测性契约本身不受影响（kb-service 仍不在 SERVICES 清单中）。
@@ -321,9 +323,15 @@ def run_promtool(root: Path) -> list[str]:
         temp_path = Path(temp_dir)
         config_path = temp_path / "prometheus.yml"
         config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+        config_path.chmod(0o644)
         service_account_path = temp_path / "serviceaccount"
         service_account_path.mkdir()
-        (service_account_path / "token").write_text("promtool-static-validation", encoding="utf-8")
+        service_account_path.chmod(0o755)
+        token_path = service_account_path / "token"
+        token_path.write_text("promtool-static-validation", encoding="utf-8")
+        # These are generated, non-secret fixtures mounted read-only for the
+        # pinned image's non-root user, including when the host uses umask 077.
+        token_path.chmod(0o644)
         result = subprocess.run(
             [
                 "docker",

@@ -109,7 +109,12 @@ type CollectionSpec struct {
 // 已有 ticker 时返回 nil（no-op）；DB UNIQUE 约束兜底重启/重放场景的重复写入。
 //
 // StopCollection 停止指定资源的周期采集。幂等语义：无 ticker 时返回 nil（no-op）。
+//
+// StopStale 用 DB 当前 running 实例集合校准进程内 ticker：对不在 activeRefs 中的
+// 采集逐个 StopCollection。作为事件驱动停止链路的兜底自愈——事件发布缺失/丢失时，
+// 周期 reconcile 仍能停止已删除/失败/停止实例的采集，避免泄漏 ticker 持续报错和错误计费。
 type MeteringCollectionService interface {
 	StartCollection(ctx context.Context, spec CollectionSpec) error
 	StopCollection(ctx context.Context, resourceRef string) error
+	StopStale(ctx context.Context, activeRefs map[string]bool) error
 }

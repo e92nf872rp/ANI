@@ -2,7 +2,9 @@ package modelsvc
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -114,8 +116,18 @@ func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (c
 		ArtifactRef:    strings.TrimSpace(version.GetStoragePath()),
 		ArtifactDigest: normalizeDigest(version.GetChecksumSha256()),
 	}
-	if !localPVCArtifact(out.ArtifactRef) {
+	if !localPVCArtifact(out.ArtifactRef) && !tenantObjectArtifact(out.ArtifactRef, tenantID, modelID) {
 		return catalog.ModelVersion{}, catalog.ErrNoCompatibleProfile
+	}
+	if tenantObjectArtifact(out.ArtifactRef, tenantID, modelID) {
+		if out.SizeBytes <= 0 || !validSHA256(out.ArtifactDigest) {
+			return catalog.ModelVersion{}, catalog.ErrNoCompatibleProfile
+		}
+		out.Materialization = &catalog.ModelMaterialization{
+			TenantID: tenantID, ModelVersionID: parsedVersionID,
+			ObjectRef: out.ArtifactRef, ExpectedSizeBytes: out.SizeBytes,
+			SHA256: out.ArtifactDigest,
+		}
 	}
 	if version.GetIsEncrypted() {
 		out.SecretRef = "model-encrypt/" + parsedVersionID.String()
@@ -216,7 +228,7 @@ func prefersSGLang(capabilities []string) bool {
 	return false
 }
 
-// localPVCArtifact 只接受 pvc://<dns-label>#/path，拒绝 object:// 和 HostPath。
+// localPVCArtifact 只接受 pvc://<dns-label>#/path。
 func localPVCArtifact(ref string) bool {
 	ref = strings.TrimSpace(ref)
 	if ref == "" || strings.Contains(ref, "..") {
@@ -228,6 +240,38 @@ func localPVCArtifact(ref string) bool {
 	}
 	claim, _, _ := strings.Cut(rest, "#")
 	return pvcClaimPattern.MatchString(strings.TrimSpace(claim))
+}
+
+// tenantObjectArtifact accepts only the model-service canonical object form:
+// object://models/<tenant>/<model>/<version>/<document>/<file>. The tenant
+// and model UUIDs are checked here as a second fence before Core is called.
+func tenantObjectArtifact(ref string, tenantID, modelID uuid.UUID) bool {
+	value := strings.TrimSpace(ref)
+	u, err := url.Parse(value)
+	if err != nil || u.Scheme != "object" || u.Host != "models" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return false
+	}
+	if strings.Contains(u.Path, "..") || strings.Contains(u.EscapedPath(), "..") {
+		return false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 5 {
+		return false
+	}
+	parsedTenant, err := uuid.Parse(parts[0])
+	if err != nil || parsedTenant != tenantID {
+		return false
+	}
+	parsedModel, err := uuid.Parse(parts[1])
+	if err != nil || parsedModel != modelID {
+		return false
+	}
+	for _, part := range parts[2:] {
+		if strings.TrimSpace(part) == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func cpuCompatible(format string) bool {
@@ -264,11 +308,22 @@ func normalizeDigest(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	if strings.HasPrefix(raw, "sha256:") {
-		return raw
+	if strings.HasPrefix(strings.ToLower(raw), "sha256:") {
+		raw = raw[len("sha256:"):]
 	}
-	return "sha256:" + raw
+	return "sha256:" + strings.ToLower(raw)
 }
+
+func validSHA256(digest string) bool {
+	raw := strings.TrimPrefix(strings.TrimSpace(digest), "sha256:")
+	if len(raw) != sha256HexLength {
+		return false
+	}
+	_, err := hex.DecodeString(raw)
+	return err == nil
+}
+
+const sha256HexLength = 64
 
 func cloneProfile(profile catalog.EngineProfile) *catalog.EngineProfile {
 	cloned := profile

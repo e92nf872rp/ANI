@@ -27,11 +27,15 @@ func main() {
 	cfg := config.Load()
 	deps := bootstrap.MustConnect(cfg.Config)
 	defer deps.Close()
-
-	store := repository.NewPostgres(deps.DB, deps.DB)
-	rt := newInferenceRuntime(cfg)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	store, closeStore, err := repository.OpenStore(ctx, cfg.DatabaseURL, cfg.PlatformDatabaseURL)
+	if err != nil {
+		panic(err)
+	}
+	defer closeStore()
+	rt := newInferenceRuntime(cfg)
 	slog.Info("inference worker limits",
 		"max_attempts", cfg.MaxAttempts,
 		"deploy_timeout_seconds", int(cfg.DeployTimeout/time.Second),
@@ -78,7 +82,7 @@ func newInferenceRuntime(cfg config.Config) runtime.InferenceRuntime {
 	if strings.TrimSpace(cfg.CoreAPIBaseURL) == "" {
 		panic("CORE_API_BASE_URL is required")
 	}
-	rt := coresdk.New(cfg.CoreAPIBaseURL, cfg.CoreServiceToken)
+	rt := coresdk.NewWithMaterializationConfig(cfg.CoreAPIBaseURL, cfg.CoreServiceToken, cfg.ModelServiceGRPCAddr, cfg.ModelFetcherImageRef)
 	if cfg.AuthServiceGRPCAddr != "" && cfg.AuthMintSecret != "" {
 		minter, err := coresdk.DialMinter(cfg.AuthServiceGRPCAddr, cfg.AuthMintSecret)
 		if err != nil {

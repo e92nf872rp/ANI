@@ -122,6 +122,14 @@ func (c *Creator) Create(ctx context.Context, tenantID uuid.UUID, input CreateIn
 		ArtifactDigest: version.ArtifactDigest,
 		SecretRef:      version.SecretRef,
 	}
+	if version.Materialization != nil {
+		materialization := version.Materialization
+		input.Spec.ExecutionProfile.Materialization = &domain.ModelMaterialization{
+			TenantID: materialization.TenantID, ModelVersionID: materialization.ModelVersionID,
+			ObjectRef: materialization.ObjectRef, ExpectedSizeBytes: materialization.ExpectedSizeBytes,
+			SHA256: materialization.SHA256,
+		}
+	}
 	modelSnapshot, err := json.Marshal(struct {
 		ModelID        uuid.UUID `json:"model_id"`
 		VersionID      uuid.UUID `json:"version_id"`

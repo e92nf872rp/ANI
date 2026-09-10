@@ -31,6 +31,21 @@ class InferenceEnvoyAIGatewayC41ManifestTests(unittest.TestCase):
     def test_repository_manifest_is_valid(self) -> None:
         manifest.validate(self.documents())
 
+    def test_rejects_tenant_database_for_platform_publisher(self) -> None:
+        documents = self.documents()
+        container = self.resource(documents, "Deployment", "inference-gateway-publisher")["spec"]["template"]["spec"]["containers"][0]
+        container["env"][0]["valueFrom"]["secretKeyRef"]["name"] = "ani-services-runtime"
+        self.assert_rejected(documents)
+
+    def test_inference_reconciler_uses_separate_platform_secret(self) -> None:
+        documents = manifest.load_documents(manifest.DEFAULT_MANIFEST.parent / "inference-incluster-e2e.yaml")
+        container = self.resource(documents, "Deployment", "inference-service")["spec"]["template"]["spec"]["containers"][0]
+        env = {entry["name"]: entry for entry in container["env"]}
+        self.assertIn("INFERENCE_PLATFORM_DATABASE_URL", env)
+        self.assertEqual(env["INFERENCE_PLATFORM_DATABASE_URL"]["valueFrom"]["secretKeyRef"],
+                         {"name": "ani-inference-platform-runtime", "key": "database_url"})
+        self.assertEqual(env["INFERENCE_DATABASE_URL"]["valueFrom"]["secretKeyRef"]["name"], "ani-services-runtime")
+
     def test_rejects_security_policy_targeting_route(self) -> None:
         documents = self.documents()
         policy = self.resource(documents, "SecurityPolicy", "ani-inference-ext-auth")

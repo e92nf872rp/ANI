@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -154,6 +155,77 @@ func TestLocalPlatformWorkloadRejectsTagImage(t *testing.T) {
 	spec.ImageRef = "registry.ani.internal/platform/runtime:latest"
 	if _, err := svc.Create(context.Background(), "11111111-1111-1111-1111-111111111111", spec); !errors.Is(err, ports.ErrInvalid) {
 		t.Fatalf("tag image Create() error = %v", err)
+	}
+}
+
+func TestValidatePlatformWorkloadMaterializationContract(t *testing.T) {
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("8df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-materialized")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: tenant, ModelVersionID: "33333333-3333-3333-3333-333333333333",
+		ObjectRef: "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors",
+		SizeBytes: 12, ChecksumSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ModelServiceGRPCAddr: "model-service:9090", FetcherImageRef: "registry.local/model-fetcher@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TargetPath: "/models/33333333-3333-3333-3333-333333333333/model.safetensors",
+	}
+	if err := validatePlatformWorkloadCreate(spec); err != nil {
+		t.Fatalf("valid materialization rejected: %v", err)
+	}
+	for _, mutate := range []func(*ports.PlatformWorkloadModelMaterialization){
+		func(m *ports.PlatformWorkloadModelMaterialization) { m.TargetPath = "/tmp/model" },
+		func(m *ports.PlatformWorkloadModelMaterialization) {
+			m.TargetPath = "/models/44444444-4444-4444-4444-444444444444/model.safetensors"
+		},
+		func(m *ports.PlatformWorkloadModelMaterialization) {
+			m.ObjectRef = "object://user:pass@models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/file"
+		},
+		func(m *ports.PlatformWorkloadModelMaterialization) {
+			m.ObjectRef = "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/foo..bar/file"
+		},
+		func(m *ports.PlatformWorkloadModelMaterialization) {
+			m.ChecksumSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		},
+		func(m *ports.PlatformWorkloadModelMaterialization) { m.ModelServiceGRPCAddr = "" },
+		func(m *ports.PlatformWorkloadModelMaterialization) { m.TargetPath = "/models/foo/../bar" },
+		func(m *ports.PlatformWorkloadModelMaterialization) { m.TargetPath = "/models/%2e%2e/secret" },
+		func(m *ports.PlatformWorkloadModelMaterialization) {
+			m.FetcherImageRef = "registry.local/a@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		},
+	} {
+		copy := *spec.ModelMaterialization
+		mutate(&copy)
+		candidate := spec
+		candidate.ModelMaterialization = &copy
+		if err := validatePlatformWorkloadCreate(candidate); !errors.Is(err, ports.ErrInvalid) {
+			t.Fatalf("invalid materialization error = %v", err)
+		}
+	}
+	pvc := spec
+	pvc.ModelMaterialization = spec.ModelMaterialization
+	pvc.Artifacts = []ports.PlatformWorkloadArtifact{{ObjectRef: "pvc://model", MountPath: "/models"}}
+	if err := validatePlatformWorkloadCreate(pvc); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("PVC/materialization conflict error = %v", err)
+	}
+	lws := sampleLeaderWorkerPlatformWorkloadSpec("9df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-materialized-lws")
+	lws.ModelMaterialization = spec.ModelMaterialization
+	if err := validatePlatformWorkloadCreate(lws); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("LWS object materialization error = %v, want invalid without RWX PVC", err)
+	}
+}
+
+func TestValidatePlatformWorkloadImportedArchiveAllowsVersionDirectory(t *testing.T) {
+	tenant := "11111111-1111-1111-1111-111111111111"
+	version := "33333333-3333-3333-3333-333333333333"
+	spec := sampleCPUPlatformWorkloadSpec("bfd72d71-9d49-46c4-a48a-52bb37b082ab", "inference-archive-materialized")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: tenant, ModelVersionID: version,
+		ObjectRef: "object://models/" + tenant + "/22222222-2222-2222-2222-222222222222/import-44444444-4444-4444-4444-444444444444/archive/model.tar.gz",
+		SizeBytes: 12, ChecksumSHA256: "sha256:" + strings.Repeat("a", 64),
+		ModelServiceGRPCAddr: "model-service:9090",
+		FetcherImageRef:      "registry.local/model-fetcher@sha256:" + strings.Repeat("b", 64),
+		TargetPath:           "/models/" + version,
+	}
+	if err := validatePlatformWorkloadCreate(spec); err != nil {
+		t.Fatalf("archive materialization rejected: %v", err)
 	}
 }
 
