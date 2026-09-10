@@ -22,7 +22,7 @@ func TestPlatformAuditServiceInterfaceSatisfiedByFake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueryAuditLogs() error = %v", err)
 	}
-	if res.Items != nil && len(res.Items) != 0 {
+	if len(res.Items) != 0 {
 		t.Fatalf("items = %+v, want empty", res.Items)
 	}
 }

@@ -121,7 +121,7 @@ func TestPlatformAuditGlobalDescMergeAndNextPage(t *testing.T) {
 	now := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
+		_, _ = fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
 			TsNs int64
 			Line string
 		}{
@@ -164,8 +164,7 @@ func TestPlatformAuditCursorEndBoundExclusive(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		capturedEnd, _ = strconv.ParseInt(r.URL.Query().Get("end"), 10, 64)
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
+		_, _ = fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
 			TsNs int64
 			Line string
 		}{"node": {}}))
@@ -192,10 +191,10 @@ func TestPlatformAuditTotalApprox(t *testing.T) {
 		query := r.URL.Query().Get("query")
 		if strings.Contains(query, "count_over_time") {
 			// matrix: sum(count_over_time(...)) 返回 1 个样本 137
-			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1757480400000000000,"137"]]}]}}`)
+			_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1757480400000000000,"137"]]}]}}`)
 			return
 		}
-		fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
+		_, _ = fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
 			TsNs int64
 			Line string
 		}{"node": {}}))
@@ -251,7 +250,7 @@ func TestPlatformAuditInvalidCursorAndRange(t *testing.T) {
 	now := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
+		_, _ = fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
 			TsNs int64
 			Line string
 		}{"node": {}}))
@@ -287,7 +286,7 @@ func TestPlatformAuditQueryRangeParamsEncoded(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.Query().Get("query")
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
+		_, _ = fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
 			TsNs int64
 			Line string
 		}{"node": {}}))
