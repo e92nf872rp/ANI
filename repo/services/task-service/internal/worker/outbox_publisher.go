@@ -88,6 +88,7 @@ func (p *OutboxPublisher) publishOnce(ctx context.Context) error {
 
 	ids := make([]int64, 0, len(events))
 	for _, event := range events {
+		p.logger.Info("outbox event dispatching", "event_id", event.ID, "subject", event.EventType)
 		if err := p.bus.Publish(ctx, ports.EventEnvelope{
 			TenantID:      event.TenantID.String(),
 			AggregateID:   event.AggregateID.String(),

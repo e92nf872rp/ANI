@@ -1,0 +1,10 @@
+.git
+.cache
+bin
+**/node_modules
+**/dist
+**/.vite
+**/.turbo
+*.test
+coverage.out
+coverage.html

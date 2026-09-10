@@ -37,6 +37,32 @@ subjects:
     name: ani-gateway
     namespace: ani-system
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-inference-materialization
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: inference-service
+    ani.dev/profile: inference-incluster-e2e
+data:
+  model_service_grpc_addr: model-service.ani-system.svc.cluster.local:9103
+  model_fetcher_grpc_addr: model-service.ani-system.svc.cluster.local:9105
+  # Release-provided immutable digest-pinned model-fetcher image used by
+  # object-backed inference services. Leave empty only in an unconfigured
+  # template; the profile then fails closed instead of selecting a tag.
+  model_fetcher_image_ref: docker.changqingyun.cn/ani/model-fetcher@sha256:3026fc390af93265df9f6eb1c191942d03947e61d7af3bc29644a857c17605ba
+  # HTTP downloads are disabled by default. Set true only for a controlled
+  # in-cluster MinIO endpoint; public object URLs must remain HTTPS.
+  # Keep HTTP downloads disabled by default; operators may override this only
+  # through an explicitly approved, environment-specific deployment overlay.
+  model_fetcher_allow_insecure_http: "false"
+  # Release-provided immutable digest-pinned model-import-worker image. Keep
+  # this value identical to the Deployment image below; an unconfigured
+  # template must leave both empty and never invent or resolve a mutable tag.
+  model_import_worker_image_ref: docker.changqingyun.cn/ani/model-import-worker@sha256:48d848902033c4a8eca6556c1f8606f9efe86ddc52de240fa796706960475ebb
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -66,7 +92,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: inference-service
-          image: docker.changqingyun.cn/ani/inference-service:create-image-c30-20260818
+          image: docker.changqingyun.cn/ani/inference-service@sha256:9fd58e4a794db7649f6babe7f228f602717fdc3be3ca68910e72da629585b5c2
           imagePullPolicy: Always
           ports:
             - name: grpc
@@ -83,6 +109,13 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: ani-services-runtime
+                  key: database_url
+            # Background leases must see all inference tenants; never grant
+            # BYPASSRLS to the ordinary request-path application account.
+            - name: INFERENCE_PLATFORM_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-inference-platform-runtime
                   key: database_url
             - name: NATS_URL
               valueFrom:
@@ -106,7 +139,15 @@ spec:
                   name: inference-c21-core-token
                   key: token
             - name: MODEL_SERVICE_GRPC_ADDR
-              value: model-service.ani-system.svc.cluster.local:9103
+              valueFrom:
+                configMapKeyRef:
+                  name: ani-inference-materialization
+                  key: model_service_grpc_addr
+            - name: MODEL_FETCHER_IMAGE_REF
+              valueFrom:
+                configMapKeyRef:
+                  name: ani-inference-materialization
+                  key: model_fetcher_image_ref
             - name: AUTH_SERVICE_GRPC_ADDR
               value: ani-auth-service.ani-system.svc.cluster.local:9101
             - name: AUTH_SERVICE_MINT_SECRET
@@ -158,6 +199,8 @@ spec:
         app.kubernetes.io/name: model-service
         ani.dev/profile: inference-incluster-e2e
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: kubercloud
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -166,11 +209,13 @@ spec:
           type: RuntimeDefault
       containers:
         - name: model-service
-          image: docker.changqingyun.cn/ani/model-service:local-model-pvc-20260817
+          image: docker.changqingyun.cn/ani/model-service@sha256:c8f0c2cbae8a8bbd124009170280b4a7394b00233316e0ec95a8044e1e984a1b
           imagePullPolicy: Always
           ports:
             - name: grpc
               containerPort: 9103
+            - name: fetcher-grpc
+              containerPort: 9105
             - name: health
               containerPort: 9203
           env:
@@ -189,10 +234,50 @@ spec:
                 secretKeyRef:
                   name: ani-services-runtime
                   key: redis_url
+            - name: OBJECT_STORE_PROVIDER
+              value: minio
+            - name: OBJECT_STORE_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: ani-objectstore-production-shaped-runtime
+                  key: endpoint
+            - name: OBJECT_STORE_PUBLIC_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: ani-objectstore-production-shaped-runtime
+                  key: public_endpoint
+            - name: OBJECT_STORE_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ani-objectstore-production-shaped-runtime
+                  key: access_key_id
+            - name: OBJECT_STORE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ani-objectstore-production-shaped-runtime
+                  key: secret_access_key
+            - name: OBJECT_STORE_REGION
+              value: us-east-1
+            - name: OBJECT_STORE_SECURE
+              value: "false"
+            - name: OBJECT_STORE_BUCKET_PREFIX
+              value: ani-s13-
             - name: GRPC_PORT
               value: "9103"
+            - name: MODEL_FETCHER_GRPC_PORT
+              value: "9105"
             - name: HEALTH_PORT
               value: "9203"
+            - name: MODEL_SERVICE_TLS_CERT_FILE
+              value: /var/run/ani/model-service-tls/tls.crt
+            - name: MODEL_SERVICE_TLS_KEY_FILE
+              value: /var/run/ani/model-service-tls/tls.key
+            - name: MODEL_SERVICE_TLS_CLIENT_CA_FILE
+              value: /var/run/ani/model-service-tls/ca.crt
+          volumeMounts:
+            - name: model-service-tls
+              mountPath: /var/run/ani/model-service-tls
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /healthz
@@ -215,6 +300,123 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: model-service-tls
+          secret:
+            secretName: model-service-grpc-tls
+            optional: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-import-worker
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: model-import-worker
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: model-import-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: ani-platform
+        app.kubernetes.io/name: model-import-worker
+        ani.dev/profile: inference-incluster-e2e
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: kubercloud
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: model-import-worker
+          # Release-supplied immutable digest. The remote-import contract
+          # requires this to match ConfigMap model_import_worker_image_ref;
+          # an unconfigured template must fail closed rather than selecting a
+          # mutable or guessed image reference.
+          image: docker.changqingyun.cn/ani/model-import-worker@sha256:48d848902033c4a8eca6556c1f8606f9efe86ddc52de240fa796706960475ebb
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: database_url
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: nats_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: redis_url
+            - name: OBJECT_STORE_PROVIDER
+              value: minio
+            - name: OBJECT_STORE_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: ani-objectstore-production-shaped-runtime
+                  key: endpoint
+            - name: OBJECT_STORE_PUBLIC_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: ani-objectstore-production-shaped-runtime
+                  key: public_endpoint
+            - name: OBJECT_STORE_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ani-objectstore-production-shaped-runtime
+                  key: access_key_id
+            - name: OBJECT_STORE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ani-objectstore-production-shaped-runtime
+                  key: secret_access_key
+            - name: OBJECT_STORE_REGION
+              value: us-east-1
+            - name: OBJECT_STORE_SECURE
+              value: "false"
+            - name: OBJECT_STORE_BUCKET_PREFIX
+              value: ani-s13-
+            # Archive bounds are intentionally below the 4Gi /tmp emptyDir so
+            # the streamed tar.gz and filesystem overhead cannot exhaust the
+            # worker workspace. The worker rejects overrides above this cap.
+            - name: MODEL_IMPORT_MAX_FILES
+              value: "10000"
+            - name: MODEL_IMPORT_MAX_TOTAL_BYTES
+              value: "3221225472"
+            - name: MODEL_IMPORT_MAX_FILE_BYTES
+              value: "3221225472"
+            - name: MODEL_IMPORT_MAX_OUTPUT_BYTES
+              value: "3221225472"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: archive-workspace
+              mountPath: /tmp
+      volumes:
+        - name: archive-workspace
+          emptyDir:
+            sizeLimit: 4Gi
 ---
 apiVersion: v1
 kind: Service
@@ -230,12 +432,15 @@ spec:
   selector:
     app.kubernetes.io/name: model-service
   ports:
-    - name: grpc
-      port: 9103
-      targetPort: grpc
-    - name: health
-      port: 9203
-      targetPort: health
+  - name: grpc
+    port: 9103
+    targetPort: grpc
+  - name: fetcher-grpc
+    port: 9105
+    targetPort: fetcher-grpc
+  - name: health
+    port: 9203
+    targetPort: health
 ---
 apiVersion: v1
 kind: Service
@@ -250,6 +455,98 @@ spec:
   type: ClusterIP
   selector:
     app.kubernetes.io/name: inference-service
+  ports:
+    - name: grpc
+      port: 9104
+      targetPort: grpc
+    - name: health
+      port: 9204
+      targetPort: health
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: task-service
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: ani-platform
+        app.kubernetes.io/name: task-service
+        ani.dev/profile: inference-incluster-e2e
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: task-service
+          image: docker.changqingyun.cn/ani/task-service@sha256:8d80e029e59d8a3f78665c029a4971bf7ad42024e5a6d0abe69e7a9487668b69
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: grpc
+              containerPort: 9104
+            - name: health
+              containerPort: 9204
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: database_url
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: nats_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: redis_url
+            - name: OUTBOX_ENABLED
+              value: "true"
+            - name: OUTBOX_POLL_INTERVAL_MS
+              value: "500"
+            - name: OUTBOX_BATCH_SIZE
+              value: "100"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: task-service
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: task-service
   ports:
     - name: grpc
       port: 9104

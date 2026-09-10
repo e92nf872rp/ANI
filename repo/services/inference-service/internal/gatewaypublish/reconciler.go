@@ -139,13 +139,22 @@ func (r *Reconciler) ready(ctx context.Context, lease *publicationLease, rendere
 	for _, check := range checks {
 		if reason := r.waitCurrent(ctx, lease, check.kind, check.name, func(object Object) (bool, string) {
 			conditions, ok := conditionsFromStatus(object.Status)
-			return ok && currentTrue(conditions, check.accepted, object.Generation), ""
+			if !ok {
+				return false, ""
+			}
+			if check.kind == KindAIServiceBackend {
+				return currentTrueAllowUnversioned(conditions, check.accepted, object.Generation), ""
+			}
+			return currentTrue(conditions, check.accepted, object.Generation), ""
 		}); reason != "" {
 			return reason
 		}
 	}
 	return r.waitCurrent(ctx, lease, KindAIGatewayRoute, rendered.AIGatewayRoute.Name, func(route Object) (bool, string) {
-		if _, ok := route.Status["parents"]; !ok {
+		if _, parents := route.Status["parents"]; !parents {
+			if _, conditions := route.Status["conditions"]; conditions {
+				return r.routeParentReady(route.Status, route.Generation), ""
+			}
 			return false, "GATEWAY_ROUTE_STATUS_UNSUPPORTED"
 		}
 		return r.routeParentReady(route.Status, route.Generation), ""
@@ -312,6 +321,16 @@ func currentTrue(conditions []Condition, typ string, generation int64) bool {
 	return matches == 1
 }
 
+func currentTrueAllowUnversioned(conditions []Condition, typ string, generation int64) bool {
+	matches := 0
+	for _, condition := range conditions {
+		if condition.Type == typ && condition.Status == "True" && (condition.ObservedGeneration == generation || condition.ObservedGeneration == 0) {
+			matches++
+		}
+	}
+	return matches == 1
+}
+
 func conditionsFromStatus(status map[string]any) ([]Condition, bool) {
 	values, ok := status["conditions"].([]any)
 	if !ok {
@@ -325,8 +344,15 @@ func conditionsFromStatus(status map[string]any) ([]Condition, bool) {
 		}
 		typ, typeOK := condition["type"].(string)
 		state, stateOK := condition["status"].(string)
-		generation, generationOK := int64Value(condition["observedGeneration"])
-		if !typeOK || !stateOK || !generationOK {
+		generation := int64(0)
+		if rawGeneration, exists := condition["observedGeneration"]; exists {
+			parsed, generationOK := int64Value(rawGeneration)
+			if !generationOK {
+				return nil, false
+			}
+			generation = parsed
+		}
+		if !typeOK || !stateOK {
 			return nil, false
 		}
 		conditions = append(conditions, Condition{Type: typ, Status: state, ObservedGeneration: generation})
@@ -335,6 +361,12 @@ func conditionsFromStatus(status map[string]any) ([]Condition, bool) {
 }
 
 func (r *Reconciler) routeParentReady(status map[string]any, generation int64) bool {
+	// AIGatewayRoute (the object rendered by this publisher) reports its
+	// Accepted condition at the top level. HTTPRoute uses status.parents;
+	// support both shapes without weakening the generation check.
+	if conditions, ok := conditionsFromStatus(status); ok {
+		return currentTrueAllowUnversioned(conditions, "Accepted", generation)
+	}
 	parents, ok := status["parents"].([]any)
 	if !ok {
 		return false

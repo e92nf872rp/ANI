@@ -94,6 +94,22 @@ allowed:
     imports:
       - github.com/jackc/pgx/v5/pgxpool
     reason: model service currently wires a bounded model repository that owns PostgreSQL/RLS access
+  - path: services/model-service/internal/repo/import_repo.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+    reason: remote model-import task repository is a bounded PostgreSQL persistence adapter; direct pgx keeps tenant RLS and atomic task/model creation explicit
+  - path: services/model-service/internal/repo/import_worker_repo.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: remote model-import worker repository owns lease/fencing and finalization transactions; direct pgx keeps RLS and idempotent state transitions explicit
+  - path: services/model-service/internal/importer/worker.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: remote model-import worker transaction boundary is a bounded persistence orchestration adapter; pgxpool is retained only for explicit lease/finalization wiring
   - path: services/inference-service/internal/repository/postgres.go
     coupling_level: bounded_direct
     imports:

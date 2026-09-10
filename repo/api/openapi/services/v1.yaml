@@ -2041,6 +2041,9 @@ paths:
       summary: 获取推理服务列表
       tags: [InferenceServices]
       security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string }, description: 下一页游标 }
       responses:
         "200":
           description: 推理服务列表
@@ -2049,6 +2052,7 @@ paths:
               schema:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/InferenceService' } }
+                  next_cursor: { type: string, nullable: true }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
     post:

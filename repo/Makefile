@@ -13,10 +13,13 @@ export
         lint lint-go lint-python \
         dev-gateway dev-core-mock \
 		image image-runtime-services image-gateway image-auth-service image-model-service image-task-service image-inference-service image-tenant-service image-metering-service \
+        image-model-import-worker image-model-fetcher \
         clean
 
 .PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate validate-inference-gpu-memory-live-gate validate-inference-envoy-ai-gateway-manifest validate-inference-envoy-ai-gateway-ratelimit-config validate-inference-envoy-ai-gateway-c41-manifest validate-inference-envoy-ai-gateway-live-gate validate-inference-access-policy-migration run-inference-envoy-ai-gateway-live image-envoy-authz-adapter
 .PHONY: validate-service-runtime-observability validate-service-runtime-observability-licenses validate-service-runtime-observability-sbom validate-service-runtime-observability-vulnerabilities
+
+.PHONY: validate-model-repository-remote-import
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:
@@ -44,6 +47,8 @@ help:
 	@echo "    make build-task-service   仅构建 Task Service"
 	@echo "    make build-reconcile-worker  仅构建 Reconcile Worker"
 	@echo "    make build-cli     仅构建 ANI Core CLI"
+	@echo "    make image-model-fetcher  构建 Model Fetcher 镜像（基础镜像 digest-pinned，不推送）"
+	@echo "    make image-console        构建 Console 静态镜像（Node/Nginx 基础镜像 digest-pinned，不推送）"
 	@echo ""
 	@echo "  测试:"
 	@echo "    make test           运行所有测试（Go + Python）"
@@ -145,6 +150,7 @@ help:
 	@echo "    make validate-mock-a 校验 Sprint 4 Core Mock Server 覆盖"
 	@echo "    make validate-doc-api 校验 Sprint 4 静态 API 文档"
 	@echo "    make validate-services-contract 校验 Services OpenAPI 语义门禁与精确存量基线"
+	@echo "    make validate-model-repository-remote-import 校验远程模型导入 worker、来源安全与对象归档契约"
 	@echo "    make validate-doc-entrypoints 校验 CLAUDE.md/文档入口职责边界"
 	@echo "    make validate-auth-contract 校验 M2.2 Auth Gateway/API 契约一致性"
 	@echo "    make gen-gateway-authz 从 Core OpenAPI 生成 Gateway authz policy 注册表"
@@ -1087,11 +1093,16 @@ validate-services-contract:
 	python scripts/validate_inference_service_contract.py
 	$(MAKE) validate-inference-access-policy-contract
 	$(MAKE) validate-model-repository-contract
+	$(MAKE) validate-model-repository-remote-import
 	@echo "✅ Services semantic contract valid"
 
 validate-model-repository-contract:
 	python scripts/validate_model_repository_contract_test.py
 	python scripts/validate_model_repository_contract.py
+
+validate-model-repository-remote-import:
+	$(PYTHON) scripts/validate_model_repository_remote_import_test.py
+	$(PYTHON) scripts/validate_model_repository_remote_import.py
 
 validate-inference-access-policy-contract:
 	python scripts/validate_inference_access_policy_contract_test.py
@@ -1402,6 +1413,13 @@ image-inference-gateway-publisher:
 	docker build -f services/inference-service/Dockerfile.publisher -t $(REGISTRY)/inference-gateway-publisher:$(VERSION) .
 
 .PHONY: image-inference-gateway-publisher
+image-model-import-worker:
+	docker build -f services/model-service/Dockerfile -t $(REGISTRY)/model-import-worker:$(VERSION) --target model-import-worker .
+
+image-model-fetcher:
+	docker build -f services/model-fetcher/Dockerfile -t $(REGISTRY)/model-fetcher:$(VERSION) .
+
+.PHONY: image-model-import-worker image-model-fetcher
 
 # ── 清理 ──────────────────────────────────────────────────────────────────────
 clean:

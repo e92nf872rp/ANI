@@ -25,6 +25,7 @@ const (
 	platformWorkloadRuntimeShape = "deployment"
 	platformWorkloadProviderName = "kubernetes"
 	platformWorkloadRoleLabel    = "ani.kubercloud.io/inference-role"
+	platformWorkloadModelVolume  = "model-cache"
 	kubeOVNDefaultLogicalSwitch  = "ovn-default"
 	kubeOVNDefaultVPC            = "ovn-cluster"
 )
@@ -53,29 +54,119 @@ type platformWorkloadObservation struct {
 }
 
 type KubernetesPlatformWorkloadRuntime struct {
-	client *KubernetesRESTClient
+	client                        *KubernetesRESTClient
+	modelServiceGRPCAddr          string
+	modelFetcherGRPCAddr          string
+	modelFetcherImageRef          string
+	modelFetcherAllowInsecureHTTP bool
 }
 
 func NewKubernetesPlatformWorkloadRuntime(client *KubernetesRESTClient) *KubernetesPlatformWorkloadRuntime {
-	return &KubernetesPlatformWorkloadRuntime{client: client}
+	return NewKubernetesPlatformWorkloadRuntimeWithMaterializationConfig(client, "", "")
+}
+
+func NewKubernetesPlatformWorkloadRuntimeWithMaterializationConfig(client *KubernetesRESTClient, modelServiceGRPCAddr, modelFetcherImageRef string) *KubernetesPlatformWorkloadRuntime {
+	return NewKubernetesPlatformWorkloadRuntimeWithFetcherConfig(client, modelServiceGRPCAddr, "", modelFetcherImageRef)
+}
+
+func NewKubernetesPlatformWorkloadRuntimeWithFetcherConfig(client *KubernetesRESTClient, modelServiceGRPCAddr, modelFetcherGRPCAddr, modelFetcherImageRef string) *KubernetesPlatformWorkloadRuntime {
+	return NewKubernetesPlatformWorkloadRuntimeWithFetcherHTTPConfig(client, modelServiceGRPCAddr, modelFetcherGRPCAddr, modelFetcherImageRef, false)
+}
+
+// NewKubernetesPlatformWorkloadRuntimeWithFetcherHTTPConfig configures the
+// optional in-cluster HTTP download path. It remains disabled by default;
+// callers must explicitly opt in when the MinIO endpoint is controlled and
+// intentionally serves HTTP.
+func NewKubernetesPlatformWorkloadRuntimeWithFetcherHTTPConfig(client *KubernetesRESTClient, modelServiceGRPCAddr, modelFetcherGRPCAddr, modelFetcherImageRef string, allowInsecureHTTP bool) *KubernetesPlatformWorkloadRuntime {
+	return &KubernetesPlatformWorkloadRuntime{client: client, modelServiceGRPCAddr: strings.TrimSpace(modelServiceGRPCAddr), modelFetcherGRPCAddr: strings.TrimSpace(modelFetcherGRPCAddr), modelFetcherImageRef: strings.TrimSpace(modelFetcherImageRef), modelFetcherAllowInsecureHTTP: allowInsecureHTTP}
+}
+
+func (r *KubernetesPlatformWorkloadRuntime) ConfigureModelMaterialization(spec *ports.PlatformWorkloadCreateSpec) {
+	if r == nil || spec == nil || spec.ModelMaterialization == nil {
+		return
+	}
+	spec.ModelMaterialization.ModelServiceGRPCAddr = r.modelServiceGRPCAddr
+	if r.modelFetcherGRPCAddr != "" {
+		spec.ModelMaterialization.ModelServiceGRPCAddr = r.modelFetcherGRPCAddr
+	}
+	spec.ModelMaterialization.FetcherImageRef = r.modelFetcherImageRef
 }
 
 func (r *KubernetesPlatformWorkloadRuntime) Apply(ctx context.Context, tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec) (platformWorkloadObservation, error) {
 	if r == nil || r.client == nil {
 		return platformWorkloadObservation{}, fmt.Errorf("%w: kubernetes platform workload client is not configured", ports.ErrUnavailable)
 	}
+	r.ConfigureModelMaterialization(&spec)
+	if err := validatePlatformWorkloadCreate(spec, tenantID); err != nil {
+		return platformWorkloadObservation{}, err
+	}
 	nodeCIDRs, err := r.client.ListNodeInternalCIDRs(ctx)
 	if err != nil {
 		return platformWorkloadObservation{}, err
 	}
-	manifests := append([]ports.WorkloadManifest{renderPlatformWorkloadNamespace(tenantID)}, renderPlatformWorkloadManifests(tenantID, workloadID, spec, nodeCIDRs)...)
-	if _, err := r.client.ApplyManifests(ctx, manifests); err != nil {
-		return platformWorkloadObservation{}, err
+	workloadManifests := renderPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID, spec, nodeCIDRs, r.modelFetcherAllowInsecureHTTP)
+	if spec.ModelMaterialization != nil {
+		workloadManifests = orderModelMaterializationManifests(workloadManifests)
+	}
+	namespaceManifest := renderPlatformWorkloadNamespace(tenantID)
+	if spec.ModelMaterialization == nil {
+		manifests := append([]ports.WorkloadManifest{namespaceManifest}, workloadManifests...)
+		if _, err := r.client.ApplyManifests(ctx, manifests); err != nil {
+			return platformWorkloadObservation{}, err
+		}
+	} else {
+		// ServiceAccount and Certificate are tenant-scoped shared identity
+		// resources. Apply each in its own request so a later workload failure
+		// cannot make ApplyManifests compensation delete an identity used by a
+		// sibling workload in the same tenant.
+		if _, err := r.client.ApplyManifests(ctx, []ports.WorkloadManifest{namespaceManifest}); err != nil {
+			return platformWorkloadObservation{}, err
+		}
+		workloadOwned := make([]ports.WorkloadManifest, 0, len(workloadManifests))
+		for _, manifest := range workloadManifests {
+			if manifest.Kind == "ServiceAccount" || manifest.Kind == "Certificate" {
+				if _, err := r.client.ApplyManifests(ctx, []ports.WorkloadManifest{manifest}); err != nil {
+					return platformWorkloadObservation{}, err
+				}
+				continue
+			}
+			workloadOwned = append(workloadOwned, manifest)
+		}
+		if _, err := r.client.ApplyManifests(ctx, workloadOwned); err != nil {
+			return platformWorkloadObservation{}, err
+		}
 	}
 	return platformWorkloadObservation{
 		Endpoint: platformWorkloadEndpoint(tenantID, spec),
 		Reason:   "applied",
 	}, nil
+}
+
+// orderModelMaterializationManifests applies tenant-scoped dependencies before
+// the workload Pod can be created. The renderer keeps its historical order for
+// callers that inspect manifests; only the Kubernetes apply path needs the
+// dependency ordering. Stable sorting preserves the renderer order for all
+// unrelated resources and keeps compensation deterministic.
+func orderModelMaterializationManifests(manifests []ports.WorkloadManifest) []ports.WorkloadManifest {
+	ordered := append([]ports.WorkloadManifest(nil), manifests...)
+	rank := func(kind string) int {
+		switch kind {
+		case "ServiceAccount":
+			return 0
+		case "Certificate":
+			return 1
+		case "NetworkPolicy":
+			return 2
+		case "Service":
+			return 3
+		default:
+			return 4
+		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return rank(ordered[i].Kind) < rank(ordered[j].Kind)
+	})
+	return ordered
 }
 
 func (r *KubernetesPlatformWorkloadRuntime) Observe(ctx context.Context, tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec) (platformWorkloadObservation, error) {
@@ -311,8 +402,12 @@ func renderPlatformWorkloadNamespace(tenantID string) ports.WorkloadManifest {
 }
 
 func renderPlatformWorkloadManifests(tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec, nodeCIDRs []string) []ports.WorkloadManifest {
+	return renderPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID, spec, nodeCIDRs, false)
+}
+
+func renderPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec, nodeCIDRs []string, allowInsecureHTTP bool) []ports.WorkloadManifest {
 	if spec.Topology.Mode == "leader_worker" {
-		return renderLeaderWorkerPlatformWorkloadManifests(tenantID, workloadID, spec, nodeCIDRs)
+		return renderLeaderWorkerPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID, spec, nodeCIDRs, allowInsecureHTTP)
 	}
 	namespace := tenantNamespace(tenantID)
 	resourceName := platformWorkloadResourceName(spec.Name)
@@ -320,8 +415,16 @@ func renderPlatformWorkloadManifests(tenantID, workloadID string, spec ports.Pla
 	selector := platformWorkloadSelectorLabels(tenantID, spec)
 	containerPorts, servicePorts := platformWorkloadNetworkPorts(spec)
 	volumes, volumeMounts := platformWorkloadPodVolumes(spec)
-	container := platformWorkloadContainer(spec, resourceName, spec.Resources, spec.Command, spec.Args, containerPorts, volumeMounts, true)
-	podSpec := platformWorkloadPodSpec(spec, []any{container}, volumes, "", false)
+	command, args := platformWorkloadMaterializationLaunch(spec)
+	containers := []any{platformWorkloadContainer(spec, resourceName, spec.Resources, command, args, containerPorts, volumeMounts, true)}
+	initContainers, mainMounts := platformWorkloadMaterializationContainersWithConfig(spec, volumeMounts, allowInsecureHTTP)
+	if initContainers != nil {
+		containers[0] = platformWorkloadContainer(spec, resourceName, spec.Resources, command, args, containerPorts, mainMounts, true)
+	}
+	podSpec := platformWorkloadPodSpec(spec, containers, volumes, "", false)
+	if len(initContainers) > 0 {
+		podSpec["initContainers"] = initContainers
+	}
 	templateMeta := map[string]any{"labels": podLabels}
 	if annotations := platformWorkloadPodAnnotations(spec, ""); len(annotations) > 0 {
 		templateMeta["annotations"] = annotations
@@ -344,14 +447,72 @@ func renderPlatformWorkloadManifests(tenantID, workloadID string, spec ports.Pla
 			},
 		},
 	})
-	return []ports.WorkloadManifest{
-		{Name: resourceName, Kind: "Deployment", Provider: platformWorkloadProviderName, Content: deployment},
+	manifests := []ports.WorkloadManifest{
+		ports.WorkloadManifest{Name: resourceName, Kind: "Deployment", Provider: platformWorkloadProviderName, Content: deployment},
 		renderPlatformWorkloadService(tenantID, workloadID, spec, selector, servicePorts),
 		renderPlatformWorkloadNetworkPolicy(tenantID, workloadID, spec, nodeCIDRs),
 	}
+	if spec.ModelMaterialization != nil {
+		manifests = append(manifests, renderModelFetcherServiceAccount(tenantID), renderModelFetcherCertificate(tenantID))
+	}
+	return manifests
+}
+
+func renderModelFetcherServiceAccount(tenantID string) ports.WorkloadManifest {
+	namespace := tenantNamespace(tenantID)
+	content := manifest(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ServiceAccount",
+		"metadata": map[string]any{
+			"name":      "ani-inference-fetcher",
+			"namespace": namespace,
+			"labels": map[string]string{
+				"app.kubernetes.io/part-of": "ani-platform",
+				"ani.dev/tenant-id":         tenantID,
+			},
+		},
+		"automountServiceAccountToken": false,
+	})
+	return ports.WorkloadManifest{Name: "ani-inference-fetcher", Kind: "ServiceAccount", Provider: platformWorkloadProviderName, Content: content}
+}
+
+func renderModelFetcherCertificate(tenantID string) ports.WorkloadManifest {
+	namespace := tenantNamespace(tenantID)
+	name := "ani-model-fetcher-" + shortWorkloadIdentity(tenantID)
+	content := manifest(map[string]any{
+		"apiVersion": "cert-manager.io/v1", "kind": "Certificate",
+		"metadata": map[string]any{"name": name, "namespace": namespace, "labels": map[string]string{"app.kubernetes.io/part-of": "ani-platform", "ani.dev/tenant-id": tenantID}},
+		"spec": map[string]any{
+			"secretName": name + "-tls", "commonName": "ani-model-fetcher",
+			"uris":      []string{"spiffe://ani.dev/ns/" + namespace + "/sa/ani-inference-fetcher"},
+			// This certificate is presented by the fetcher as a client to the
+			// model-service listener. Explicitly constrain the key usage so a
+			// cert-manager default cannot accidentally issue a server-only cert.
+			"usages":    []string{"client auth"},
+			"issuerRef": map[string]any{"name": "ani-model-repository-ca", "kind": "ClusterIssuer", "group": "cert-manager.io"},
+		},
+	})
+	return ports.WorkloadManifest{Name: name, Kind: "Certificate", Provider: platformWorkloadProviderName, Content: content}
+}
+
+func shortWorkloadIdentity(tenantID string) string {
+	clean := strings.ToLower(strings.TrimSpace(tenantID))
+	clean = strings.NewReplacer("_", "-", ".", "-", "/", "-").Replace(clean)
+	if len(clean) > 20 {
+		clean = clean[:20]
+	}
+	clean = strings.Trim(clean, "-")
+	if clean == "" {
+		return "unknown"
+	}
+	return clean
 }
 
 func renderLeaderWorkerPlatformWorkloadManifests(tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec, nodeCIDRs []string) []ports.WorkloadManifest {
+	return renderLeaderWorkerPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID, spec, nodeCIDRs, false)
+}
+
+func renderLeaderWorkerPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec, nodeCIDRs []string, allowInsecureHTTP bool) []ports.WorkloadManifest {
 	namespace := tenantNamespace(tenantID)
 	resourceName := platformWorkloadResourceName(spec.Name)
 	podLabels := platformWorkloadPodLabels(tenantID, workloadID, spec)
@@ -373,22 +534,24 @@ func renderLeaderWorkerPlatformWorkloadManifests(tenantID, workloadID string, sp
 		workerResources.AcceleratorMemoryMB = spec.Resources.AcceleratorMemoryMB
 	}
 	size := 1 + spec.Topology.Workers.Count
-	leaderContainer := platformWorkloadContainer(spec, resourceName, leaderResources, spec.Command, spec.Args, containerPorts, volumeMounts, true)
+	leaderInit, leaderMounts := platformWorkloadMaterializationContainersWithConfig(spec, volumeMounts, allowInsecureHTTP)
+	command, args := platformWorkloadMaterializationLaunch(spec)
+	leaderContainer := platformWorkloadContainer(spec, resourceName, leaderResources, command, args, containerPorts, leaderMounts, true)
 	workerCommand, workerArgs := platformWorkloadWorkerLaunch()
-	workerContainer := platformWorkloadContainer(spec, resourceName, workerResources, workerCommand, workerArgs, nil, volumeMounts, false)
+	workerContainer := platformWorkloadContainer(spec, resourceName, workerResources, workerCommand, workerArgs, nil, leaderMounts, false)
 	leaderTemplate := map[string]any{
 		"metadata": map[string]any{
 			"labels":      leaderLabels,
 			"annotations": platformWorkloadPodAnnotations(spec, resourceName),
 		},
-		"spec": platformWorkloadPodSpec(spec, []any{leaderContainer}, volumes, resourceName, true),
+		"spec": platformWorkloadPodSpecWithInit(spec, []any{leaderContainer}, leaderInit, volumes, resourceName, true),
 	}
 	workerTemplate := map[string]any{
 		"metadata": map[string]any{
 			"labels":      workerLabels,
 			"annotations": platformWorkloadPodAnnotations(spec, resourceName),
 		},
-		"spec": platformWorkloadPodSpec(spec, []any{workerContainer}, volumes, resourceName, true),
+		"spec": platformWorkloadPodSpecWithInit(spec, []any{workerContainer}, leaderInit, volumes, resourceName, true),
 	}
 	lws := manifest(map[string]any{
 		"apiVersion": "leaderworkerset.x-k8s.io/v1",
@@ -421,12 +584,16 @@ func renderLeaderWorkerPlatformWorkloadManifests(tenantID, workloadID string, sp
 			"minResources": platformWorkloadAcceleratorResourceMap(spec.Resources),
 		},
 	})
-	return []ports.WorkloadManifest{
-		{Name: resourceName, Kind: "LeaderWorkerSet", Provider: platformWorkloadProviderName, Content: lws},
-		{Name: resourceName, Kind: "PodGroup", Provider: platformWorkloadProviderName, Content: podGroup},
+	manifests := []ports.WorkloadManifest{
+		ports.WorkloadManifest{Name: resourceName, Kind: "LeaderWorkerSet", Provider: platformWorkloadProviderName, Content: lws},
+		ports.WorkloadManifest{Name: resourceName, Kind: "PodGroup", Provider: platformWorkloadProviderName, Content: podGroup},
 		renderPlatformWorkloadService(tenantID, workloadID, spec, serviceSelector, servicePorts),
 		renderPlatformWorkloadNetworkPolicy(tenantID, workloadID, spec, nodeCIDRs),
 	}
+	if spec.ModelMaterialization != nil {
+		manifests = append(manifests, renderModelFetcherServiceAccount(tenantID), renderModelFetcherCertificate(tenantID))
+	}
+	return manifests
 }
 
 func renderPlatformWorkloadService(tenantID, workloadID string, spec ports.PlatformWorkloadCreateSpec, selector map[string]string, servicePorts []any) ports.WorkloadManifest {
@@ -485,6 +652,19 @@ func renderPlatformWorkloadNetworkPolicy(tenantID, workloadID string, spec ports
 			},
 		)
 	}
+	policyTypes := []any{"Ingress"}
+	policySpec := map[string]any{"podSelector": map[string]any{"matchLabels": selector}, "policyTypes": policyTypes, "ingress": ingress}
+	if spec.ModelMaterialization != nil {
+		policyTypes = append(policyTypes, "Egress")
+		policySpec["egress"] = []any{
+			map[string]any{"to": []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "kube-system"}}}}, "ports": []any{map[string]any{"protocol": "UDP", "port": 53}, map[string]any{"protocol": "TCP", "port": 53}}},
+			map[string]any{"to": []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "ani-system"}}, "podSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "model-service"}}}}, "ports": []any{map[string]any{"protocol": "TCP", "port": 9105}}},
+			// The S05 MinIO Service is named ani-s05-minio, but its selected Pods
+			// use app.kubernetes.io/name=minio. NetworkPolicy evaluates endpoint
+			// Pod labels, so the Service name must not be used as the selector.
+			map[string]any{"to": []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "ani-s05-objectstore"}}, "podSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "minio"}}}}, "ports": []any{map[string]any{"protocol": "TCP", "port": 9000}}},
+		}
+	}
 	content := manifest(map[string]any{
 		"apiVersion": "networking.k8s.io/v1",
 		"kind":       "NetworkPolicy",
@@ -493,11 +673,7 @@ func renderPlatformWorkloadNetworkPolicy(tenantID, workloadID string, spec ports
 			"namespace": namespace,
 			"labels":    platformWorkloadPodLabels(tenantID, workloadID, spec),
 		},
-		"spec": map[string]any{
-			"podSelector": map[string]any{"matchLabels": selector},
-			"policyTypes": []any{"Ingress"},
-			"ingress":     ingress,
-		},
+		"spec": policySpec,
 	})
 	return ports.WorkloadManifest{Name: resourceName, Kind: "NetworkPolicy", Provider: platformWorkloadProviderName, Content: content}
 }
@@ -528,7 +704,164 @@ func platformWorkloadPodVolumes(spec ports.PlatformWorkloadCreateSpec) ([]any, [
 		})
 		mounts = append(mounts, map[string]any{"name": name, "mountPath": path})
 	}
+	if spec.ModelMaterialization != nil {
+		volumes = append(volumes, map[string]any{
+			"name": "model-fetcher-tls", "secret": map[string]any{
+				"secretName": "ani-model-fetcher-" + shortWorkloadIdentity(spec.ModelMaterialization.TenantID) + "-tls",
+				"optional":   false,
+			},
+		})
+		volumes = append(volumes, map[string]any{
+			// Object storage is authoritative. Each Pod gets its own disk cache,
+			// shared only with its fetcher; replicas must not share an RWO PVC.
+			"name":     platformWorkloadModelVolume,
+			"emptyDir": map[string]any{"sizeLimit": "20Gi"},
+		})
+		mounts = append(mounts, map[string]any{
+			"name": platformWorkloadModelVolume, "mountPath": "/models",
+		})
+	}
 	return volumes, mounts
+}
+
+// platformWorkloadMaterializationContainers adds a single bounded, publisher-owned
+// fetcher init container and returns read-only mounts for the runtime container.
+// The descriptor contains only immutable metadata; the short-lived download URL
+// is obtained by the fetcher at runtime and is never rendered here.
+func platformWorkloadMaterializationContainers(spec ports.PlatformWorkloadCreateSpec, mounts []any) ([]any, []any) {
+	return platformWorkloadMaterializationContainersWithConfig(spec, mounts, false)
+}
+
+func platformWorkloadMaterializationContainersWithConfig(spec ports.PlatformWorkloadCreateSpec, mounts []any, allowInsecureHTTP bool) ([]any, []any) {
+	if spec.ModelMaterialization == nil {
+		return nil, mounts
+	}
+	mat := spec.ModelMaterialization
+	targetPath := platformWorkloadMaterializationTargetPath(mat)
+	initMounts := cloneVolumeMounts(mounts)
+	mainMounts := cloneVolumeMounts(mounts)
+	initMounts = append(initMounts, map[string]any{"name": "model-fetcher-tls", "mountPath": "/var/run/ani/model-fetcher-tls", "readOnly": true})
+	for _, raw := range mainMounts {
+		mount, _ := raw.(map[string]any)
+		if mount != nil && mount["name"] == platformWorkloadModelVolume {
+			mount["readOnly"] = true
+		}
+	}
+	env := []any{
+		map[string]any{"name": "MODEL_TENANT_ID", "value": mat.TenantID},
+		map[string]any{"name": "MODEL_VERSION_ID", "value": mat.ModelVersionID},
+		map[string]any{"name": "MODEL_SERVICE_GRPC_ADDR", "value": mat.ModelServiceGRPCAddr},
+		map[string]any{"name": "MODEL_OBJECT_REF", "value": mat.ObjectRef},
+		map[string]any{"name": "MODEL_EXPECTED_SIZE_BYTES", "value": strconv.FormatInt(mat.SizeBytes, 10)},
+		map[string]any{"name": "MODEL_CHECKSUM_SHA256", "value": mat.ChecksumSHA256},
+		map[string]any{"name": "MODEL_TARGET_PATH", "value": targetPath},
+		map[string]any{"name": "MODEL_SERVICE_TLS_CA_FILE", "value": "/var/run/ani/model-fetcher-tls/ca.crt"},
+		map[string]any{"name": "MODEL_SERVICE_TLS_CERT_FILE", "value": "/var/run/ani/model-fetcher-tls/tls.crt"},
+		map[string]any{"name": "MODEL_SERVICE_TLS_KEY_FILE", "value": "/var/run/ani/model-fetcher-tls/tls.key"},
+		map[string]any{"name": "MODEL_FETCHER_ALLOW_INSECURE_HTTP", "value": strconv.FormatBool(allowInsecureHTTP)},
+	}
+	init := map[string]any{
+		"name":            "model-fetcher",
+		"image":           mat.FetcherImageRef,
+		"imagePullPolicy": "IfNotPresent",
+		"args": []string{
+			"--tenant-id=" + mat.TenantID,
+			"--model-version-id=" + mat.ModelVersionID,
+			"--model-service-grpc-addr=" + mat.ModelServiceGRPCAddr,
+			"--object-ref=" + mat.ObjectRef,
+			"--size-bytes=" + strconv.FormatInt(mat.SizeBytes, 10),
+			"--sha256=" + mat.ChecksumSHA256,
+			"--target-path=" + targetPath,
+		},
+		"env": env,
+		"resources": map[string]any{
+			"requests": map[string]any{"cpu": "100m", "memory": "256Mi"},
+			"limits":   map[string]any{"cpu": "500m", "memory": "512Mi"},
+		},
+		"volumeMounts": initMounts,
+		"securityContext": map[string]any{
+			"allowPrivilegeEscalation": false,
+			"readOnlyRootFilesystem":   true,
+			"runAsNonRoot":             true,
+		},
+	}
+	return []any{init}, mainMounts
+}
+
+func platformWorkloadMaterializationLaunch(spec ports.PlatformWorkloadCreateSpec) ([]string, []string) {
+	command := append([]string(nil), spec.Command...)
+	args := append([]string(nil), spec.Args...)
+	if spec.ModelMaterialization == nil {
+		return command, args
+	}
+	path := platformWorkloadMaterializationTargetPath(spec.ModelMaterialization)
+	for i := 0; i < len(command); i++ {
+		if strings.HasPrefix(command[i], "--model=") || strings.HasPrefix(command[i], "--model-path=") {
+			if strings.HasPrefix(command[i], "--model-path=") {
+				command[i] = "--model-path=" + path
+			} else {
+				command[i] = "--model=" + path
+			}
+			continue
+		}
+		if (command[i] == "--model" || command[i] == "--model-path") && i+1 < len(command) {
+			command[i+1] = path
+			i++
+		}
+	}
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "--model=") || strings.HasPrefix(args[i], "--model-path=") {
+			if strings.HasPrefix(args[i], "--model-path=") {
+				args[i] = "--model-path=" + path
+			} else {
+				args[i] = "--model=" + path
+			}
+			continue
+		}
+		if (args[i] == "--model" || args[i] == "--model-path") && i+1 < len(args) {
+			args[i+1] = path
+			i++
+		}
+	}
+	return command, args
+}
+
+// platformWorkloadMaterializationTargetPath returns the runtime target used by
+// both the fetcher init-container and the engine command. Imported archives
+// are directories after extraction; ordinary object versions remain a single
+// file path for backward compatibility.
+func platformWorkloadMaterializationTargetPath(mat *ports.PlatformWorkloadModelMaterialization) string {
+	if mat == nil {
+		return ""
+	}
+	if platformWorkloadArchiveObjectRef(mat.ObjectRef) {
+		return "/models/" + strings.TrimSpace(mat.ModelVersionID)
+	}
+	return mat.TargetPath
+}
+
+func platformWorkloadArchiveObjectRef(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "object" || parsed.Host != "models" || parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	return strings.HasSuffix(parsed.Path, "/model.tar.gz") && !strings.Contains(parsed.Path, "..")
+}
+
+func cloneVolumeMounts(mounts []any) []any {
+	out := make([]any, 0, len(mounts))
+	for _, raw := range mounts {
+		mount, _ := raw.(map[string]any)
+		if mount == nil {
+			continue
+		}
+		copy := make(map[string]any, len(mount))
+		for key, value := range mount {
+			copy[key] = value
+		}
+		out = append(out, copy)
+	}
+	return out
 }
 
 func platformWorkloadSHMSize(spec ports.PlatformWorkloadCreateSpec) string {
@@ -687,7 +1020,25 @@ func platformWorkloadPodSpec(spec ports.PlatformWorkloadCreateSpec, containers [
 	if forceVolcano || spec.Resources.AcceleratorCount > 0 {
 		podSpec["schedulerName"] = kubernetesVolcanoSchedulerName
 	}
+	if spec.ModelMaterialization != nil {
+		podSpec["serviceAccountName"] = "ani-inference-fetcher"
+		// Model PVCs are commonly provisioned root:root 0755. Let the
+		// non-root fetcher write its staging/final files without making the
+		// volume world-writable; kubelet fixes ownership only when needed.
+		podSpec["securityContext"] = map[string]any{
+			"fsGroup":             int64(65532),
+			"fsGroupChangePolicy": "OnRootMismatch",
+		}
+	}
 	_ = podGroupName
+	return podSpec
+}
+
+func platformWorkloadPodSpecWithInit(spec ports.PlatformWorkloadCreateSpec, containers, initContainers, volumes []any, podGroupName string, forceVolcano bool) map[string]any {
+	podSpec := platformWorkloadPodSpec(spec, containers, volumes, podGroupName, forceVolcano)
+	if len(initContainers) > 0 {
+		podSpec["initContainers"] = initContainers
+	}
 	return podSpec
 }
 
@@ -749,6 +1100,9 @@ func platformWorkloadPodLabels(tenantID, workloadID string, spec ports.PlatformW
 	})
 	if spec.Resources.AcceleratorSpecID != "" {
 		labels["ani.kubercloud.io/accelerator-spec-id"] = spec.Resources.AcceleratorSpecID
+	}
+	if spec.ModelMaterialization != nil {
+		labels["ani.dev/model-fetcher-client"] = "true"
 	}
 	return labels
 }

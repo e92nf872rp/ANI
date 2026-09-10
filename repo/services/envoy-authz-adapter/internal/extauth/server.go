@@ -2,6 +2,7 @@ package extauth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -66,15 +67,19 @@ func (s *Server) Check(ctx context.Context, request *authv3.CheckRequest) (*auth
 		}
 	}
 	path := normalizeOpenAIPath(httpRequest.GetPath())
-	if path == "/v1/models" || (path != "/v1/chat/completions" && path != "/v1/embeddings") || strings.TrimSpace(headers["x-ai-eg-model"]) == "" {
+	if path == "/v1/models" || (path != "/v1/chat/completions" && path != "/v1/embeddings") {
 		return denied(http.StatusNotFound, 0), nil
+	}
+	model := requestModel(httpRequest.GetBody(), headers["x-ai-eg-model"])
+	if model == "" {
+		return denied(http.StatusBadRequest, 0), nil
 	}
 	tenantID := strings.TrimSpace(principal.GetTenantId())
 	apiKeyID := strings.TrimSpace(principal.GetApiKeyId())
 	if s.checker == nil || tenantID == "" || apiKeyID == "" {
 		return denied(http.StatusServiceUnavailable, 0), nil
 	}
-	decision, checkErr := s.checker.CheckInferenceAccess(ctx, tenantID, principal.GetUserId(), apiKeyID, keyPrefix(token), strings.TrimSpace(headers["x-ai-eg-model"]), path, httpRequest.GetId(), strings.Contains(strings.ToLower(headers["accept"]), "text/event-stream"))
+	decision, checkErr := s.checker.CheckInferenceAccess(ctx, tenantID, principal.GetUserId(), apiKeyID, keyPrefix(token), model, path, httpRequest.GetId(), strings.Contains(strings.ToLower(headers["accept"]), "text/event-stream"))
 	if checkErr != nil {
 		return denied(http.StatusServiceUnavailable, 0), nil
 	}
@@ -99,6 +104,22 @@ func (s *Server) Check(ctx context.Context, request *authv3.CheckRequest) (*auth
 			HeadersToRemove: []string{"authorization", "x-api-key", "x-ani-user-id"},
 		}},
 	}, nil
+}
+
+// requestModel extracts the public OpenAI model field. The header fallback is
+// retained for existing internal callers, but new clients must only send the
+// standard JSON body; tenant and service routing headers are trusted outputs of
+// this authorization step, never client input.
+func requestModel(body, legacyHeader string) string {
+	var request struct {
+		Model string `json:"model"`
+	}
+	if strings.TrimSpace(body) != "" && json.Unmarshal([]byte(body), &request) == nil {
+		if model := strings.TrimSpace(request.Model); model != "" {
+			return model
+		}
+	}
+	return strings.TrimSpace(legacyHeader)
 }
 
 func retryAfterSecondsFromError(err error) int {

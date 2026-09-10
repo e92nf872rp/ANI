@@ -1,0 +1,165 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: ani-model-repository-selfsigned
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ani-model-repository-ca
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  isCA: true
+  commonName: ani-model-repository-dev-ca
+  secretName: ani-model-repository-ca
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  issuerRef:
+    name: ani-model-repository-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ani-model-repository-ca
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  ca:
+    secretName: ani-model-repository-ca
+---
+# Least-privilege tenant bootstrap. This Role/RoleBinding must be rendered
+# once per tenant namespace by the platform bootstrapper before Gateway starts
+# creating object-backed inference workloads. The Gateway ServiceAccount is
+# intentionally not granted cert-manager access through a ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ani-model-fetcher-provisioner
+  namespace: ani-tenant-00000000-0000-0000-0000-000000000001
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.dev/profile: inference-incluster-e2e
+rules:
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ani-model-fetcher-provisioner
+  namespace: ani-tenant-00000000-0000-0000-0000-000000000001
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.dev/profile: inference-incluster-e2e
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ani-model-fetcher-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: ani-gateway
+    namespace: ani-system
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: model-service-grpc
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  secretName: model-service-grpc-tls
+  dnsNames:
+    - model-service
+    - model-service.ani-system
+    - model-service.ani-system.svc
+    - model-service.ani-system.svc.cluster.local
+  issuerRef:
+    name: ani-model-repository-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: model-service-fetcher-ingress
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: model-service
+  policyTypes: [Ingress]
+  ingress:
+    # The normal 9103 model-service surface is control-plane only. Keep the
+    # peer selectors namespace-scoped so arbitrary pods cannot reach it.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ani-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ani-gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ani-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: inference-service
+      ports:
+        - protocol: TCP
+          port: 9103
+    # The dedicated 9105 listener remains reachable only by fetcher clients
+    # carrying the runtime's model-fetcher-client label; TLS authenticates the
+    # tenant SPIFFE identity on that port.
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              ani.dev/model-fetcher-client: "true"
+      ports:
+        - protocol: TCP
+          port: 9105
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: model-fetcher-client
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  secretName: model-fetcher-client-tls
+  commonName: ani-model-fetcher
+  uris:
+    # This development client represents the tenant-scoped fetcher identity
+    # emitted by the Kubernetes runtime. Production workloads receive the
+    # same URI shape in their tenant namespace.
+    - spiffe://ani.dev/ns/ani-tenant-00000000-0000-0000-0000-000000000001/sa/ani-inference-fetcher
+  usages:
+    - client auth
+  issuerRef:
+    name: ani-model-repository-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

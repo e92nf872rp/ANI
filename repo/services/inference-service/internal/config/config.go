@@ -15,7 +15,9 @@ type Config struct {
 	WorkerOwner          string // 对账 lease 持有者，默认 inference-service/<hostname>
 	CoreAPIBaseURL       string // Core OpenAPI 基址，空则用 fake runtime
 	CoreServiceToken     string // 访问 platform-workloads 的静态 service token（无 minter 时）
+	PlatformDatabaseURL  string // reconciler claim/observation 使用的跨租户平台连接；应为专用 BYPASSRLS 角色
 	ModelServiceGRPCAddr string // model-service 内部 gRPC，空则用 fake catalog
+	ModelFetcherImageRef string // digest-pinned model-fetcher init-container image
 	AuthServiceGRPCAddr  string // 用于按租户 mint Core service JWT
 	AuthMintSecret       string // mint 调用凭据
 	MaxAttempts          int    // worker 对同一 operation 的最大尝试次数
@@ -37,7 +39,9 @@ func Load() Config {
 		WorkerOwner:          workerOwner(),
 		CoreAPIBaseURL:       env("CORE_API_BASE_URL", ""),
 		CoreServiceToken:     env("CORE_SERVICE_TOKEN", ""),
+		PlatformDatabaseURL:  env("INFERENCE_PLATFORM_DATABASE_URL", ""),
 		ModelServiceGRPCAddr: env("MODEL_SERVICE_GRPC_ADDR", ""),
+		ModelFetcherImageRef: env("MODEL_FETCHER_IMAGE_REF", ""),
 		AuthServiceGRPCAddr:  env("AUTH_SERVICE_GRPC_ADDR", ""),
 		AuthMintSecret:       env("AUTH_SERVICE_MINT_SECRET", ""),
 		MaxAttempts:          envInt("INFERENCE_MAX_ATTEMPTS", 180),

@@ -8,15 +8,21 @@ import (
 
 func TestLoadReadsServiceLocalSettings(t *testing.T) {
 	t.Setenv("INFERENCE_DATABASE_URL", "postgres://tenant/db")
+	t.Setenv("INFERENCE_PLATFORM_DATABASE_URL", "postgres://reconciler/db")
 	t.Setenv("NATS_URL", "nats://nats:4222")
 	t.Setenv("REDIS_URL", "redis://redis:6379/0")
 	t.Setenv("GRPC_PORT", "9104")
 	t.Setenv("HEALTH_PORT", "9204")
 	t.Setenv("INFERENCE_WORKER_OWNER", "inference-test")
+	t.Setenv("MODEL_SERVICE_GRPC_ADDR", "model-service.ani-system.svc.cluster.local:9103")
+	t.Setenv("MODEL_FETCHER_IMAGE_REF", "registry.example/model-fetcher@sha256:"+strings.Repeat("a", 64))
 
 	cfg := Load()
 	if cfg.DatabaseURL != "postgres://tenant/db" {
 		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
+	}
+	if cfg.PlatformDatabaseURL != "postgres://reconciler/db" {
+		t.Fatalf("PlatformDatabaseURL = %q", cfg.PlatformDatabaseURL)
 	}
 	if cfg.NATSURL != "nats://nats:4222" || cfg.RedisURL != "redis://redis:6379/0" {
 		t.Fatalf("bus urls = %+v", cfg.Config)
@@ -26,6 +32,9 @@ func TestLoadReadsServiceLocalSettings(t *testing.T) {
 	}
 	if cfg.WorkerOwner != "inference-test" {
 		t.Fatalf("WorkerOwner = %q", cfg.WorkerOwner)
+	}
+	if cfg.ModelServiceGRPCAddr != "model-service.ani-system.svc.cluster.local:9103" || cfg.ModelFetcherImageRef == "" {
+		t.Fatalf("model materialization settings = %q/%q", cfg.ModelServiceGRPCAddr, cfg.ModelFetcherImageRef)
 	}
 }
 

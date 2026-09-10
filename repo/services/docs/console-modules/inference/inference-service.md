@@ -106,7 +106,7 @@
 
 ### 待补能力边界
 
-- OpenAI 兼容 API <!-- ADDED-TO-YAML: Gateway POST /v1/chat/completions（非 services/v1.yaml） (Phase 2 2026-06-17) -->
+- OpenAI 兼容 API — 由独立 Envoy AI Gateway 数据面承载；`invocation_url` 发布后供客户端使用（不经过 `ani-gateway`）
 - 限流与访问策略 <!-- ADDED-TO-YAML: PUT /api/v1/svc/inference-services/{service_id}/policies (Services v1.yaml, Phase 2 2026-06-17) -->
 - 日志 / 事件 / 指标独立资源 <!-- ADDED-TO-YAML: GET /api/v1/svc/inference-services/{service_id}/logs (Services v1.yaml, Phase 2 2026-06-17) --> — 详文见 `inference-observability.md`
 - 调用测试独立资源 <!-- ADDED-TO-YAML: POST /api/v1/svc/inference-services/{service_id}/test (Services v1.yaml, Phase 2 2026-06-17) --> — 详文见 `inference-call-test.md`

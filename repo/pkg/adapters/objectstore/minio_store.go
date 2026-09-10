@@ -1,13 +1,15 @@
 package objectstore
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"net/url"
@@ -59,6 +61,7 @@ type MinIOObjectStore struct {
 }
 
 var _ ports.ObjectStore = (*MinIOObjectStore)(nil)
+var _ ports.ObjectStoreContentVerifier = (*MinIOObjectStore)(nil)
 
 func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, error) {
 	endpoints, err := parseMinIOEndpoints(config.Endpoint, config.Endpoints, config.Secure)
@@ -228,18 +231,57 @@ func (s *MinIOObjectStore) PutObject(ctx context.Context, input ports.PutObjectI
 	if input.Body == nil {
 		return ports.ObjectMetadata{}, fmt.Errorf("%w: object body is required", ports.ErrInvalid)
 	}
-	data, err := io.ReadAll(input.Body)
-	if err != nil {
-		return ports.ObjectMetadata{}, err
+	if input.SizeBytes < 0 {
+		return ports.ObjectMetadata{}, fmt.Errorf("%w: object size must not be negative", ports.ErrInvalid)
 	}
 	target, err := s.objectURL(input.Ref)
 	if err != nil {
 		return ports.ObjectMetadata{}, err
 	}
-	contentHash := sha256Hex(data)
-	req, err := s.newSignedRequest(ctx, http.MethodPut, target, bytes.NewReader(data), contentHash)
+	checksum := strings.TrimSpace(input.Checksum)
+	contentHash := minIOUnsignedPayloadHash
+	expectedChecksum := ""
+	requestHeaders := map[string]string(nil)
+	if checksum != "" {
+		canonicalChecksum, ok := canonicalSHA256Checksum(checksum)
+		if !ok {
+			return ports.ObjectMetadata{}, fmt.Errorf("%w: object checksum must be a SHA-256 digest", ports.ErrInvalid)
+		}
+		expectedChecksum = canonicalChecksum
+		contentHash = canonicalChecksum
+		// Persist the trusted digest as user metadata. It is covered by the
+		// SigV4 signature so an object store or intermediary cannot silently
+		// replace the value while retaining a successful upload response.
+		requestHeaders = map[string]string{"x-amz-meta-sha256": canonicalChecksum}
+	}
+	var uploadBody io.Reader
+	var boundedBody *exactSizeReader
+	var countedBody *countingReader
+	if input.SizeBytes > 0 {
+		boundedBody = &exactSizeReader{reader: input.Body, expected: input.SizeBytes}
+		uploadBody = boundedBody
+	} else {
+		// SizeBytes=0 was historically an unspecified size in this port. Keep
+		// that compatibility while still streaming and counting the body; the
+		// remote-import worker always supplies a positive archive size and is
+		// therefore strictly bounded by exactSizeReader.
+		countedBody = &countingReader{reader: input.Body}
+		uploadBody = countedBody
+	}
+	var digest hash.Hash
+	if expectedChecksum != "" {
+		digest = sha256.New()
+		// SigV4 metadata binds the declared value, while this tee computes an
+		// independent proof of the bytes actually consumed by the HTTP client.
+		// A caller cannot make a mismatched body look valid by forging metadata.
+		uploadBody = io.TeeReader(uploadBody, digest)
+	}
+	req, err := s.newSignedRequestWithHeaders(ctx, http.MethodPut, target, uploadBody, contentHash, requestHeaders)
 	if err != nil {
 		return ports.ObjectMetadata{}, err
+	}
+	if input.SizeBytes > 0 {
+		req.ContentLength = input.SizeBytes
 	}
 	if contentType := strings.TrimSpace(input.ContentType); contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -252,13 +294,153 @@ func (s *MinIOObjectStore) PutObject(ctx context.Context, input ports.PutObjectI
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ports.ObjectMetadata{}, minIOHTTPError(resp.StatusCode, "put object")
 	}
+	if boundedBody != nil {
+		if err := boundedBody.Err(); err != nil {
+			return ports.ObjectMetadata{}, fmt.Errorf("%w: object body size mismatch: %v", ports.ErrInvalid, err)
+		}
+	}
+	if digest != nil && hex.EncodeToString(digest.Sum(nil)) != expectedChecksum {
+		// Do not leave an object with a forged checksum metadata value behind.
+		// Cleanup is best effort; the operation remains failed either way and
+		// no model version may be registered from this object.
+		_ = s.DeleteObject(ctx, input.Ref)
+		return ports.ObjectMetadata{}, fmt.Errorf("%w: object checksum does not match declared SHA-256", ports.ErrInvalid)
+	}
+	uploadedSize := input.SizeBytes
+	if countedBody != nil {
+		uploadedSize = countedBody.read
+	}
 	return ports.ObjectMetadata{
 		Ref:         input.Ref,
 		ContentType: input.ContentType,
-		SizeBytes:   int64(len(data)),
-		Checksum:    input.Checksum,
+		SizeBytes:   uploadedSize,
+		Checksum:    checksum,
 		UpdatedAt:   s.now().UTC(),
 	}, nil
+}
+
+// VerifyObject streams an object back from MinIO and verifies its actual
+// bytes. This is required after a presigned PUT because a signed metadata
+// header authenticates the declared value, not the payload that a client sent.
+func (s *MinIOObjectStore) VerifyObject(ctx context.Context, ref ports.ObjectRef, expectedSize int64, expectedChecksum string) error {
+	if expectedSize <= 0 {
+		return fmt.Errorf("%w: expected object size must be positive", ports.ErrInvalid)
+	}
+	expected, ok := canonicalSHA256Checksum(expectedChecksum)
+	if !ok {
+		return fmt.Errorf("%w: expected object checksum must be a SHA-256 digest", ports.ErrInvalid)
+	}
+	target, err := s.objectURL(ref)
+	if err != nil {
+		return err
+	}
+	req, err := s.newSignedRequest(ctx, http.MethodGet, target, nil, "")
+	if err != nil {
+		return err
+	}
+	resp, err := s.doRequest(req)
+	if err != nil {
+		return err
+	}
+	defer closeBody(resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		return ports.ErrNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return minIOHTTPError(resp.StatusCode, "verify object")
+	}
+	if resp.ContentLength >= 0 && resp.ContentLength != expectedSize {
+		return fmt.Errorf("%w: object size does not match expected size", ports.ErrInvalid)
+	}
+	digest := sha256.New()
+	read, err := io.CopyN(digest, resp.Body, expectedSize+1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("%w: read object for verification", ports.ErrInvalid)
+	}
+	if read != expectedSize {
+		return fmt.Errorf("%w: object size does not match expected size", ports.ErrInvalid)
+	}
+	// CopyN can return exactly N without observing EOF, so probe one byte to
+	// reject a payload longer than the declared object size.
+	var extra [1]byte
+	if n, probeErr := resp.Body.Read(extra[:]); n != 0 || (probeErr != nil && !errors.Is(probeErr, io.EOF)) {
+		return fmt.Errorf("%w: object size does not match expected size", ports.ErrInvalid)
+	}
+	if hex.EncodeToString(digest.Sum(nil)) != expected {
+		return fmt.Errorf("%w: object checksum does not match expected SHA-256", ports.ErrInvalid)
+	}
+	return nil
+}
+
+type countingReader struct {
+	reader io.Reader
+	read   int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.read += int64(n)
+	return n, err
+}
+
+// exactSizeReader bounds a streamed upload to the declared size and records
+// short/long reads without buffering the object in memory. The transport gets
+// at most expected bytes; an extra byte is consumed only to detect overflow.
+type exactSizeReader struct {
+	reader   io.Reader
+	expected int64
+	read     int64
+	err      error
+	checked  bool
+}
+
+func (r *exactSizeReader) Read(p []byte) (int, error) {
+	if r.err != nil {
+		return 0, r.err
+	}
+	if r.read >= r.expected {
+		if !r.checked {
+			r.checked = true
+			var one [1]byte
+			n, err := r.reader.Read(one[:])
+			if n > 0 {
+				r.err = fmt.Errorf("body exceeds declared size %d", r.expected)
+				return 0, r.err
+			}
+			if err != nil && !errors.Is(err, io.EOF) {
+				r.err = err
+				return 0, r.err
+			}
+		}
+		return 0, io.EOF
+	}
+	remaining := r.expected - r.read
+	if int64(len(p)) > remaining {
+		p = p[:remaining]
+	}
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.read += int64(n)
+	}
+	if err != nil && !errors.Is(err, io.EOF) && r.read < r.expected {
+		r.err = err
+		return n, err
+	}
+	if errors.Is(err, io.EOF) && r.read < r.expected {
+		r.err = fmt.Errorf("body ended after %d bytes, want %d", r.read, r.expected)
+		return n, r.err
+	}
+	return n, nil
+}
+
+func (r *exactSizeReader) Err() error {
+	if r.err != nil {
+		return r.err
+	}
+	if r.read != r.expected {
+		return fmt.Errorf("body read %d bytes, want %d", r.read, r.expected)
+	}
+	return nil
 }
 
 func (s *MinIOObjectStore) GetObject(ctx context.Context, ref ports.ObjectRef) (io.ReadCloser, ports.ObjectMetadata, error) {
@@ -309,10 +491,13 @@ func (s *MinIOObjectStore) StatObject(ctx context.Context, ref ports.ObjectRef) 
 	if err != nil {
 		return ports.ObjectMetadata{}, err
 	}
-	req, err := s.newSignedRequest(ctx, http.MethodHead, target, nil, "")
+	req, err := s.newSignedRequestWithHeaders(ctx, http.MethodHead, target, nil, "", map[string]string{"x-amz-checksum-mode": "ENABLED"})
 	if err != nil {
 		return ports.ObjectMetadata{}, err
 	}
+	// S3 exposes the object checksum on HEAD only when checksum mode is
+	// requested. The request helper includes this header in SigV4
+	// SignedHeaders so the checksum negotiation cannot be stripped or altered.
 	resp, err := s.doRequest(req)
 	if err != nil {
 		return ports.ObjectMetadata{}, err
@@ -324,11 +509,20 @@ func (s *MinIOObjectStore) StatObject(ctx context.Context, ref ports.ObjectRef) 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ports.ObjectMetadata{}, minIOHTTPError(resp.StatusCode, "stat object")
 	}
-	return s.metadataFromResponse(ref, resp), nil
+	metadata := s.metadataFromResponse(ref, resp)
+	// A HEAD response without a real SHA-256 checksum must not expose ETag as
+	// a model checksum: ETag may be MD5 or a multipart composite, and an
+	// attacker-controlled 64-hex ETag must not satisfy the model proof.
+	metadata.Checksum = responseSHA256Checksum(resp.Header)
+	return metadata, nil
 }
 
 func (s *MinIOObjectStore) SignedUploadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
 	return s.presignWithEndpoint(ctx, http.MethodPut, ref, ttl, s.publicEndpoint)
+}
+
+func (s *MinIOObjectStore) SignedUploadURLWithHeaders(ctx context.Context, ref ports.ObjectRef, ttl time.Duration, headers map[string]string) (ports.SignedURL, error) {
+	return s.presignWithHeadersAndEndpoint(ctx, http.MethodPut, ref, ttl, s.publicEndpoint, headers)
 }
 
 func (s *MinIOObjectStore) SignedDownloadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
@@ -336,6 +530,10 @@ func (s *MinIOObjectStore) SignedDownloadURL(ctx context.Context, ref ports.Obje
 }
 
 func (s *MinIOObjectStore) presignWithEndpoint(ctx context.Context, method string, ref ports.ObjectRef, ttl time.Duration, endpoint *url.URL) (ports.SignedURL, error) {
+	return s.presignWithHeadersAndEndpoint(ctx, method, ref, ttl, endpoint, nil)
+}
+
+func (s *MinIOObjectStore) presignWithHeadersAndEndpoint(ctx context.Context, method string, ref ports.ObjectRef, ttl time.Duration, endpoint *url.URL, headers map[string]string) (ports.SignedURL, error) {
 	if err := ctx.Err(); err != nil {
 		return ports.SignedURL{}, err
 	}
@@ -346,6 +544,10 @@ func (s *MinIOObjectStore) presignWithEndpoint(ctx context.Context, method strin
 	if err != nil {
 		return ports.SignedURL{}, err
 	}
+	normalizedHeaders, signedHeaderNames, clientHeaders, err := canonicalPresignHeaders(target.Host, headers)
+	if err != nil {
+		return ports.SignedURL{}, err
+	}
 	now := s.now().UTC()
 	expirySeconds := int(ttl.Seconds())
 	query := target.Query()
@@ -353,30 +555,78 @@ func (s *MinIOObjectStore) presignWithEndpoint(ctx context.Context, method strin
 	query.Set("X-Amz-Credential", s.credentialScope(now))
 	query.Set("X-Amz-Date", now.Format("20060102T150405Z"))
 	query.Set("X-Amz-Expires", strconv.Itoa(expirySeconds))
-	query.Set("X-Amz-SignedHeaders", "host")
+	query.Set("X-Amz-SignedHeaders", strings.Join(signedHeaderNames, ";"))
 	if s.sessionToken != "" {
 		query.Set("X-Amz-Security-Token", s.sessionToken)
 	}
 	target.RawQuery = canonicalQuery(query)
-	canonicalRequest := strings.Join([]string{
-		method,
-		target.EscapedPath(),
-		target.RawQuery,
-		"host:" + target.Host + "\n",
-		"host",
-		minIOUnsignedPayloadHash,
-	}, "\n")
+	canonicalRequest := strings.Join([]string{method, target.EscapedPath(), target.RawQuery, canonicalPresignHeaderBlock(target.Host, normalizedHeaders), strings.Join(signedHeaderNames, ";"), minIOUnsignedPayloadHash}, "\n")
 	signature := s.signature(now, canonicalRequest)
 	query.Set("X-Amz-Signature", signature)
 	target.RawQuery = canonicalQuery(query)
 	return ports.SignedURL{
 		URL:       target.String(),
 		ExpiresAt: now.Add(ttl),
-		Headers:   map[string]string{},
+		Headers:   clientHeaders,
 	}, nil
 }
 
+func canonicalPresignHeaders(host string, headers map[string]string) (map[string]string, []string, map[string]string, error) {
+	normalized := map[string]string{"host": host}
+	for name, value := range headers {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" || strings.ContainsAny(name, " \t\r\n:") || name == "host" {
+			return nil, nil, nil, fmt.Errorf("%w: invalid signed upload header", ports.ErrInvalid)
+		}
+		if strings.ContainsAny(value, "\r\n") {
+			return nil, nil, nil, fmt.Errorf("%w: invalid signed upload header value", ports.ErrInvalid)
+		}
+		if _, exists := normalized[name]; exists {
+			return nil, nil, nil, fmt.Errorf("%w: duplicate signed upload header", ports.ErrInvalid)
+		}
+		normalized[name] = strings.TrimSpace(value)
+	}
+	names := make([]string, 0, len(normalized))
+	for name := range normalized {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	// The returned map is client-facing; do not expose host or any mutable
+	// caller-owned map. Host is supplied by the URL itself.
+	clientHeaders := make(map[string]string, len(normalized)-1)
+	for _, name := range names {
+		if name != "host" {
+			clientHeaders[name] = normalized[name]
+		}
+	}
+	return normalized, names, clientHeaders, nil
+}
+
+func canonicalPresignHeaderBlock(host string, headers map[string]string) string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var block strings.Builder
+	for _, name := range names {
+		value := headers[name]
+		if name == "host" {
+			value = host
+		}
+		block.WriteString(name)
+		block.WriteByte(':')
+		block.WriteString(strings.TrimSpace(value))
+		block.WriteByte('\n')
+	}
+	return block.String()
+}
+
 func (s *MinIOObjectStore) newSignedRequest(ctx context.Context, method string, target url.URL, body io.Reader, payloadHash string) (*http.Request, error) {
+	return s.newSignedRequestWithHeaders(ctx, method, target, body, payloadHash, nil)
+}
+
+func (s *MinIOObjectStore) newSignedRequestWithHeaders(ctx context.Context, method string, target url.URL, body io.Reader, payloadHash string, headers map[string]string) (*http.Request, error) {
 	if payloadHash == "" {
 		payloadHash = sha256Hex(nil)
 	}
@@ -389,6 +639,9 @@ func (s *MinIOObjectStore) newSignedRequest(ctx context.Context, method string, 
 	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
 	if s.sessionToken != "" {
 		req.Header.Set("X-Amz-Security-Token", s.sessionToken)
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 	s.signRequest(req, now, payloadHash)
 	return req, nil
@@ -410,6 +663,12 @@ func (s *MinIOObjectStore) doRequest(req *http.Request) (*http.Response, error) 
 			return nil, err
 		}
 		if index < len(s.endpoints)-1 && minIORetryableStatus(resp.StatusCode) {
+			// A streamed body is not replayable unless the caller supplied a
+			// GetBody function. Never retry a consumed upload against another
+			// endpoint: doing so would silently write a truncated object.
+			if req.Body != nil && req.GetBody == nil {
+				return resp, nil
+			}
 			lastErr = minIOHTTPError(resp.StatusCode, strings.TrimSpace(req.Method+" "+req.URL.Path))
 			closeBody(resp.Body)
 			continue
@@ -454,8 +713,20 @@ func (s *MinIOObjectStore) requestForEndpoint(req *http.Request, endpoint *url.U
 
 func (s *MinIOObjectStore) signRequest(req *http.Request, now time.Time, payloadHash string) {
 	signedHeaders := []string{"host", "x-amz-content-sha256", "x-amz-date"}
-	if s.sessionToken != "" {
-		signedHeaders = append(signedHeaders, "x-amz-security-token")
+	seen := map[string]struct{}{}
+	for _, header := range signedHeaders {
+		seen[header] = struct{}{}
+	}
+	for name, values := range req.Header {
+		lower := strings.ToLower(strings.TrimSpace(name))
+		if !strings.HasPrefix(lower, "x-amz-") || len(values) == 0 || strings.TrimSpace(values[0]) == "" {
+			continue
+		}
+		if _, ok := seen[lower]; ok {
+			continue
+		}
+		signedHeaders = append(signedHeaders, lower)
+		seen[lower] = struct{}{}
 	}
 	sort.Strings(signedHeaders)
 
@@ -554,13 +825,64 @@ func (s *MinIOObjectStore) metadataFromResponse(ref ports.ObjectRef, resp *http.
 			updatedAt = parsed.UTC()
 		}
 	}
+	checksum := responseSHA256Checksum(resp.Header)
+	if checksum == "" && !hasSHA256ChecksumHeader(resp.Header) {
+		checksum = strings.Trim(resp.Header.Get("ETag"), `"`)
+	}
 	return ports.ObjectMetadata{
 		Ref:         ref,
 		ContentType: resp.Header.Get("Content-Type"),
 		SizeBytes:   resp.ContentLength,
-		Checksum:    strings.Trim(resp.Header.Get("ETag"), `"`),
+		Checksum:    checksum,
 		UpdatedAt:   updatedAt,
 	}
+}
+
+// responseSHA256Checksum returns the canonical hex SHA-256 for S3 checksum
+// responses. The standard x-amz-checksum-sha256 header is base64 encoded;
+// MinIO deployments may instead expose the same value as user metadata. A
+// 64-character hex value is accepted for that metadata form.
+func responseSHA256Checksum(headers http.Header) string {
+	for _, name := range []string{"X-Amz-Checksum-Sha256", "X-Amz-Meta-Checksum-Sha256", "X-Amz-Meta-Sha256"} {
+		raw := strings.TrimSpace(headers.Get(name))
+		if raw == "" {
+			continue
+		}
+		// The model upload contract uses the human-readable sha256:<hex>
+		// representation for x-amz-meta-sha256. Normalize that form before
+		// handling standard base64 or bare-hex checksum headers.
+		if strings.HasPrefix(strings.ToLower(raw), "sha256:") {
+			raw = strings.TrimSpace(raw[len("sha256:"):])
+		}
+		if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil && len(decoded) == sha256.Size {
+			return hex.EncodeToString(decoded)
+		}
+		if decoded, err := hex.DecodeString(raw); err == nil && len(decoded) == sha256.Size {
+			return hex.EncodeToString(decoded)
+		}
+	}
+	return ""
+}
+
+func canonicalSHA256Checksum(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(strings.ToLower(raw), "sha256:") {
+		raw = strings.TrimSpace(raw[len("sha256:"):])
+	}
+	decoded, err := hex.DecodeString(raw)
+	if err != nil || len(decoded) != sha256.Size {
+		return "", false
+	}
+	return hex.EncodeToString(decoded), true
+}
+
+func hasSHA256ChecksumHeader(headers http.Header) bool {
+	for _, name := range []string{"X-Amz-Checksum-Sha256", "X-Amz-Meta-Checksum-Sha256", "X-Amz-Meta-Sha256"} {
+		if strings.TrimSpace(headers.Get(name)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func parseMinIOEndpoint(raw string, secure bool) (*url.URL, error) {

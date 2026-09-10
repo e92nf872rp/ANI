@@ -73,7 +73,7 @@
 | P1-13 | `object-storage-upload` | Core | **部分** | `compute/storage/object-storage-upload.md` | upload/buckets/download Phase 2 |
 | P1-14 | `vector-store-write` | Core | **部分** | `compute/storage/vector-store-write.md` | insert documents Phase 2 |
 | P1-15 | `inference-rate-limit-policy` | Services | **否** | `inference/inference-rate-limit-policy.md` | PUT policies Phase 2 |
-| P1-16 | `openai-compatible-api` | Gateway | **部分** | `integration/openai-compatible-api.md` | /v1/chat/completions stub |
+| P1-16 | `openai-compatible-api` | Envoy AI Gateway | **部分** | `integration/openai-compatible-api.md` | 独立数据面路由与发布流程仍需 live 验证；ANI Gateway 不代理 |
 | P1-17 | `resource-pool-overview` | Core 聚合 | **是** | `compute/resource-pool-overview.md` | 无独立 pool API |
 | P1-18 | `global-search` | 聚合 | **是** | `home/global-search.md` | 无 search API |
 

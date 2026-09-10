@@ -64,6 +64,23 @@ func TestBuildListModelsQueriesKeepTenantArgumentFirst(t *testing.T) {
 	}
 }
 
+func TestBuildListModelsFilterSupportsTenantScopedSearch(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	where, args, err := buildListModelsFilter(ListFilter{TenantID: tenantID, Status: "ready", Source: "upload", Capability: "embedding", Keyword: "qwen_3"})
+	if err != nil {
+		t.Fatalf("buildListModelsFilter: %v", err)
+	}
+	flat := strings.Join(strings.Fields(where), " ")
+	for _, fragment := range []string{"tenant_id=$1", "source=$3", "$4=ANY(capabilities)", "ILIKE $5", "ESCAPE CHR(92)", "status=$2"} {
+		if !strings.Contains(flat, fragment) {
+			t.Fatalf("where lacks %q: %s", fragment, flat)
+		}
+	}
+	if got := args[4]; got != "%qwen\\_3%" {
+		t.Fatalf("escaped keyword = %#v", got)
+	}
+}
+
 type stubQueryRower struct {
 	sql  string
 	args []any

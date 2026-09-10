@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -818,6 +819,372 @@ func TestRenderPlatformWorkloadManifestsMountsPVCArtifact(t *testing.T) {
 	}
 }
 
+func TestObjectModelCacheIsPodLocal(t *testing.T) {
+	spec := sampleCPUPlatformWorkloadSpec("9df72d71-9d49-46c4-a48a-52bb37b082ab", "cache")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{TenantID: "11111111-1111-1111-1111-111111111111"}
+	volumes, _ := platformWorkloadPodVolumes(spec)
+	for _, value := range volumes {
+		volume := value.(map[string]any)
+		if volume["name"] != platformWorkloadModelVolume {
+			continue
+		}
+		if _, shared := volume["persistentVolumeClaim"]; shared {
+			t.Fatal("object model cache must not share an RWO claim across Pods")
+		}
+		cache, ok := volume["emptyDir"].(map[string]any)
+		if !ok || cache["sizeLimit"] != "20Gi" {
+			t.Fatalf("expected bounded disk cache: %#v", volume)
+		}
+		return
+	}
+	t.Fatal("missing model cache")
+}
+
+func TestRenderPlatformWorkloadManifestsObjectMaterializationUsesFetcherGate(t *testing.T) {
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("9df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-model")
+	spec.Command = []string{"python3", "-m", "vllm.entrypoints.openai.api_server", "--model", "/models"}
+	spec.Metadata.OwnerRef = "inference-service/33333333-3333-3333-3333-333333333333"
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: tenant, ModelVersionID: "33333333-3333-3333-3333-333333333333",
+		ObjectRef: "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors",
+		SizeBytes: 12, ChecksumSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ModelServiceGRPCAddr: "model-service:9090",
+		FetcherImageRef:      "registry.local/model-fetcher@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		TargetPath:           "/models/33333333-3333-3333-3333-333333333333/model.safetensors",
+	}
+	manifests := renderPlatformWorkloadManifests(tenant, "workload-object-1", spec, nil)
+	var deployment map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
+		t.Fatalf("deployment json: %v", err)
+	}
+	podSpec, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	initContainers, _ := podSpec["initContainers"].([]any)
+	if len(initContainers) != 1 {
+		t.Fatalf("initContainers = %#v, want one model-fetcher", initContainers)
+	}
+	init, _ := initContainers[0].(map[string]any)
+	if init["name"] != "model-fetcher" || init["image"] != spec.ModelMaterialization.FetcherImageRef {
+		t.Fatalf("init container = %#v", init)
+	}
+	args, _ := init["args"].([]any)
+	wantArgs := []string{
+		"--tenant-id=" + tenant,
+		"--model-version-id=" + spec.ModelMaterialization.ModelVersionID,
+		"--model-service-grpc-addr=" + spec.ModelMaterialization.ModelServiceGRPCAddr,
+		"--object-ref=" + spec.ModelMaterialization.ObjectRef,
+		"--size-bytes=12",
+		"--sha256=" + spec.ModelMaterialization.ChecksumSHA256,
+		"--target-path=" + spec.ModelMaterialization.TargetPath,
+	}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("args = %#v", args)
+	}
+	for index, want := range wantArgs {
+		if got := args[index]; got != want || strings.Contains(got.(string), "$(") {
+			t.Fatalf("arg[%d] = %v, want %q", index, got, want)
+		}
+	}
+	env, _ := init["env"].([]any)
+	if len(env) != 11 {
+		t.Fatalf("env = %#v", env)
+	}
+	envNames := map[string]bool{}
+	for _, raw := range env {
+		if item, ok := raw.(map[string]any); ok {
+			envNames[item["name"].(string)] = true
+		}
+	}
+	for _, name := range []string{"MODEL_SERVICE_TLS_CA_FILE", "MODEL_SERVICE_TLS_CERT_FILE", "MODEL_SERVICE_TLS_KEY_FILE"} {
+		if !envNames[name] {
+			t.Fatalf("missing TLS env %q", name)
+		}
+	}
+	if got := envValue(env, "MODEL_FETCHER_ALLOW_INSECURE_HTTP"); got != "false" {
+		t.Fatalf("default fetcher HTTP opt-in = %q, want false", got)
+	}
+	if strings.Contains(string(manifests[0].Content), "signed") || strings.Contains(string(manifests[0].Content), "https://") {
+		t.Fatalf("manifest contains a signed URL or URL literal: %s", manifests[0].Content)
+	}
+	resources, _ := init["resources"].(map[string]any)
+	requests, _ := resources["requests"].(map[string]any)
+	if _, ok := requests[kubernetesNVIDIAGPUResource]; ok {
+		t.Fatalf("fetcher must not request GPU: %#v", requests)
+	}
+	mounts, _ := init["volumeMounts"].([]any)
+	main, _ := podSpec["containers"].([]any)[0].(map[string]any)
+	mainArgs, _ := main["args"].([]any)
+	mainCommand, _ := main["command"].([]any)
+	joinedArgs := fmt.Sprint(mainCommand, mainArgs)
+	if !strings.Contains(joinedArgs, spec.ModelMaterialization.TargetPath) {
+		t.Fatalf("main engine args must target verified model path %q: %#v", spec.ModelMaterialization.TargetPath, mainArgs)
+	}
+	mainMounts, _ := main["volumeMounts"].([]any)
+	if len(mounts) == 0 || len(mainMounts) == 0 {
+		t.Fatalf("shared model mounts missing: init=%#v main=%#v", mounts, mainMounts)
+	}
+	if mounts[len(mounts)-2].(map[string]any)["name"] != mainMounts[len(mainMounts)-1].(map[string]any)["name"] {
+		t.Fatalf("init/main do not share final model volume: init=%#v main=%#v", mounts, mainMounts)
+	}
+	if got, _ := mainMounts[len(mainMounts)-1].(map[string]any)["readOnly"].(bool); !got {
+		t.Fatalf("main model mount must be read-only: %#v", mainMounts[len(mainMounts)-1])
+	}
+	labels, _ := deployment["metadata"].(map[string]any)["labels"].(map[string]any)
+	for key, want := range map[string]string{
+		platformWorkloadTenantLabel: tenant,
+		platformWorkloadIDLabel:     "workload-object-1",
+		platformWorkloadOwnerLabel:  spec.Metadata.OwnerRef,
+	} {
+		if labels[key] != want {
+			t.Fatalf("label %s = %v, want %s", key, labels[key], want)
+		}
+	}
+}
+
+func TestRenderPlatformWorkloadObjectMaterializationUsesTenantFetcherIdentityAndMinIOEgress(t *testing.T) {
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("9ef72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-policy")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: tenant, ModelVersionID: "33333333-3333-3333-3333-333333333333",
+		ObjectRef: "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors",
+		SizeBytes: 12, ChecksumSHA256: "sha256:" + strings.Repeat("a", 64),
+		ModelServiceGRPCAddr: "model-service:9105",
+		FetcherImageRef:      "registry.local/model-fetcher@sha256:" + strings.Repeat("b", 64),
+		TargetPath:           "/models/33333333-3333-3333-3333-333333333333/model.safetensors",
+	}
+	manifests := renderPlatformWorkloadManifests(tenant, "workload-object-policy", spec, nil)
+	var deployment, policy, certificateManifest map[string]any
+	var serviceAccount bool
+	var serviceAccountManifest map[string]any
+	for _, item := range manifests {
+		switch item.Kind {
+		case "Deployment":
+			if err := json.Unmarshal([]byte(item.Content), &deployment); err != nil {
+				t.Fatalf("deployment json: %v", err)
+			}
+		case "NetworkPolicy":
+			if err := json.Unmarshal([]byte(item.Content), &policy); err != nil {
+				t.Fatalf("network policy json: %v", err)
+			}
+		case "ServiceAccount":
+			serviceAccount = true
+			if err := json.Unmarshal([]byte(item.Content), &serviceAccountManifest); err != nil {
+				t.Fatalf("service account json: %v", err)
+			}
+		case "Certificate":
+			if err := json.Unmarshal([]byte(item.Content), &certificateManifest); err != nil {
+				t.Fatalf("certificate json: %v", err)
+			}
+		}
+	}
+	if !serviceAccount {
+		t.Fatalf("object materialization must render tenant fetcher ServiceAccount: %#v", manifests)
+	}
+	if serviceAccountManifest["metadata"].(map[string]any)["name"] != "ani-inference-fetcher" || serviceAccountManifest["metadata"].(map[string]any)["namespace"] != "ani-tenant-"+tenant {
+		t.Fatalf("tenant fetcher ServiceAccount = %#v", serviceAccountManifest)
+	}
+	if got := serviceAccountManifest["automountServiceAccountToken"]; got != false {
+		t.Fatalf("tenant fetcher ServiceAccount automountServiceAccountToken = %v, want false", got)
+	}
+	certificateSpec, _ := certificateManifest["spec"].(map[string]any)
+	certificateURIs, _ := certificateSpec["uris"].([]any)
+	wantURI := "spiffe://ani.dev/ns/ani-tenant-" + tenant + "/sa/ani-inference-fetcher"
+	if len(certificateURIs) != 1 || certificateURIs[0] != wantURI {
+		t.Fatalf("tenant fetcher Certificate URIs = %#v, want %q", certificateURIs, wantURI)
+	}
+	certificateUsages, _ := certificateSpec["usages"].([]any)
+	if len(certificateUsages) != 1 || certificateUsages[0] != "client auth" {
+		t.Fatalf("tenant fetcher Certificate usages = %#v, want [client auth]", certificateSpec["usages"])
+	}
+	podSpec, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	if got := podSpec["serviceAccountName"]; got != "ani-inference-fetcher" {
+		t.Fatalf("serviceAccountName = %v, want ani-inference-fetcher", got)
+	}
+	securityContext, _ := podSpec["securityContext"].(map[string]any)
+	if got := securityContext["fsGroup"]; got != float64(65532) {
+		t.Fatalf("object materialization fsGroup = %v, want 65532 for tenant PVC write access", got)
+	}
+	if !networkPolicyAllowsMinIO(policy) {
+		t.Fatalf("object materialization policy must allow MinIO app.kubernetes.io/name=minio on TCP/9000: %#v", policy)
+	}
+}
+
+func TestRenderPlatformWorkloadMaterializationHTTPOptInIsScopedToFetcherInit(t *testing.T) {
+	spec := sampleCPUPlatformWorkloadSpec("9af72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-http")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: "11111111-1111-1111-1111-111111111111", ModelVersionID: "33333333-3333-3333-3333-333333333333",
+		ObjectRef: "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors",
+		SizeBytes: 12, ChecksumSHA256: "sha256:" + strings.Repeat("a", 64), ModelServiceGRPCAddr: "model-service:9105",
+		FetcherImageRef: "registry.local/model-fetcher@sha256:" + strings.Repeat("b", 64), TargetPath: "/models/33333333-3333-3333-3333-333333333333/model.safetensors",
+	}
+	manifests := renderPlatformWorkloadManifestsWithFetcherConfig("11111111-1111-1111-1111-111111111111", "workload-object-http", spec, nil, true)
+	var deployment map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
+		t.Fatalf("deployment json: %v", err)
+	}
+	podSpec, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	initContainers, _ := podSpec["initContainers"].([]any)
+	init, _ := initContainers[0].(map[string]any)
+	initEnv, _ := init["env"].([]any)
+	if got := envValue(initEnv, "MODEL_FETCHER_ALLOW_INSECURE_HTTP"); got != "true" {
+		t.Fatalf("fetcher HTTP opt-in = %q, want true", got)
+	}
+	mainContainers, _ := podSpec["containers"].([]any)
+	main, _ := mainContainers[0].(map[string]any)
+	mainEnv, _ := main["env"].([]any)
+	if got := envValue(mainEnv, "MODEL_FETCHER_ALLOW_INSECURE_HTTP"); got != "" {
+		t.Fatalf("main container received fetcher HTTP opt-in = %q", got)
+	}
+
+	defaultManifests := renderPlatformWorkloadManifestsWithFetcherConfig("11111111-1111-1111-1111-111111111111", "workload-object-http-default", spec, nil, false)
+	if err := json.Unmarshal([]byte(defaultManifests[0].Content), &deployment); err != nil {
+		t.Fatalf("default deployment json: %v", err)
+	}
+	podSpec, _ = deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	initContainers, _ = podSpec["initContainers"].([]any)
+	init, _ = initContainers[0].(map[string]any)
+	initEnv, _ = init["env"].([]any)
+	if got := envValue(initEnv, "MODEL_FETCHER_ALLOW_INSECURE_HTTP"); got != "false" {
+		t.Fatalf("default fetcher HTTP opt-in = %q, want false", got)
+	}
+}
+
+func envValue(env []any, name string) string {
+	for _, raw := range env {
+		item, _ := raw.(map[string]any)
+		if item["name"] == name {
+			value, _ := item["value"].(string)
+			return value
+		}
+	}
+	return ""
+}
+
+func networkPolicyAllowsMinIO(policy map[string]any) bool {
+	spec, _ := policy["spec"].(map[string]any)
+	egress, _ := spec["egress"].([]any)
+	for _, rawRule := range egress {
+		rule, _ := rawRule.(map[string]any)
+		ports, _ := rule["ports"].([]any)
+		port9000 := false
+		for _, rawPort := range ports {
+			port, _ := rawPort.(map[string]any)
+			if port["protocol"] == "TCP" && port["port"] == float64(9000) {
+				port9000 = true
+			}
+		}
+		if !port9000 {
+			continue
+		}
+		to, _ := rule["to"].([]any)
+		for _, rawPeer := range to {
+			peer, _ := rawPeer.(map[string]any)
+			ns, _ := peer["namespaceSelector"].(map[string]any)
+			labels, _ := ns["matchLabels"].(map[string]any)
+			if labels["kubernetes.io/metadata.name"] != "ani-s05-objectstore" {
+				continue
+			}
+			pod, _ := peer["podSelector"].(map[string]any)
+			podLabels, _ := pod["matchLabels"].(map[string]any)
+			if podLabels["app.kubernetes.io/name"] == "minio" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestRenderPlatformWorkloadManifestsImportedArchiveUsesVersionDirectory(t *testing.T) {
+	tenant := "11111111-1111-1111-1111-111111111111"
+	version := "33333333-3333-3333-3333-333333333333"
+	spec := sampleCPUPlatformWorkloadSpec("afd72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-archive")
+	spec.Command = []string{"serve", "--model", "/models/old"}
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: tenant, ModelVersionID: version,
+		ObjectRef: "object://models/" + tenant + "/22222222-2222-2222-2222-222222222222/import-44444444-4444-4444-4444-444444444444/archive/model.tar.gz",
+		SizeBytes: 12, ChecksumSHA256: "sha256:" + strings.Repeat("a", 64),
+		ModelServiceGRPCAddr: "model-service:9090",
+		FetcherImageRef:      "registry.local/model-fetcher@sha256:" + strings.Repeat("b", 64),
+		TargetPath:           "/models/" + version + "/model.tar.gz",
+	}
+	manifests := renderPlatformWorkloadManifests(tenant, "workload-object-archive", spec, nil)
+	var deployment map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
+		t.Fatalf("deployment json: %v", err)
+	}
+	podSpec, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	initContainers, _ := podSpec["initContainers"].([]any)
+	init, _ := initContainers[0].(map[string]any)
+	args, _ := init["args"].([]any)
+	if args[len(args)-1] != "--target-path=/models/"+version {
+		t.Fatalf("fetcher target arg = %#v", args)
+	}
+	main, _ := podSpec["containers"].([]any)[0].(map[string]any)
+	mainArgs, _ := main["args"].([]any)
+	mainCommand, _ := main["command"].([]any)
+	if !strings.Contains(fmt.Sprint(mainCommand, mainArgs), "/models/"+version) {
+		t.Fatalf("engine target = %#v/%#v", mainCommand, mainArgs)
+	}
+}
+
+func TestRenderPlatformWorkloadManifestsPVCOnlyHasNoFetcher(t *testing.T) {
+	spec := sampleCPUPlatformWorkloadSpec("8df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-pvc-only")
+	spec.Artifacts = []ports.PlatformWorkloadArtifact{{ObjectRef: "pvc://vllm-model", MountPath: "/models"}}
+	manifests := renderPlatformWorkloadManifests("11111111-1111-1111-1111-111111111111", "workload-pvc-only", spec, nil)
+	var deployment map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
+		t.Fatalf("deployment json: %v", err)
+	}
+	podSpec, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	if _, ok := podSpec["initContainers"]; ok {
+		t.Fatalf("PVC-only workload must not get model-fetcher: %#v", podSpec["initContainers"])
+	}
+}
+
+func TestKubernetesPlatformWorkloadRuntimeInjectsPublisherMaterializationConfig(t *testing.T) {
+	spec := sampleCPUPlatformWorkloadSpec("7df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-configured")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		ModelServiceGRPCAddr: "caller.invalid:1",
+		FetcherImageRef:      "caller.invalid/fetcher@sha256:" + strings.Repeat("c", 64),
+	}
+	runtime := NewKubernetesPlatformWorkloadRuntimeWithMaterializationConfig(nil, "model-service:9090", "registry.local/model-fetcher@sha256:"+strings.Repeat("d", 64))
+	runtime.ConfigureModelMaterialization(&spec)
+	if got := spec.ModelMaterialization.ModelServiceGRPCAddr; got != "model-service:9090" {
+		t.Fatalf("model service addr = %q", got)
+	}
+	if got := spec.ModelMaterialization.FetcherImageRef; got != "registry.local/model-fetcher@sha256:"+strings.Repeat("d", 64) {
+		t.Fatalf("fetcher image = %q", got)
+	}
+}
+
+func TestKubernetesPlatformWorkloadRejectsScalingObjectMaterialization(t *testing.T) {
+	provider := newReadyFakePlatformWorkloadRuntime()
+	svc := NewKubernetesPlatformWorkloadService(provider)
+	spec := sampleCPUPlatformWorkloadSpec("6df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-scale")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{TenantID: "11111111-1111-1111-1111-111111111111", ModelVersionID: "33333333-3333-3333-3333-333333333333", ObjectRef: "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors", SizeBytes: 1, ChecksumSHA256: "sha256:" + strings.Repeat("a", 64), ModelServiceGRPCAddr: "model-service:9090", FetcherImageRef: "registry.local/model-fetcher@sha256:" + strings.Repeat("b", 64), TargetPath: "/models/33333333-3333-3333-3333-333333333333/model.safetensors"}
+	created, err := svc.Create(context.Background(), spec.ModelMaterialization.TenantID, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdateReplicas(context.Background(), created.TenantID, created.ID, "7df72d71-9d49-46c4-a48a-52bb37b082ab", 2); !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("scale object materialization error = %v", err)
+	}
+	if _, err := svc.UpdateReplicas(context.Background(), created.TenantID, created.ID, "7df72d71-9d49-46c4-a48a-52bb37b082ab", 2); !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("replayed scale object materialization error = %v", err)
+	}
+}
+
+func TestPlatformWorkloadMaterializationLaunchRewritesEqualsForm(t *testing.T) {
+	spec := sampleCPUPlatformWorkloadSpec("5df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-launch")
+	spec.Command = []string{"serve", "--model=/models/old", "--model-path=/models/old2"}
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{TargetPath: "/models/33333333-3333-3333-3333-333333333333/model.safetensors"}
+	command, _ := platformWorkloadMaterializationLaunch(spec)
+	joined := strings.Join(command, " ")
+	if strings.Contains(joined, "/models/old") || strings.Count(joined, spec.ModelMaterialization.TargetPath) != 2 {
+		t.Fatalf("rewritten command = %#v", command)
+	}
+}
+
 func TestPvcClaimNameAcceptsTenantLocalPVC(t *testing.T) {
 	claim, ok := pvcClaimName("pvc://vllm-model#/models/qwen")
 	if !ok || claim != "vllm-model" {
@@ -889,6 +1256,121 @@ func TestKubernetesPlatformWorkloadRuntimeApplyObserveDelete(t *testing.T) {
 	}
 	if strings.Count(strings.Join(methods, ","), http.MethodDelete) < 3 {
 		t.Fatalf("methods = %v, want service, networkpolicy, and deployment deletes", methods)
+	}
+}
+
+func TestKubernetesPlatformWorkloadRuntimeObjectMaterializationAppliesTenantFetcherIdentity(t *testing.T) {
+	var paths []string
+	client := newTestKubernetesRESTClient(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPatch {
+			paths = append(paths, r.URL.Path)
+		}
+		if r.Method == http.MethodPatch || r.Method == http.MethodDelete {
+			return jsonResponse(http.StatusOK, `{"kind":"Status","status":"Success"}`), nil
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/api/v1/nodes") {
+			return jsonResponse(http.StatusOK, `{"items":[]}`), nil
+		}
+		return jsonResponse(http.StatusNotFound, `{"kind":"Status","status":"Failure"}`), nil
+	}))
+	runtime := NewKubernetesPlatformWorkloadRuntimeWithMaterializationConfig(client, "model-service:9105", "registry.local/model-fetcher@sha256:"+strings.Repeat("b", 64))
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("2df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-apply")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: tenant, ModelVersionID: "33333333-3333-3333-3333-333333333333",
+		ObjectRef: "object://models/" + tenant + "/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors",
+		SizeBytes: 12, ChecksumSHA256: "sha256:" + strings.Repeat("a", 64),
+		ModelServiceGRPCAddr: "model-service:9105",
+		FetcherImageRef:      "registry.local/model-fetcher@sha256:" + strings.Repeat("b", 64),
+		TargetPath:           "/models/33333333-3333-3333-3333-333333333333/model.safetensors",
+	}
+	if _, err := runtime.Apply(context.Background(), tenant, "workload-object-apply", spec); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	joined := strings.Join(paths, "\n")
+	ns := "/namespaces/ani-tenant-" + tenant + "/"
+	for _, want := range []string{
+		"/api/v1" + ns + "serviceaccounts/ani-inference-fetcher",
+		"/apis/cert-manager.io/v1" + ns + "certificates/ani-model-fetcher-11111111-1111-1111-1",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("Apply() paths = %v, want %s", paths, want)
+		}
+	}
+	indexOf := func(fragment string) int {
+		for index, path := range paths {
+			if strings.Contains(path, fragment) {
+				return index
+			}
+		}
+		return -1
+	}
+	serviceAccountIndex := indexOf("/serviceaccounts/ani-inference-fetcher")
+	certificateIndex := indexOf("/certificates/ani-model-fetcher-")
+	deploymentIndex := indexOf("/deployments/inference-object-apply")
+	policyIndex := indexOf("/networkpolicies/inference-object-apply")
+	if serviceAccountIndex < 0 || certificateIndex < 0 || deploymentIndex < 0 || policyIndex < 0 || serviceAccountIndex > deploymentIndex || certificateIndex > deploymentIndex || policyIndex > deploymentIndex {
+		t.Fatalf("Apply() dependency order = %v, want SA/certificate/NetworkPolicy before deployment", paths)
+	}
+}
+
+func TestKubernetesPlatformWorkloadRuntimeObjectApplyFailureKeepsTenantFetcherIdentity(t *testing.T) {
+	var deleted []string
+	client := newTestKubernetesRESTClient(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodDelete {
+			deleted = append(deleted, r.URL.Path)
+			return jsonResponse(http.StatusOK, `{"kind":"Status","status":"Success"}`), nil
+		}
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/") {
+			return jsonResponse(http.StatusInternalServerError, `{"kind":"Status","status":"Failure"}`), nil
+		}
+		if r.Method == http.MethodPatch || r.Method == http.MethodDelete {
+			return jsonResponse(http.StatusOK, `{"kind":"Status","status":"Success"}`), nil
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/api/v1/nodes") {
+			return jsonResponse(http.StatusOK, `{"items":[]}`), nil
+		}
+		return jsonResponse(http.StatusNotFound, `{"kind":"Status","status":"Failure"}`), nil
+	}))
+	runtime := NewKubernetesPlatformWorkloadRuntimeWithMaterializationConfig(client, "model-service:9105", "registry.local/model-fetcher@sha256:"+strings.Repeat("b", 64))
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("4df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-apply-failure")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: tenant, ModelVersionID: "33333333-3333-3333-3333-333333333333",
+		ObjectRef: "object://models/" + tenant + "/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors",
+		SizeBytes: 12, ChecksumSHA256: "sha256:" + strings.Repeat("a", 64),
+		ModelServiceGRPCAddr: "model-service:9105",
+		FetcherImageRef:      "registry.local/model-fetcher@sha256:" + strings.Repeat("b", 64),
+		TargetPath:           "/models/33333333-3333-3333-3333-333333333333/model.safetensors",
+	}
+	if _, err := runtime.Apply(context.Background(), tenant, "workload-object-apply-failure", spec); err == nil {
+		t.Fatal("Apply() error = nil, want workload failure")
+	}
+	joined := strings.Join(deleted, "\n")
+	if strings.Contains(joined, "/serviceaccounts/ani-inference-fetcher") || strings.Contains(joined, "/certificates/ani-model-fetcher-") {
+		t.Fatalf("Apply() compensation removed tenant-shared fetcher identity: %v", deleted)
+	}
+}
+
+func TestKubernetesPlatformWorkloadRuntimeDeleteKeepsTenantFetcherIdentity(t *testing.T) {
+	var paths []string
+	client := newTestKubernetesRESTClient(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodDelete {
+			paths = append(paths, r.Method+" "+r.URL.Path)
+			return jsonResponse(http.StatusOK, `{"kind":"Status","status":"Success"}`), nil
+		}
+		return jsonResponse(http.StatusNotFound, `{"kind":"Status","status":"Failure"}`), nil
+	}))
+	runtime := NewKubernetesPlatformWorkloadRuntime(client)
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("3df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-object-delete")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{TenantID: tenant}
+	if err := runtime.Delete(context.Background(), tenant, "workload-object-delete", spec); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	joined := strings.Join(paths, "\n")
+	if strings.Contains(joined, "/serviceaccounts/ani-inference-fetcher") || strings.Contains(joined, "/certificates/ani-model-fetcher-") {
+		t.Fatalf("Delete() removed tenant-shared fetcher identity: %v", paths)
 	}
 }
 

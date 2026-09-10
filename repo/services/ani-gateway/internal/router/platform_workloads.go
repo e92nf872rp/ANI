@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,23 +24,24 @@ type platformWorkloadAPI struct {
 }
 
 type platformWorkloadCreateRequest struct {
-	IdempotencyKey string                             `json:"idempotency_key"`
-	Name           string                             `json:"name"`
-	WorkloadClass  string                             `json:"workload_class"`
-	RuntimeKind    string                             `json:"runtime_kind"`
-	ImageRef       string                             `json:"image_ref"`
-	Command        []string                           `json:"command"`
-	Args           []string                           `json:"args"`
-	Env            []platformWorkloadEnvVarRequest    `json:"env"`
-	Replicas       int                                `json:"replicas"`
-	Resources      platformWorkloadResourcesRequest   `json:"resources"`
-	Topology       platformWorkloadTopologyRequest    `json:"topology"`
-	Scheduling     platformWorkloadSchedulingRequest  `json:"scheduling"`
-	Network        platformWorkloadNetworkRequest     `json:"network"`
-	Artifacts      []platformWorkloadArtifactRequest  `json:"artifacts"`
-	SecretBindings []platformWorkloadSecretRequest    `json:"secret_bindings"`
-	HealthCheck    platformWorkloadHealthCheckRequest `json:"health_check"`
-	Metadata       platformWorkloadMetadataRequest    `json:"metadata"`
+	IdempotencyKey       string                                       `json:"idempotency_key"`
+	Name                 string                                       `json:"name"`
+	WorkloadClass        string                                       `json:"workload_class"`
+	RuntimeKind          string                                       `json:"runtime_kind"`
+	ImageRef             string                                       `json:"image_ref"`
+	Command              []string                                     `json:"command"`
+	Args                 []string                                     `json:"args"`
+	Env                  []platformWorkloadEnvVarRequest              `json:"env"`
+	Replicas             int                                          `json:"replicas"`
+	Resources            platformWorkloadResourcesRequest             `json:"resources"`
+	Topology             platformWorkloadTopologyRequest              `json:"topology"`
+	Scheduling           platformWorkloadSchedulingRequest            `json:"scheduling"`
+	Network              platformWorkloadNetworkRequest               `json:"network"`
+	Artifacts            []platformWorkloadArtifactRequest            `json:"artifacts"`
+	ModelMaterialization *platformWorkloadModelMaterializationRequest `json:"model_materialization"`
+	SecretBindings       []platformWorkloadSecretRequest              `json:"secret_bindings"`
+	HealthCheck          platformWorkloadHealthCheckRequest           `json:"health_check"`
+	Metadata             platformWorkloadMetadataRequest              `json:"metadata"`
 }
 
 type platformWorkloadResourcesRequest struct {
@@ -86,6 +88,17 @@ type platformWorkloadNetworkRequest struct {
 type platformWorkloadArtifactRequest struct {
 	ObjectRef string `json:"object_ref"`
 	MountPath string `json:"mount_path"`
+}
+
+type platformWorkloadModelMaterializationRequest struct {
+	TenantID             string `json:"tenant_id"`
+	ModelVersionID       string `json:"model_version_id"`
+	ObjectRef            string `json:"object_ref"`
+	SizeBytes            int64  `json:"size_bytes"`
+	ChecksumSHA256       string `json:"checksum_sha256"`
+	ModelServiceGRPCAddr string `json:"model_service_grpc_addr"`
+	FetcherImageRef      string `json:"fetcher_image_ref"`
+	TargetPath           string `json:"target_path"`
 }
 
 type platformWorkloadEnvVarRequest struct {
@@ -376,6 +389,19 @@ func platformWorkloadSpecFromRequest(req platformWorkloadCreateRequest) (ports.P
 	}
 	for _, artifact := range req.Artifacts {
 		spec.Artifacts = append(spec.Artifacts, ports.PlatformWorkloadArtifact{ObjectRef: artifact.ObjectRef, MountPath: artifact.MountPath})
+	}
+	if req.ModelMaterialization != nil {
+		mat := req.ModelMaterialization
+		slog.Info("platform workload model materialization received",
+			"model_version_id", mat.ModelVersionID,
+			"object_ref_present", strings.TrimSpace(mat.ObjectRef) != "",
+		)
+		spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+			TenantID: mat.TenantID, ModelVersionID: mat.ModelVersionID, ObjectRef: mat.ObjectRef,
+			SizeBytes: mat.SizeBytes, ChecksumSHA256: mat.ChecksumSHA256,
+			ModelServiceGRPCAddr: mat.ModelServiceGRPCAddr, FetcherImageRef: mat.FetcherImageRef,
+			TargetPath: mat.TargetPath,
+		}
 	}
 	for _, binding := range req.SecretBindings {
 		spec.SecretBindings = append(spec.SecretBindings, ports.PlatformWorkloadSecretBinding{SecretRef: binding.SecretRef, MountPath: binding.MountPath})

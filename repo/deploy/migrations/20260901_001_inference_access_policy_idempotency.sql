@@ -30,4 +30,9 @@ CREATE POLICY inference_access_policy_mutations_tenant_isolation
     USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
+-- The inference-service connects through the shared application role.  Without
+-- these table privileges the new idempotency lookup is mapped to 503 even
+-- though the table and RLS policy exist.
+GRANT SELECT, INSERT ON inference_access_policy_mutations TO ani_app;
+
 COMMIT;

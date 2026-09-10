@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -24,16 +25,27 @@ import (
 
 // Runtime 用 Core SDK 调 /platform-workloads。Services 禁止 import Core 内部包。
 type Runtime struct {
-	client      anisdk.Client
-	httpClient  *http.Client
-	staticToken string
-	minter      *Minter // 按租户 mint JWT；没有则用 staticToken
+	client               anisdk.Client
+	httpClient           *http.Client
+	staticToken          string
+	minter               *Minter // 按租户 mint JWT；没有则用 staticToken
+	modelServiceGRPCAddr string
+	modelFetcherImageRef string
 }
 
 func New(baseURL, token string) *Runtime {
+	return NewWithMaterializationConfig(baseURL, token, os.Getenv("MODEL_SERVICE_GRPC_ADDR"), os.Getenv("MODEL_FETCHER_IMAGE_REF"))
+}
+
+// NewWithMaterializationConfig binds the non-secret model materialization
+// settings supplied by deployment configuration. Signed URLs and object-store
+// credentials are intentionally not accepted here.
+func NewWithMaterializationConfig(baseURL, token, modelServiceGRPCAddr, modelFetcherImageRef string) *Runtime {
 	return &Runtime{
-		client:      anisdk.NewClient(strings.TrimRight(baseURL, "/"), ""),
-		staticToken: strings.TrimSpace(token),
+		client:               anisdk.NewClient(strings.TrimRight(baseURL, "/"), ""),
+		staticToken:          strings.TrimSpace(token),
+		modelServiceGRPCAddr: strings.TrimSpace(modelServiceGRPCAddr),
+		modelFetcherImageRef: strings.TrimSpace(modelFetcherImageRef),
 	}
 }
 
@@ -57,7 +69,17 @@ func (r *Runtime) Ensure(ctx context.Context, request runtime.EnsureRequest) (ru
 	if err != nil {
 		return runtime.Observation{}, err
 	}
-	body := createBody(request, plan)
+	if err := r.validateObjectMaterialization(request); err != nil {
+		return runtime.Observation{}, err
+	}
+	body := r.createBody(request, plan)
+	slog.Info("core platform workload request",
+		"service_id", request.ServiceID.String(),
+		"generation", request.Generation,
+		"materialization_present", request.Spec.ExecutionProfile.Materialization != nil,
+		"materialization_body_present", body["model_materialization"] != nil,
+		"artifact_ref", request.Spec.ExecutionProfile.ArtifactRef,
+	)
 	payload, err := r.request(ctx, request.TenantID, "POST", "/platform-workloads", anisdk.RequestOptions{Body: body})
 	if err != nil {
 		return runtime.Observation{}, err
@@ -71,6 +93,10 @@ func (r *Runtime) Ensure(ctx context.Context, request runtime.EnsureRequest) (ru
 		return runtime.Observation{RuntimeRef: workloadID}, err
 	}
 	return observed, nil
+}
+
+func (r *Runtime) createBody(request runtime.EnsureRequest, plan runtime.TopologyPlan) map[string]any {
+	return createBodyWithMaterializationConfig(request, plan, r.modelServiceGRPCAddr, r.modelFetcherImageRef)
 }
 
 // Observe 只读 GET platform-workload，不创建。
@@ -266,6 +292,10 @@ func isIdempotencyInProgress(err error) bool {
 
 // createBody 组装 Core POST /platform-workloads。Core 只收 image_ref + command/args，不知道 vLLM。
 func createBody(request runtime.EnsureRequest, plan runtime.TopologyPlan) map[string]any {
+	return createBodyWithMaterializationConfig(request, plan, os.Getenv("MODEL_SERVICE_GRPC_ADDR"), os.Getenv("MODEL_FETCHER_IMAGE_REF"))
+}
+
+func createBodyWithMaterializationConfig(request runtime.EnsureRequest, plan runtime.TopologyPlan, modelServiceGRPCAddr, modelFetcherImageRef string) map[string]any {
 	image := request.Spec.ExecutionProfile.ImageRef
 	if image == "" {
 		image = "registry.ani.internal/platform/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -325,12 +355,137 @@ func createBody(request runtime.EnsureRequest, plan runtime.TopologyPlan) map[st
 		}
 		body["env"] = env
 	}
-	// Local models are pvc://<claim>. Core mounts that claim at /models; the
-	// engine --model path is the #fragment from ArtifactRef, not a subPath.
-	if objectRef, _ := engine.Artifact(request.Spec.ExecutionProfile.ArtifactRef); objectRef != "" {
-		body["artifacts"] = []map[string]any{{"object_ref": objectRef, "mount_path": "/models"}}
+	// PVC models remain Core artifacts. Object-backed models use the explicit
+	// materialization contract; never pass object:// as an ordinary artifact.
+	if mat := request.Spec.ExecutionProfile.Materialization; mat != nil {
+		body["model_materialization"] = materializationBodyWithConfig(*mat, modelServiceGRPCAddr, modelFetcherImageRef)
+	} else if objectRef, _ := engine.Artifact(request.Spec.ExecutionProfile.ArtifactRef); objectRef != "" {
+		if strings.HasPrefix(strings.ToLower(objectRef), "pvc://") {
+			body["artifacts"] = []map[string]any{{"object_ref": objectRef, "mount_path": "/models"}}
+		}
 	}
 	return body
+}
+
+func validateObjectMaterialization(request runtime.EnsureRequest) error {
+	return validateObjectMaterializationWithConfig(request, os.Getenv("MODEL_SERVICE_GRPC_ADDR"), os.Getenv("MODEL_FETCHER_IMAGE_REF"))
+}
+
+func (r *Runtime) validateObjectMaterialization(request runtime.EnsureRequest) error {
+	return validateObjectMaterializationWithConfig(request, r.modelServiceGRPCAddr, r.modelFetcherImageRef)
+}
+
+func validateObjectMaterializationWithConfig(request runtime.EnsureRequest, modelServiceGRPCAddr, modelFetcherImageRef string) error {
+	objectRef, _ := engine.Artifact(request.Spec.ExecutionProfile.ArtifactRef)
+	mat := request.Spec.ExecutionProfile.Materialization
+	if mat != nil && objectRef != "" && !strings.HasPrefix(strings.ToLower(objectRef), "object://") {
+		return fmt.Errorf("model materialization requires an object-backed artifact")
+	}
+	if mat == nil && !strings.HasPrefix(strings.ToLower(objectRef), "object://") {
+		return nil
+	}
+	if mat == nil {
+		return fmt.Errorf("object-backed model requires materialization metadata")
+	}
+	if mat.TenantID == uuid.Nil || mat.TenantID != request.TenantID || mat.ModelVersionID == uuid.Nil ||
+		!canonicalObjectRef(mat.ObjectRef, mat.TenantID) || (objectRef != "" && strings.TrimSpace(mat.ObjectRef) != objectRef) || mat.ExpectedSizeBytes < 1 ||
+		!validSHA256(mat.SHA256) {
+		return fmt.Errorf("object-backed model materialization metadata is incomplete")
+	}
+	if strings.TrimSpace(modelServiceGRPCAddr) == "" || !validFetcherImage(strings.TrimSpace(modelFetcherImageRef)) {
+		return fmt.Errorf("object-backed model materialization runtime configuration is missing")
+	}
+	return nil
+}
+
+func validFetcherImage(value string) bool {
+	at := strings.LastIndex(value, "@sha256:")
+	return at > 0 && strings.Count(value, "@") == 1 && validSHA256(value[at+1:])
+}
+
+func validSHA256(value string) bool {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	value = strings.TrimPrefix(value, "sha256:")
+	if len(value) != 64 {
+		return false
+	}
+	for _, ch := range value {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalObjectRef(value string, tenantID uuid.UUID) bool {
+	u, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || u.Scheme != "object" || u.Host != "models" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 5 {
+		return false
+	}
+	parsedTenant, err := uuid.Parse(parts[0])
+	if err != nil || parsedTenant != tenantID {
+		return false
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil {
+		return false
+	}
+	decodedPath, _ := url.PathUnescape(u.EscapedPath())
+	if strings.Contains(u.Path, "..") || strings.Contains(decodedPath, "..") {
+		return false
+	}
+	for _, part := range parts[2:] {
+		if strings.TrimSpace(part) == "" || part == "." || part == ".." || strings.Contains(part, "\\") {
+			return false
+		}
+	}
+	return true
+}
+
+func safeTargetPath(value string) bool {
+	target := strings.TrimSpace(value)
+	if !strings.HasPrefix(target, "/") || strings.Contains(target, "\\") || strings.Contains(target, "..") {
+		return false
+	}
+	decoded, err := url.PathUnescape(target)
+	return err == nil && !strings.Contains(decoded, "..")
+}
+
+func materializationBody(mat domain.ModelMaterialization) map[string]any {
+	return materializationBodyWithConfig(mat, os.Getenv("MODEL_SERVICE_GRPC_ADDR"), os.Getenv("MODEL_FETCHER_IMAGE_REF"))
+}
+
+func materializationBodyWithConfig(mat domain.ModelMaterialization, modelServiceAddr, fetcherImage string) map[string]any {
+	modelServiceAddr = strings.TrimSpace(modelServiceAddr)
+	fetcherImage = strings.TrimSpace(fetcherImage)
+	targetPath := "/models/model"
+	if parsed, err := url.Parse(mat.ObjectRef); err == nil {
+		if name := path.Base(parsed.Path); name != "." && name != "/" && name != "" {
+			targetPath = "/models/" + mat.ModelVersionID.String() + "/" + name
+			if isArchiveObjectRef(mat.ObjectRef) {
+				targetPath = "/models/" + mat.ModelVersionID.String()
+			}
+		}
+	}
+	return map[string]any{
+		"tenant_id": mat.TenantID.String(), "model_version_id": mat.ModelVersionID.String(),
+		"object_ref": mat.ObjectRef, "size_bytes": mat.ExpectedSizeBytes, "checksum_sha256": mat.SHA256,
+		"model_service_grpc_addr": modelServiceAddr, "fetcher_image_ref": fetcherImage, "target_path": targetPath,
+	}
+}
+
+func isArchiveObjectRef(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "object" || parsed.Host != "models" || parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	return strings.HasSuffix(parsed.Path, "/model.tar.gz") && !strings.Contains(parsed.Path, "..")
 }
 
 // acceleratorBody 把推理加速器映射到 Core platform-workloads。

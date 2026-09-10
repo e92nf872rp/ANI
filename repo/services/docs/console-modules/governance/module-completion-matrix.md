@@ -62,7 +62,7 @@
 | 资源池概览 | 可用 | 聚合 | `compute/resource-pool-overview.md` |
 | 卷/对象/向量存储子能力 | 可用 | Core | `compute/storage/*-snapshot/upload/write.md` |
 | 用户/LDAP/角色编辑 | 可用 | Services | `tenant/user-management.md` 等 |
-| 推理策略 / OpenAI 兼容 | 可用 | Services/Gateway | `inference/inference-rate-limit-policy.md`、`integration/openai-compatible-api.md` |
+| 推理策略 / OpenAI 兼容 | 可用 | Services / Envoy AI Gateway | `inference/inference-rate-limit-policy.md`、`integration/openai-compatible-api.md` |
 | 全局搜索 | 可用 | 聚合 | `home/global-search.md` |
 
 ## P2 子模块（2026-06-17 YAML 已有项文档收口）
@@ -99,7 +99,7 @@
 - ~~`Python SDK（待补）`~~ — **已有详文**（`integration-py-sdk.md`）
 - ~~`TypeScript Client（待补）`~~ — **已有详文**（`integration-ts-client.md`）
 - ~~`Java SDK（待补）`~~ — **已有详文**（`integration-java-sdk.md`）
-- `OpenAI 兼容 API`（详文见 `openai-compatible-api.md`；Gateway stub）
+- `OpenAI 兼容 API`（详文见 `openai-compatible-api.md`；独立 Envoy AI Gateway 数据面，ANI Gateway 不代理）
 - `Webhook`、`企业微信 / 钉钉 Bot`、`第三方业务系统集成` — **已有子模块详文**（Phase 2 YAML；handler stub），不再标「待补」导航占位
 
 额外说明：
