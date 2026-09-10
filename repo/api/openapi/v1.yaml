@@ -3788,6 +3788,7 @@ components:
         gpu_spec:            { type: string, nullable: true, description: "整卡规格标签值，从 ani.kubercloud.io/gpu-spec 读取" }
         gpu_sharing_spec:    { type: string, nullable: true, description: "vGPU 共享规格标签值，从 ani.kubercloud.io/gpu-sharing-spec 读取" }
         gpu_sharing_policy:  { type: string, nullable: true, description: "vGPU 共享策略标签值，从 ani.kubercloud.io/gpu-sharing-policy 读取" }
+        shares:              { type: integer, minimum: 1, description: "该记录所属物理卡的切分份数；1 表示整卡，vgpu 卡为切分份数（2/4/8）。数据源为 volcano.sh/node-vgpu-register 注解（回退用 volcano.sh/vgpu-number allocatable 推导）" }
 
     GPUInventoryListResponse:
       type: object
@@ -4022,6 +4023,30 @@ components:
       properties:
         status: { type: string, enum: [maintenance, idle], description: "目标状态：maintenance=维护中，idle=空闲" }
 
+    # ── 集群切分 Schemas（GPU-PARTITION-A 新增）────────────────────────────────
+
+    GPUPartitionCreateRequest:
+      type: object
+      description: |
+        集群 GPU 等分切分请求。对集群内所有空闲整卡节点统一生效（跨型号），
+        每份显存 = 物理卡显存 / shares，由后端按节点实际显存派生，不在请求中指定。
+      required: [shares]
+      properties:
+        shares:
+          type: integer
+          enum: [2, 4, 8]
+          description: "等分份数：2=half，4=quarter，8=eighth"
+
+    GPUPartitionTaskAccepted:
+      type: object
+      description: "切分异步任务受理响应；通过 GET /tasks/{task_id} 轮询直至 completed/failed"
+      required: [task_id, task_type, status, progress_pct]
+      properties:
+        task_id:      { type: string, format: uuid }
+        task_type:    { type: string, description: "固定为 gpu_partition" }
+        status:       { type: string, enum: [running], description: "受理后初始状态" }
+        progress_pct: { type: integer, minimum: 0, maximum: 100 }
+
     # ── 配额自查 Schemas（SPEC §4.3 新增）────────────────────────────────────────
 
     QuotaListResult:
@@ -4140,6 +4165,9 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/QuotaItem' }
+        gpu_reservation:
+          $ref: '#/components/schemas/ReservationView'
+          description: "GPU 预留视图（仅查询类端点返回）；未设置预留时 allocated_gpu_count=0，available 可能为负"
 
     QuotaItem:
       type: object
@@ -4150,6 +4178,7 @@ components:
         total:         { type: integer, format: int64, description: "配额上限" }
         used:          { type: integer, format: int64, description: "已实扣（已 Confirm）" }
         reserved:      { type: integer, format: int64, description: "已预占（已 Try 未 Confirm/Cancel）" }
+        available:     { type: integer, format: int64, description: "可创建 = total - used - reserved" }
         tightened:     { type: boolean, description: "PUT 缩容自动收紧标记（请求 total<used+reserved 时收紧为 used+reserved，置 true）；GET 响应中为零值 false" }
         unit:          { type: string, description: "单位（来自 resource_quota_meta，GET 时返回）" }
         display_name:  { type: string, description: "展示名称（来自 resource_quota_meta，GET 时返回）" }
@@ -4643,6 +4672,11 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     GPUTypeNotInNodes:
       description: GPU 型号不存在于集群节点标签中（code=GPU_TYPE_NOT_IN_NODES）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NoIdleWholecardGPUs:
+      description: 集群内没有可切分的空闲整卡节点（code=NO_IDLE_WHOLECARD_GPUS）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -7933,13 +7967,10 @@ paths:
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      # 双域资源：BOSS 提交 gpu_partition 等集群级异步操作后需用 platform token
+      # 轮询任务结果，tenant token 轮询本租户 instance.* 任务；handler 按 token
+      # 上下文 tenant_id 过滤，无跨租户泄露。V2 boundary 只支持单域，故走 legacy。
       x-ani-rbac-scope: "scope:tasks:read"
-      x-ani-authz:
-        version: v1
-        resource: tasks
-        action: read
-        boundary: tenant
-        principal_kinds: [user, api_key]
       parameters:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
         - { name: cursor, in: query, required: false, schema: { type: string } }
@@ -7971,13 +8002,9 @@ paths:
       security:
         - BearerAuth: []
         - ApiKeyAuth: []
+      # 双域资源：同 GET /tasks；BOSS 用 platform token 轮询 gpu_partition 任务，
+      # tenant 轮询本租户任务。V2 boundary 只支持单域，故走 legacy。
       x-ani-rbac-scope: "scope:tasks:read"
-      x-ani-authz:
-        version: v1
-        resource: tasks
-        action: read
-        boundary: tenant
-        principal_kinds: [user, api_key]
       parameters:
         - { name: task_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -9088,6 +9115,47 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/DeviceNotFound' }
+
+  # ── GPU 集群切分（GPU-PARTITION-A，BOSS 专属异步操作）─────────────────────────
+  /gpu-inventory/gpu-partitions:
+    post:
+      operationId: createGPUPartition
+      summary: 集群 GPU 等分切分
+      description: |
+        对集群内全部空闲整卡节点做统一等分切分（跨型号生效，异步任务）。
+        自动完成：更新节点级 volcano-vgpu-node-config 的 devicesplitcount、
+        重启节点 volcano vGPU device plugin pod 触发重新注册、打 vGPU 节点标签
+        （gpu-mode/gpu-sharing-policy/gpu-sharing-spec，按各节点卡型实际显存派生）
+        并清除整卡 gpu-spec 标签。
+        节点级判定：存在持有 GPU 资源 Pod（nvidia.com/gpu>0 或
+        volcano.sh/vgpu-number>0）的节点整体跳过，跳过明细记录在任务 result 中。
+        集群内没有可切分的空闲整卡节点时返回 422。
+        本操作不创建 GPUSpec；切分完成后通过 POST /gpu-specs 单独创建规格
+        （mb_per_share 在创建规格时选择）。仅支持 2/4/8 等分；整卡回退暂不提供。
+      tags: [GPUInventory]
+      x-ani-rbac-scope: "scope:gpu-inventory:write"
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "幂等键，防止重复提交" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GPUPartitionCreateRequest' }
+      responses:
+        "202":
+          description: 切分任务已受理
+          headers:
+            Location:
+              description: 任务轮询地址（GET /api/v1/tasks/{task_id}）
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GPUPartitionTaskAccepted' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/NoIdleWholecardGPUs' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   # ── GPU 规格（Core API v1，只读选择契约）──────────────────────────────────────
   /gpu-specs:

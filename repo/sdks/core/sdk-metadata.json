@@ -503,6 +503,12 @@
       "scope": "scope:gpu-inventory:read"
     },
     {
+      "operationId": "createGPUPartition",
+      "method": "POST",
+      "path": "/gpu-inventory/gpu-partitions",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
       "operationId": "getGPUOccupancy",
       "method": "GET",
       "path": "/gpu-inventory/occupancy",
@@ -1528,6 +1534,8 @@
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
     "GPUOccupancyStats",
+    "GPUPartitionCreateRequest",
+    "GPUPartitionTaskAccepted",
     "GPUSchedulingQueue",
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
@@ -1925,6 +1933,7 @@
     "LAST_PLATFORM_ADMIN",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
+    "NO_IDLE_WHOLECARD_GPUS",
     "PASSWORD_SAME_AS_OLD",
     "PLATFORM_USER_NOT_FOUND",
     "PRECONDITION_FAILED",

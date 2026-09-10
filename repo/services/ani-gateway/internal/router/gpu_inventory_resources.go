@@ -70,6 +70,7 @@ type gpuInventoryRecordResponse struct {
 	GPUSpec          string `json:"gpu_spec,omitempty"`
 	GPUSharingSpec   string `json:"gpu_sharing_spec,omitempty"`
 	GPUSharingPolicy string `json:"gpu_sharing_policy,omitempty"`
+	Shares           int    `json:"shares,omitempty"`
 }
 
 type gpuSpecResponse struct {
@@ -602,6 +603,12 @@ func (api *gpuInventoryAPI) gpuInventoryRecordFromDevice(node ports.GPUNodeClass
 		GPUSpec:          node.GPUSpec,
 		GPUSharingSpec:   node.GPUSharingSpec,
 		GPUSharingPolicy: node.GPUSharingPolicy,
+	}
+	// 每张物理卡的切分份数：整卡=1，vgpu 卡=切分份数（如 2/4/8）。
+	// device.Shares<=0 时（如 local profile / 其他 inventory 实现）按整卡 1 处理。
+	record.Shares = device.Shares
+	if record.Shares <= 0 {
+		record.Shares = 1
 	}
 	// 当节点 ready 且存在同节点的 Running GPU Pod 时，按设备索引顺序
 	// 标记前 PodCount 个设备为 in_use（每个 Pod 占用 1 个设备记录）。

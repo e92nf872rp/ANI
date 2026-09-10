@@ -130,6 +130,14 @@ func (r *InstancePodNamesResolver) PodNames(ctx context.Context, tenantID, insta
 //
 // 降级发生时打 Warn 日志：静默降级会让"前缀重叠实例互相污染"这一缺陷在无感知中回归，
 // 运维需要从日志知晓当前处于降级状态（该日志按失败场景保留）。
+// 过滤 KubeVirt VM 宿主 pod（virt-launcher-*）。VM 的监控指标由 getMetricsForVM 走
+// kubevirt name= 单独采集，其 virt-launcher 宿主 pod 绝不参与 sandbox/container 的
+// 容器级 cAdvisor 聚合；否则当同一实例名下 sandbox pod 与 VM 宿主 pod 并存（共享同一
+// ani.kubercloud.io/instance=<Name> label）时，VM 宿主的 CPU/working-set/limit 会被
+// sum 混入业务实例，导致监控异常偏高（2026-09-09 实测：Name=test 的 sandbox 叠入了
+// virt-launcher-test-tcjlv 的指标，内存出现 used > total、CPU ≈ VM 占用率）。
+// 过滤后为空则返回「永不匹配」占位符而非降级前缀正则，避免前缀重叠再次把宿主 pod
+// 纳入聚合。
 func (r *InstancePodNamesResolver) Matcher(ctx context.Context, tenantID, instanceName string) string {
 	names, err := r.PodNames(ctx, tenantID, instanceName)
 	if err != nil {
@@ -137,6 +145,7 @@ func (r *InstancePodNamesResolver) Matcher(ctx context.Context, tenantID, instan
 			"namespace", tenantNamespace(tenantID), "instance", instanceName, "err", err)
 		return promQLPodMatcher(instanceName)
 	}
+	names = filterOutVMHostPods(names)
 	if len(names) == 0 {
 		return podNamesNonePlaceholder
 	}
@@ -145,4 +154,20 @@ func (r *InstancePodNamesResolver) Matcher(ctx context.Context, tenantID, instan
 		quoted[i] = regexp.QuoteMeta(name)
 	}
 	return "^(" + strings.Join(quoted, "|") + ")$"
+}
+
+// vmHostPodPrefix 是 KubeVirt VM 宿主 pod 的保留命名前缀（pod 名 = virt-launcher-<vmi>）。
+const vmHostPodPrefix = "virt-launcher-"
+
+// filterOutVMHostPods 去除 VM 宿主 pod 名（virt-launcher-*），保留业务容器/sandbox pod。
+// VM 实例的指标走 kubevirt 专用采集，不依赖这些宿主 pod 的 cAdvisor series。
+func filterOutVMHostPods(names []string) []string {
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.HasPrefix(name, vmHostPodPrefix) {
+			continue
+		}
+		filtered = append(filtered, name)
+	}
+	return filtered
 }

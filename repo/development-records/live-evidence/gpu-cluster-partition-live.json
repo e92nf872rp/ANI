@@ -1,0 +1,96 @@
+{
+ "profile": "GPU-CLUSTER-PARTITION-LIVE-GATE-C1",
+ "steps": [
+  {
+   "step": "platform-login",
+   "ok": true,
+   "detail": "http=200 token_len=822"
+  },
+  {
+   "step": "tenant-login",
+   "ok": true,
+   "detail": "http=200 token_len=862"
+  },
+  {
+   "step": "tenant-denied-403",
+   "ok": true,
+   "detail": "http=403 body={\"code\": \"FORBIDDEN\", \"message\": \"token scope not allowed for this path\", \"request_id\": \"req_75dbb030-0e29-49b9-91ae-1ad414dd53cb\"}"
+  },
+  {
+   "step": "task-accepted-202",
+   "ok": true,
+   "detail": "http=202 task_id=e5a85c3b-fd2c-468e-a758-0b71be787f15 status=running"
+  },
+  {
+   "step": "task-terminal",
+   "ok": true,
+   "detail": "{\"status\": \"completed\", \"progress_pct\": 100, \"error_message\": null, \"result\": {\"applied_nodes\": [\"dev-phys-02\"], \"failed_nodes\": [], \"shares\": 4, \"skipped_nodes\": [{\"node_name\": \"dev-phys-03\", \"pods\": [{\"name\": \"new-t-7cfcf99766-sqcbm\", \"namespace\": \"ani-tenant-00000000-0000-0000-0000-000000000001\"}], \"reason\": \"node_busy\"}, {\"node_name\": \"kubercloud\", \"pods\": [{\"name\": \"pw-3ea36b2c-c396-4215-bc91-78b1b3596d23-757f5d58d9-6p7qz\", \"namespace\": \"ani-tenant-00000000-0000-0000-0000-000000000001\"}], \"reason\": \"node_busy\"}]}}"
+  },
+  {
+   "step": "cm-devicesplitcount",
+   "ok": true,
+   "detail": "dev-phys-02 entry={'name': 'dev-phys-02', 'operatingmode': 'hami-core', 'devicememoryscaling': 1, 'devicesplitcount': 4, 'migstrategy': 'none', 'filterdevices': {'uuid': [], 'index': []}}"
+  },
+  {
+   "step": "node-relabeled",
+   "ok": true,
+   "detail": "{\"ani.dev/gpu\": \"nvidia\", \"ani.kubercloud.io/gpu-mode\": \"vgpu\", \"ani.kubercloud.io/gpu-model\": \"RTX4090\", \"ani.kubercloud.io/gpu-node\": \"true\", \"ani.kubercloud.io/gpu-sharing-policy\": \"quarter\", \"ani.kubercloud.io/gpu-sharing-spec\": \"NVIDIA-RTX-4090-12285MiB\", \"ani.kubercloud.io/gpu-vendor\": \"nvidia\", \"gpu\": \"on\", \"nvidia.com/gpu.compute.major\": \"8\", \"nvidia.com/gpu.compute.minor\": \"9\", \"nvidia.com/gpu.count\": \"1\", \"nvidia.com/gpu.deploy.container-toolkit\": \"true\", \"nvidia.com/gpu.deploy.dcgm\": \"true\", \"nvidia.com/gpu.deploy.dcgm-exporter\": \"true\", \"nvidia.com/gpu.deploy.device-plugin\": \"true\", \"nvidia.com/gpu.deploy.driver\": \"true\", \"nvidia.com/gpu.deploy.gpu-feature-discovery\": \"true\", \"nvidia.com/gpu.deploy.node-status-exporter\": \"true\", \"nvidia.com/gpu.deploy.operator-validator\": \"true\", \"nvidia.com/gpu.family\": \"ada-lovelace\", \"nvidia.com/gpu.machine\": \"SY4108G-G4\", \"nvidia.com/gpu.memory\": \"49140\", \"nvidia.com/gpu.mode\": \"graphics\", \"nvidia.com/gpu.present\": \"true\", \"nvidia.com/gpu.product\": \"NVIDIA-GeForce-RTX-4090\", \"nvidia.com/gpu.replicas\": \"1\", \"nvidia.com/gpu.sharing-strategy\": \"none\", \"nvidia.com/vgpu.present\": \"false\"}"
+  },
+  {
+   "step": "vgpu-registered",
+   "ok": true,
+   "detail": "{\"volcano.sh/node-vgpu-register\": \"GPU-204847f2-3318-aa4d-dea3-bf171ba14afe,4,4914,NVIDIA-NVIDIA GeForce RTX 4090,true,hami-core:\"}"
+  },
+  {
+   "step": "plugin-pods",
+   "ok": true,
+   "detail": "volcano-device-plugin-jhsrd   2/2   Running   0     9s    10.16.7.204   dev-phys-02   <none>   <none>\nvolcano-device-plugin-wqfw7   2/2   Running   0     20d   10.16.5.40    dev-phys-03   <none>   <none>"
+  },
+  {
+   "step": "task-list-filter",
+   "ok": true,
+   "detail": "http=200 items=5"
+  }
+ ],
+ "final_task": {
+  "id": "e5a85c3b-fd2c-468e-a758-0b71be787f15",
+  "idempotency_key": "gpu-partition-live-1788936667",
+  "task_type": "gpu_partition",
+  "resource_type": "gpu_inventory",
+  "status": "completed",
+  "attempt_count": 1,
+  "max_attempts": 1,
+  "progress_pct": 100,
+  "result": {
+   "applied_nodes": [
+    "dev-phys-02"
+   ],
+   "failed_nodes": [],
+   "shares": 4,
+   "skipped_nodes": [
+    {
+     "node_name": "dev-phys-03",
+     "pods": [
+      {
+       "name": "new-t-7cfcf99766-sqcbm",
+       "namespace": "ani-tenant-00000000-0000-0000-0000-000000000001"
+      }
+     ],
+     "reason": "node_busy"
+    },
+    {
+     "node_name": "kubercloud",
+     "pods": [
+      {
+       "name": "pw-3ea36b2c-c396-4215-bc91-78b1b3596d23-757f5d58d9-6p7qz",
+       "namespace": "ani-tenant-00000000-0000-0000-0000-000000000001"
+      }
+     ],
+     "reason": "node_busy"
+    }
+   ]
+  },
+  "created_at": "2026-09-09T06:51:08Z",
+  "completed_at": "2026-09-09T06:51:16Z"
+ }
+}
