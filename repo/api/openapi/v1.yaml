@@ -8573,9 +8573,8 @@ paths:
         平台级（跨租户）只读审计检索。数据源为 kube-apiserver 审计日志（Metadata 级，
         仅 write verb：create/update/patch/delete），操作者为 K8s 原生身份。
         返回按 timestamp(+auditID) 全局倒序的一页，游标翻页（after=末条 timestamp），
-        total 为近似量（count_over_time）。任一数据源失败不阻塞 200：
-        缺失字段降级为 0/空，dev_profile.real_provider=false + reason 记录降级原因；
-        空流返回 items:[]。租户 token 访问必须 403。
+        total 为近似量（count_over_time）。Loki 不可用或查询失败时直接返回错误
+        （503/500，不降级不返回假数据）；空流返回 items:[]。租户 token 访问必须 403。
       tags: [PlatformAuditLog]
       parameters:
         - name: time_from

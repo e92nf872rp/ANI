@@ -13,8 +13,6 @@ import (
 // 操作者为 K8s 原生身份（system:serviceaccount:* / system:masters 等），
 // 不映射 ANI 用户，也不含 gateway 业务责任人台账（audit.go TODO 专项内容）。
 var (
-	// ErrPlatformAuditUnsupported 表示当前 provider 不支持平台审计查询。
-	ErrPlatformAuditUnsupported = errors.New("platform audit: unsupported provider")
 	// ErrPlatformAuditInvalid 表示平台审计查询请求参数非法。
 	ErrPlatformAuditInvalid = errors.New("platform audit: invalid request")
 )
@@ -82,8 +80,7 @@ type PlatformAuditLogResult struct {
 	NextAfter string
 	// TotalApprox 近似总量（count_over_time 按 step 聚合），非精确值。
 	TotalApprox int64
-	// DevProfile 数据源 profile（real adapter 为 real + real_provider=true；
-	// 单源失败/未配置时为 real + real_provider=false + reason 降级）。
+	// DevProfile 数据源 profile（real adapter 为 real + real_provider=true）。
 	DevProfile DevProfileInfo
 }
 

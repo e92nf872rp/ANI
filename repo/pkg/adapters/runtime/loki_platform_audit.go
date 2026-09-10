@@ -65,11 +65,11 @@ func NewLokiPlatformAudit(config LokiPlatformAuditConfig) (*LokiPlatformAudit, e
 	}, nil
 }
 
-// QueryAuditLogs 查询平台审计日志。Loki 不可用/非 200 时按单源降级语义返回
-// 200 等价结果（空 items + dev_profile.real_provider=false + reason），不报错。
+// QueryAuditLogs 查询平台审计日志。Loki 不可用/非 200 时直接返回错误
+// （过渡方案不降级，由 handler 映射为 5xx）。
 //
 // 注意：total_approx 为 best-effort（count_over_time 按 step 聚合）；若主查询成功而
-// total 查询失败，仅 total 置 0，不降级 real_provider（Loki 可达主查询即认为可用）。
+// total 查询失败，仅 total 置 0，不报错（Loki 可达主查询即认为可用）。
 func (s *LokiPlatformAudit) QueryAuditLogs(ctx context.Context, query ports.PlatformAuditLogQuery) (ports.PlatformAuditLogResult, error) {
 	now := s.now().UTC()
 	end := now
@@ -98,8 +98,7 @@ func (s *LokiPlatformAudit) QueryAuditLogs(ctx context.Context, query ports.Plat
 
 	items, err := s.fetchAuditItems(ctx, logql, start, end, limit)
 	if err != nil {
-		// 单源失败不阻塞 200：降级为空结果 + reason。
-		return degradedPlatformAudit(err), nil
+		return ports.PlatformAuditLogResult{}, err
 	}
 
 	// 多 stream 全局倒序合并（timestamp 相同以 auditID 兜底稳定排序）。
@@ -296,21 +295,6 @@ func (s *LokiPlatformAudit) getLoki(ctx context.Context, apiPath string, params 
 		return nil, fmt.Errorf("loki query failed: %w", err)
 	}
 	return resp, nil
-}
-
-// degradedPlatformAudit 构造单源降级结果（200 等价，real_provider=false + reason）。
-func degradedPlatformAudit(err error) ports.PlatformAuditLogResult {
-	return ports.PlatformAuditLogResult{
-		Items:       []ports.PlatformAuditLogItem{},
-		NextAfter:   "",
-		TotalApprox: 0,
-		DevProfile: ports.DevProfileInfo{
-			Mode:         "real",
-			Provider:     "loki",
-			RealProvider: false,
-			Reason:       err.Error(),
-		},
-	}
 }
 
 // platformAuditLine 是 fluent-bit 存入 Loki 的审计 record 的关键字段（脱敏后）。

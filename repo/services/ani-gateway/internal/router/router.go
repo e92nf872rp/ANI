@@ -75,8 +75,8 @@ type RegisterOptions struct {
 	// local deterministic adapter.
 	PlatformCapacityService ports.PlatformCapacityService
 	// PlatformAuditService backs the platform audit logs endpoint
-	// (GET /platform/audit-logs). When nil the handler falls back to the
-	// local deterministic adapter.
+	// (GET /platform/audit-logs). Nil is not expected: main always wires
+	// the Loki-backed adapter (transitional design, no local fallback).
 	PlatformAuditService ports.PlatformAuditService
 	// ComponentStatusService backs the platform component status endpoint
 	// (GET /platform/components). When nil the handler falls back to the

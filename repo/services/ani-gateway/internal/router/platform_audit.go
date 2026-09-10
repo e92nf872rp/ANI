@@ -2,7 +2,7 @@
 // GET /api/v1/platform/audit-logs（BOSS「平台审计且合规 → 平台审计日志」）。
 // 数据源为 kube-apiserver 审计日志经 fluent-bit 采集进 Loki 的独立
 // stream="kubernetes-audit"；按 timestamp(+auditID) 全局倒序 + 游标翻页，
-// total 为近似量；单源失败不阻塞 200（dev_profile.real_provider=false + reason）。
+// total 为近似量；Loki 不可用/查询失败时直接返回错误（过渡方案不降级）。
 package router
 
 import (
@@ -14,7 +14,6 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
-	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -55,13 +54,9 @@ type platformAuditDetailResponse struct {
 	UserAgent  string `json:"user_agent"`
 }
 
-// newPlatformAuditAPI 注入为 nil 时回退 local 降级实现（与 gpu-inventory /
-// platform-capacity fallback 惯例一致），保证 gateway 未配置 provider 时仍可启动
-// 并返回 200。
+// newPlatformAuditAPI 构造审计 API。service 由 main 装配必选注入（默认
+// 直连 Loki）；nil 不再回退 local 假数据——过渡方案宁可报错也不降级。
 func newPlatformAuditAPI(service ports.PlatformAuditService) *platformAuditAPI {
-	if service == nil {
-		service = runtimeadapter.NewLocalPlatformAudit()
-	}
 	return &platformAuditAPI{service: service}
 }
 

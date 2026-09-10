@@ -219,28 +219,19 @@ func TestPlatformAuditTotalApprox(t *testing.T) {
 	}
 }
 
-func TestPlatformAuditDegradedWhenLokiUnavailable(t *testing.T) {
+func TestPlatformAuditErrorWhenLokiUnavailable(t *testing.T) {
 	now := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
 	api := mustPlatformAudit(t, "http://127.0.0.1:1", now) // 端口 1 不可达
 	from := now.Add(-time.Hour)
-	result, err := api.QueryAuditLogs(context.Background(), ports.PlatformAuditLogQuery{
+	_, err := api.QueryAuditLogs(context.Background(), ports.PlatformAuditLogQuery{
 		TimeFrom: &from, TimeTo: &now, PageSize: 10,
 	})
-	if err != nil {
-		t.Fatalf("QueryAuditLogs() must not error on Loki unavailability, got %v", err)
-	}
-	if len(result.Items) != 0 {
-		t.Fatalf("len(items) = %d, want 0 on degrade", len(result.Items))
-	}
-	if result.DevProfile.RealProvider {
-		t.Fatal("real_provider must be false on Loki unavailable")
-	}
-	if result.DevProfile.Reason == "" {
-		t.Fatal("degraded reason must be populated")
+	if err == nil {
+		t.Fatal("QueryAuditLogs() must return error on Loki unavailability (no degrade)")
 	}
 }
 
-func TestPlatformAuditDegradedWhenLokiNon200(t *testing.T) {
+func TestPlatformAuditErrorWhenLokiNon200(t *testing.T) {
 	now := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -248,14 +239,11 @@ func TestPlatformAuditDegradedWhenLokiNon200(t *testing.T) {
 	defer srv.Close()
 	api := mustPlatformAudit(t, srv.URL, now)
 	from := now.Add(-time.Hour)
-	result, err := api.QueryAuditLogs(context.Background(), ports.PlatformAuditLogQuery{
+	_, err := api.QueryAuditLogs(context.Background(), ports.PlatformAuditLogQuery{
 		TimeFrom: &from, TimeTo: &now, PageSize: 10,
 	})
-	if err != nil {
-		t.Fatalf("QueryAuditLogs() must not error on Loki 500, got %v", err)
-	}
-	if result.DevProfile.RealProvider {
-		t.Fatal("real_provider must be false on Loki non-200")
+	if err == nil {
+		t.Fatal("QueryAuditLogs() must return error on Loki non-200 (no degrade)")
 	}
 }
 
