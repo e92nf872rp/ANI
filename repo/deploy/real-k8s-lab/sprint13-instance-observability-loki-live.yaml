@@ -429,7 +429,7 @@ data:
       Match           audit.*
       Host            ani-loki.ani-s07-observability
       Port            3100
-      Labels          job=fluent-bit,stream=kubernetes-audit,audit_user=$audit_user,audit_verb=$audit_verb,audit_resource=$audit_resource,audit_namespace=$audit_namespace,audit_name=$audit_name,audit_code=$audit_code
+      Labels          job=fluent-bit,stream=kubernetes-audit,audit_user=$audit_user,audit_verb=$audit_verb,audit_resource=$audit_resource,audit_namespace=$audit_namespace,audit_code=$audit_code
       Line_Format     json
       # Remove_Keys 必须保留 responseStatus：Metadata 级 responseStatus 只含
       # code 与空 metadata（无敏感体），gateway 的 response_code 字段依赖它；
