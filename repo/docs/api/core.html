@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>247</dd></div>
-          <div><dt>Schemas</dt><dd>341</dd></div>
+          <div><dt>Operations</dt><dd>248</dd></div>
+          <div><dt>Schemas</dt><dd>343</dd></div>
         </dl>
       </section>
 
@@ -840,6 +840,14 @@
           <td>200, 401, 403</td>
         </tr>
         <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-inventory/events</code></td>
+          <td><code>listGPUDeviceEvents</code></td>
+          <td>查询 GPU 设备台账事件流</td>
+          <td><code>scope:gpu-inventory:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/gpu-inventory/gpu-partitions</code></td>
           <td><code>createGPUPartition</code></td>
@@ -861,7 +869,7 @@
           <td><code>updateGPUDeviceStatus</code></td>
           <td>翻转 GPU 设备状态</td>
           <td><code>scope:gpu-inventory:write</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -2202,6 +2210,8 @@
         <li><code>FilesystemMountTarget</code></li>
         <li><code>FilesystemMountTargetCreateRequest</code></li>
         <li><code>FilesystemMountTargetListResponse</code></li>
+        <li><code>GPUDeviceEvent</code></li>
+        <li><code>GPUDeviceEventListResponse</code></li>
         <li><code>GPUDeviceStatusUpdateRequest</code></li>
         <li><code>GPUInventoryListResponse</code></li>
         <li><code>GPUInventoryRecord</code></li>

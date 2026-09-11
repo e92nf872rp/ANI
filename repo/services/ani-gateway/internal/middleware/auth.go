@@ -298,6 +298,15 @@ func scopeAllowedForPath(path, scope string) bool {
 	if path == "/api/v1/gpu-inventory/gpu-partitions" {
 		return scope == "platform"
 	}
+	// GPU 设备台账操作（BOSS GPU 池管理专属）：状态翻转、事件流。
+	// 台账数据来自平台级 PG（WithPlatformTx RLS bypass），且携带跨租户信息
+	// （全池维护/不可用计数），仅 platform scope 可访问。
+	// 必须放在下方 gpu-inventory 前缀规则之前。{device_id} 按段结构 + UUID
+	// 形态识别，避免误伤 /gpu-inventory/occupancy 等静态双域路径。
+	if path == "/api/v1/gpu-inventory/events" ||
+		isGPUDeviceSurfaceDevicePath(path) {
+		return scope == "platform"
+	}
 	// 集群级 GPU 资源目录（规格目录与设备清单）：GPU spec 是集群级 CRD、
 	// 设备清单是集群级视图，platform（BOSS 管理端）和 tenant 均可访问，
 	// 写操作（POST/DELETE /gpu-specs）角色准入由 rbac.go CheckPermission 校验。
@@ -323,6 +332,19 @@ func scopeAllowedForPath(path, scope string) bool {
 		return scope == "platform"
 	}
 	return scope == "tenant"
+}
+
+// isGPUDeviceSurfaceDevicePath 识别 GPU 设备台账的设备级路径：
+// /api/v1/gpu-inventory/{device_id}（PATCH 翻转）。
+// device_id 是 UUID（节点 × 卡 index × 型号派生），静态子路径
+// （/occupancy、/gpu-partitions 等）不会命中 UUID 解析。
+func isGPUDeviceSurfaceDevicePath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "gpu-inventory" {
+		return false
+	}
+	_, err := uuid.Parse(parts[3])
+	return err == nil
 }
 
 func isPlatformWorkloadPath(path string) bool {

@@ -15,7 +15,7 @@ func TestGPUInventoryAPIListsInventoryAndOccupancy(t *testing.T) {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
 	emptyOccupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}
-	listResponse := api.gpuInventoryListFromNodes(records, "", "", "", emptyOccupancy)
+	listResponse := api.gpuInventoryListFromNodes(context.Background(), records, "", "", "", emptyOccupancy, emptySurfaceState())
 	if len(listResponse.Items) == 0 || listResponse.Total != len(listResponse.Items) {
 		t.Fatalf("inventory response = %+v, want items and total", listResponse)
 	}
@@ -25,7 +25,7 @@ func TestGPUInventoryAPIListsInventoryAndOccupancy(t *testing.T) {
 	}
 	requireLocalCoreDevProfile(t, listResponse.Items[0].DevProfile, "local-gpu-inventory")
 
-	occupancy := api.gpuOccupancyFromNodes(records, emptyOccupancy)
+	occupancy := api.gpuOccupancyFromNodes(context.Background(), records, emptyOccupancy, emptySurfaceState())
 	if occupancy.Total != len(listResponse.Items) || occupancy.Available+occupancy.InUse+occupancy.Fault != occupancy.Total {
 		t.Fatalf("occupancy = %+v, inventory total = %d", occupancy, len(listResponse.Items))
 	}
@@ -71,7 +71,7 @@ func TestGPUInventoryAPIWithProviderMarksRealDevProfile(t *testing.T) {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
 	emptyOccupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}
-	listResponse := api.gpuInventoryListFromNodes(records, "", "", "", emptyOccupancy)
+	listResponse := api.gpuInventoryListFromNodes(context.Background(), records, "", "", "", emptyOccupancy, emptySurfaceState())
 	if listResponse.DevProfile.Mode != "real" || !listResponse.DevProfile.RealProvider || listResponse.DevProfile.Provider != "kubernetes-gpu-inventory" {
 		t.Fatalf("list dev_profile = %+v, want Kubernetes GPU real provider", listResponse.DevProfile)
 	}
@@ -79,7 +79,7 @@ func TestGPUInventoryAPIWithProviderMarksRealDevProfile(t *testing.T) {
 		t.Fatalf("items = %+v, want real provider item profile", listResponse.Items)
 	}
 
-	occupancy := api.gpuOccupancyFromNodes(records, emptyOccupancy)
+	occupancy := api.gpuOccupancyFromNodes(context.Background(), records, emptyOccupancy, emptySurfaceState())
 	if occupancy.DevProfile.Mode != "real" || !occupancy.DevProfile.RealProvider || occupancy.DevProfile.Provider != "kubernetes-gpu-inventory" {
 		t.Fatalf("occupancy dev_profile = %+v, want Kubernetes GPU real provider", occupancy.DevProfile)
 	}
@@ -175,7 +175,7 @@ func TestGPUInventoryListEchoesInstanceIDForRunningGPUContainerOnSameNode(t *tes
 	if err != nil {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
-	listResponse := api.gpuInventoryListFromNodes(records, "", "", "", occupancy)
+	listResponse := api.gpuInventoryListFromNodes(context.Background(), records, "", "", "", occupancy, emptySurfaceState())
 	if len(listResponse.Items) != 2 {
 		t.Fatalf("items = %d, want 2 devices", len(listResponse.Items))
 	}
@@ -206,7 +206,7 @@ func TestGPUInventoryListLeavesAvailableWhenNoInstanceOnNode(t *testing.T) {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
 	emptyOccupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}
-	listResponse := api.gpuInventoryListFromNodes(records, "", "", "", emptyOccupancy)
+	listResponse := api.gpuInventoryListFromNodes(context.Background(), records, "", "", "", emptyOccupancy, emptySurfaceState())
 	if len(listResponse.Items) != 1 {
 		t.Fatalf("items = %d, want 1", len(listResponse.Items))
 	}
@@ -241,7 +241,7 @@ func TestGPUInventoryListIgnoresNonRunningInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
-	listResponse := api.gpuInventoryListFromNodes(records, "", "", "", occupancy)
+	listResponse := api.gpuInventoryListFromNodes(context.Background(), records, "", "", "", occupancy, emptySurfaceState())
 	if len(listResponse.Items) != 1 {
 		t.Fatalf("items = %d, want 1", len(listResponse.Items))
 	}
@@ -285,7 +285,7 @@ func TestGPUInventoryListMarksFaultNodeAsFaultRegardlessOfOccupancy(t *testing.T
 	if err != nil {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
-	listResponse := api.gpuInventoryListFromNodes(records, "", "", "", occupancy)
+	listResponse := api.gpuInventoryListFromNodes(context.Background(), records, "", "", "", occupancy, emptySurfaceState())
 	if len(listResponse.Items) != 1 {
 		t.Fatalf("items = %d, want 1", len(listResponse.Items))
 	}
@@ -319,7 +319,7 @@ func TestGPUInventoryOccupancyCountsInUseWhenInstanceEchoed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
-	occupancyResp := api.gpuOccupancyFromNodes(records, occupancy)
+	occupancyResp := api.gpuOccupancyFromNodes(context.Background(), records, occupancy, emptySurfaceState())
 	if occupancyResp.Total != 2 || occupancyResp.InUse != 2 || occupancyResp.Available != 0 {
 		t.Fatalf("occupancy = %+v, want Total=2 InUse=2 Available=0", occupancyResp)
 	}
@@ -335,7 +335,7 @@ func TestGPUInventoryListWithNilStoreFallsBackToNoEcho(t *testing.T) {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
 	emptyOccupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}
-	listResponse := api.gpuInventoryListFromNodes(records, "", "", "", emptyOccupancy)
+	listResponse := api.gpuInventoryListFromNodes(context.Background(), records, "", "", "", emptyOccupancy, emptySurfaceState())
 	if len(listResponse.Items) != 1 {
 		t.Fatalf("items = %d, want 1", len(listResponse.Items))
 	}

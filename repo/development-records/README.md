@@ -57,6 +57,12 @@
 |---|---|---|
 | GATEWAY-GPU-V1-ROLLBACK-A | 生产 gateway 镜像回退致 BOSS GPU 接口 403 复现，且 main（PR #145）已将 v1.yaml 全量 V2 化、GPU 路径标单域 `scope: platform`，部署后 Console（tenant）将 403。V2 boundary 域互斥无法表达 GPU 双域共享，经产品确认**暂时回退 V1 链路**：v1.yaml 13 个 GPU 操作删除 `x-ani-authz` 且 classification `authorized→authenticated`（交叉校验要求两者一致），operation-registry.v1.json / zz_generated_target_operation_registry.go / zz_generated_core_policies.go 全链同步重生成（GPU 全部 `PolicySourceLegacy`），冻结计数 authenticated 9→22、authorized 278→265；`/quotas`+`/quotas/me` V2 定义与 V1 行为一致故保留；运行时 middleware 零改动（rebase 后已含双放行与 /quotas platform-only）。同期 `hotfix/network-store-read` rebase 到 origin/main（core-schema.d.ts 接受删除、auth.go/auth_test.go 保留 main V2 结构+完整双放行逻辑、修复 rebase 遗留冲突标记）。live 验证（ani-test2 隔离环境 10.10.1.66:30083，镜像 `test2-20260908-b`）：platform token GPU 三端点+/quotas 200、/quotas/me 403；tenant token GPU 三端点+/quotas/me+/instances 200、/quotas 403（泄露封堵保持）；tenant-a/admin Console 登录+核心接口 200。同期 `hotfix/network-store-read` rebase 到含 ANI-IAM-PRE930-CONTAINMENT 的最新 main：V2 target registry 基建（operation-registry.v1.json 等）与 GPU 接口 V2 注解已由 main 整体移除、回退终态由 main 承载，分支残余 delta 为批次记录与 auth-service runtimeadmin replace 构建修复；上述 main 既有红门禁已随隔离批次恢复绿，rebase 文档回归（README 租户列表小节/core.html 旧态）已修复；rebase 后 authz drift/路由覆盖/架构守卫/build/test 复验全绿。后续项：GPU 迁回 V2 前置 boundary 模型双域扩展（cluster） | gateway-gpu-v1-rollback-a.md |
 
+### GPU 资源池状态台账（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GPU-POOL-SURFACE-A | BOSS GPU 资源池态势页后端缺口补齐（设计 `repo/design/gpu-pool-status-surface-gap-plan.md`）：`PATCH /gpu-inventory/{device_id}`（platform-only，幂等）人工翻转 maintenance/unavailable/idle + reason 落台账，`GET /gpu-inventory/events` 设备事件流（status_changed/partition_applied，带 node/gpu_type/actor），occupancy 补 physical/logical/maintenance/unavailable/tenant_count，GPUInventoryRecord 加 reason、status enum 加 unavailable；迁移 `20260911_001_gpu_device_surface.sql`（gpu_device_overlays + gpu_device_events，平台级 RLS + ani_app 授权）+ atlas.sum 重算；SDK/docs/authz 生成物重生成。**二次拍板：设备级预留（assign/revoke/reserved）整体回退**——预留=数量型额度（既有 PUT /admin/tenants/{tid}/reservations），Volcano 无 device-level pinning 不做卡级绑定。**live 验证 PASS（2026-09-11，ani-test2 10.10.1.66:30083，镜像 `test2-20260911-b`）**：PATCH 翻转/事件流/occupancy（physical=24 logical=96）/租户 403 隔离全过；前端对接文档 `repo/design/gpu-pool-status-frontend-integration.md`（cursor 现状与零值字段省略已注明） | gpu-pool-status-surface-a.md |
+
 ### 集群 GPU 等分切分（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |

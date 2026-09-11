@@ -26,7 +26,10 @@ type gpuInventoryAPI struct {
 	instanceStore ports.WorkloadInstanceStore
 	quotaStore    ports.QuotaStoreService
 	quotaAdmin    ports.QuotaAdminService
-	k8sClient     *runtimeadapter.KubernetesRESTClient
+	// surface 是 GPU 设备台账（状态覆盖/事件流）PG 存储；local/dev
+	// profile 未注入时为 nil，台账相关端点退化为空态或 501。
+	surface   ports.GPUDeviceSurfaceStore
+	k8sClient *runtimeadapter.KubernetesRESTClient
 	// podOccupancyFetcher is overrideable in tests; production code leaves it
 	// nil and gpuNodeOccupancy falls back to querying k8sClient directly.
 	podOccupancyFetcher func(ctx context.Context, tenantID string) []gpuPodOccupancy
@@ -71,6 +74,8 @@ type gpuInventoryRecordResponse struct {
 	GPUSharingSpec   string `json:"gpu_sharing_spec,omitempty"`
 	GPUSharingPolicy string `json:"gpu_sharing_policy,omitempty"`
 	Shares           int    `json:"shares,omitempty"`
+	// Reason 是人工操作原因（维护窗口/不可用标记/预留说明），来自设备台账。
+	Reason string `json:"reason,omitempty"`
 }
 
 type gpuSpecResponse struct {
@@ -93,12 +98,20 @@ type gpuSpecListResponse struct {
 }
 
 type gpuOccupancyResponse struct {
-	Total      int                      `json:"total"`
-	InUse      int                      `json:"in_use"`
-	Available  int                      `json:"available"`
-	Fault      int                      `json:"fault"`
-	ByGPUType  []gpuOccupancyTypeBucket `json:"by_gpu_type"`
-	DevProfile coreDevProfileResponse   `json:"dev_profile"`
+	Total          int                      `json:"total"`
+	InUse          int                      `json:"in_use"`
+	Available      int                      `json:"available"`
+	Fault          int                      `json:"fault"`
+	ByGPUType      []gpuOccupancyTypeBucket `json:"by_gpu_type"`
+	DevProfile     coreDevProfileResponse   `json:"dev_profile"`
+	VGPUCount      int                      `json:"vgpu_count,omitempty"`
+	WholecardCount int                      `json:"wholecard_count,omitempty"`
+	// GPU 资源池态势页补齐口径（design/gpu-pool-status-surface-gap-plan §4-④）
+	PhysicalCardCount int `json:"physical_card_count,omitempty"`
+	LogicalCardCount  int `json:"logical_card_count,omitempty"`
+	MaintenanceCount  int `json:"maintenance_count,omitempty"`
+	UnavailableCount  int `json:"unavailable_count,omitempty"`
+	TenantCount       int `json:"tenant_count,omitempty"`
 }
 
 type gpuOccupancyTypeBucket struct {
@@ -165,13 +178,20 @@ func newGPUInventoryAPIWithStore(inventory ports.GPUInventory, store ports.Workl
 	}
 }
 
-func registerGPUInventoryResourcesWithStore(v1 *route.RouterGroup, inventory ports.GPUInventory, store ports.WorkloadInstanceStore, k8sClient *runtimeadapter.KubernetesRESTClient, specStore ports.GPUSpecStore, quotaStore ports.QuotaStoreService, quotaAdmin ports.QuotaAdminService, specServices ...ports.GPUSpecService) {
+func registerGPUInventoryResourcesWithStore(v1 *route.RouterGroup, inventory ports.GPUInventory, store ports.WorkloadInstanceStore, k8sClient *runtimeadapter.KubernetesRESTClient, specStore ports.GPUSpecStore, quotaStore ports.QuotaStoreService, quotaAdmin ports.QuotaAdminService, metadataStore ports.MetadataStore, specServices ...ports.GPUSpecService) {
 	api := newGPUInventoryAPIWithStore(inventory, store, k8sClient, specServices...)
 	api.specStore = specStore
 	api.quotaStore = quotaStore
 	api.quotaAdmin = quotaAdmin
+	// 设备台账 store：PG 平台账（覆盖/预留/事件）。metadataStore 为 nil 时
+	// 台账 handler 返回 503（local/dev profile 无台账持久化）。
+	if metadataStore != nil {
+		api.surface = runtimeadapter.NewPostgresGPUDeviceSurface(metadataStore)
+	}
 	v1.GET("/gpu-inventory", api.listGPUInventory)
 	v1.GET("/gpu-inventory/occupancy", api.getGPUOccupancy)
+	// 台账路由（events/PATCH 翻转）：静态路径先于参数路径注册。
+	registerGPUDeviceSurfaceResources(v1, api)
 	v1.GET("/gpu-specs", api.listGPUSpecs)
 	// /gpu-specs/availability must be registered BEFORE /gpu-specs/:spec_id
 	// so the static path takes precedence over the param route.
@@ -457,7 +477,8 @@ func (api *gpuInventoryAPI) listGPUInventory(ctx context.Context, c *app.Request
 		return
 	}
 	occupancy := api.gpuNodeOccupancy(ctx, c)
-	response := api.gpuInventoryListFromNodes(nodes, c.Query("gpu_type"), c.Query("status"), c.Query("node_name"), occupancy)
+	surface := api.loadSurfaceStateForRequest(ctx, c)
+	response := api.gpuInventoryListFromNodes(ctx, nodes, c.Query("gpu_type"), c.Query("status"), c.Query("node_name"), occupancy, surface)
 	c.JSON(http.StatusOK, response)
 }
 
@@ -467,7 +488,9 @@ func (api *gpuInventoryAPI) getGPUOccupancy(ctx context.Context, c *app.RequestC
 		writeGPUInventoryError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, api.gpuOccupancyFromNodes(nodes, api.gpuNodeOccupancy(ctx, c)))
+	occupancy := api.gpuNodeOccupancy(ctx, c)
+	surface := api.loadSurfaceStateForRequest(ctx, c)
+	c.JSON(http.StatusOK, api.gpuOccupancyFromNodes(ctx, nodes, occupancy, surface))
 }
 
 func (api *gpuInventoryAPI) listSandboxTemplates(ctx context.Context, c *app.RequestContext) {
@@ -491,14 +514,14 @@ func (api *gpuInventoryAPI) gpuFilter(gpuType string, _ string, nodeName string)
 	return filter
 }
 
-func (api *gpuInventoryAPI) gpuInventoryListFromNodes(nodes []ports.GPUNodeClass, gpuType string, status string, nodeName string, occupancy gpuNodeOccupancyMap) gpuInventoryListResponse {
+func (api *gpuInventoryAPI) gpuInventoryListFromNodes(ctx context.Context, nodes []ports.GPUNodeClass, gpuType string, status string, nodeName string, occupancy gpuNodeOccupancyMap, surface gpuDeviceSurfaceState) gpuInventoryListResponse {
 	items := make([]gpuInventoryRecordResponse, 0)
 	for _, node := range nodes {
 		if strings.TrimSpace(nodeName) != "" && node.NodeName != strings.TrimSpace(nodeName) {
 			continue
 		}
 		for index, device := range node.Devices {
-			item := api.gpuInventoryRecordFromDevice(node, device, index, occupancy)
+			item := api.gpuInventoryRecordFromDevice(ctx, node, device, index, occupancy, surface)
 			if strings.TrimSpace(gpuType) != "" && !strings.EqualFold(item.GPUType, strings.TrimSpace(gpuType)) {
 				continue
 			}
@@ -516,23 +539,44 @@ func (api *gpuInventoryAPI) gpuInventoryListFromNodes(nodes []ports.GPUNodeClass
 	}
 }
 
-func (api *gpuInventoryAPI) gpuOccupancyFromNodes(nodes []ports.GPUNodeClass, occupancy gpuNodeOccupancyMap) gpuOccupancyResponse {
+func (api *gpuInventoryAPI) gpuOccupancyFromNodes(ctx context.Context, nodes []ports.GPUNodeClass, occupancy gpuNodeOccupancyMap, surface gpuDeviceSurfaceState) gpuOccupancyResponse {
 	response := gpuOccupancyResponse{
 		ByGPUType:  []gpuOccupancyTypeBucket{},
 		DevProfile: api.profile,
 	}
+	tenants := map[string]bool{}
 	buckets := map[string]*gpuOccupancyTypeBucket{}
 	for _, node := range nodes {
 		for index, device := range node.Devices {
-			item := api.gpuInventoryRecordFromDevice(node, device, index, occupancy)
+			item := api.gpuInventoryRecordFromDevice(ctx, node, device, index, occupancy, surface)
 			response.Total++
+			// 物理卡口径：每条设备记录即一张物理卡；逻辑卡按 shares 累计。
+			response.PhysicalCardCount++
+			shares := item.Shares
+			if shares <= 0 {
+				shares = 1
+			}
+			response.LogicalCardCount += shares
+			switch item.GPUMode {
+			case "vgpu":
+				response.VGPUCount++
+			case "wholecard":
+				response.WholecardCount++
+			}
 			switch item.Status {
 			case "available":
 				response.Available++
 			case "in_use":
 				response.InUse++
+				if item.TenantID != nil && *item.TenantID != "" {
+					tenants[*item.TenantID] = true
+				}
 			case "fault":
 				response.Fault++
+			case "maintenance":
+				response.MaintenanceCount++
+			case "unavailable":
+				response.UnavailableCount++
 			}
 			bucket := buckets[item.GPUType]
 			if bucket == nil {
@@ -548,6 +592,7 @@ func (api *gpuInventoryAPI) gpuOccupancyFromNodes(nodes []ports.GPUNodeClass, oc
 			}
 		}
 	}
+	response.TenantCount = len(tenants)
 	for _, bucket := range buckets {
 		response.ByGPUType = append(response.ByGPUType, *bucket)
 	}
@@ -582,7 +627,7 @@ func (api *gpuInventoryAPI) sandboxTemplateListFromResult(result ports.SandboxTe
 	}
 }
 
-func (api *gpuInventoryAPI) gpuInventoryRecordFromDevice(node ports.GPUNodeClass, device ports.GPUDeviceClass, index int, occupancy gpuNodeOccupancyMap) gpuInventoryRecordResponse {
+func (api *gpuInventoryAPI) gpuInventoryRecordFromDevice(ctx context.Context, node ports.GPUNodeClass, device ports.GPUDeviceClass, index int, occupancy gpuNodeOccupancyMap, surface gpuDeviceSurfaceState) gpuInventoryRecordResponse {
 	status := "available"
 	if !node.Ready {
 		status = "fault"
@@ -620,10 +665,14 @@ func (api *gpuInventoryAPI) gpuInventoryRecordFromDevice(node ports.GPUNodeClass
 			tenantID := owner.TenantID
 			instanceID := owner.InstanceID
 			record.Status = "in_use"
-			record.TenantID = &tenantID
+			if tenantID != "" {
+				record.TenantID = &tenantID
+			}
 			record.InstanceID = &instanceID
 		}
 	}
+	// 台账合并：人工覆盖（maintenance/unavailable）> 自动观测态。
+	surface.applyToRecord(&record)
 	return record
 }
 
@@ -665,10 +714,19 @@ func (m gpuNodeOccupancyMap) lookup(nodeName string) (gpuNodeOccupancyEntry, boo
 //
 // 没有 k8sClient 注入时返回空 map，行为等同于旧的硬编码 nil。
 func (api *gpuInventoryAPI) gpuNodeOccupancy(ctx context.Context, c *app.RequestContext) gpuNodeOccupancyMap {
-	empty := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}
 	tenantID := middleware.GetTenantID(c)
 	if strings.TrimSpace(tenantID) == "" {
 		tenantID = "demo-tenant"
+	}
+	return api.gpuNodeOccupancyForTenant(ctx, tenantID)
+}
+
+// gpuNodeOccupancyForTenant 按显式租户构建 occupancy 映射；tenantID 为空时
+// 返回空 map（平台台账路径无租户上下文，in_use 标记由 Pod 归属之外的状态承载）。
+func (api *gpuInventoryAPI) gpuNodeOccupancyForTenant(ctx context.Context, tenantID string) gpuNodeOccupancyMap {
+	empty := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}
+	if strings.TrimSpace(tenantID) == "" {
+		return empty
 	}
 	// 获取 Pod 占用列表：测试时用注入的 fetcher，生产时查 K8s API。
 	var pods []gpuPodOccupancy
