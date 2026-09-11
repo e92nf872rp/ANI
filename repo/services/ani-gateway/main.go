@@ -304,6 +304,11 @@ func main() {
 		logger.Error("failed to configure component status provider runtime", "err", err)
 		os.Exit(1)
 	}
+	platformAuditService, err := newGatewayPlatformAuditService()
+	if err != nil {
+		logger.Error("failed to configure platform audit provider runtime", "err", err)
+		os.Exit(1)
+	}
 	componentMetricsReader, componentLogReader, err := newGatewayComponentDiagnosticsService()
 	if err != nil {
 		logger.Error("failed to configure component diagnostics provider runtime", "err", err)
@@ -356,6 +361,7 @@ func main() {
 		QuotaStoreService:                     quotaStoreService,
 		MeteringService:                       meteringService,
 		PlatformCapacityService:               platformCapacityService,
+		PlatformAuditService:                  platformAuditService,
 		ComponentStatusService:                componentStatusService,
 		ComponentMetricsReader:                componentMetricsReader,
 		ComponentLogReader:                    componentLogReader,

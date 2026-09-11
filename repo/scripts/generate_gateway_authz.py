@@ -241,7 +241,7 @@ def render_go(policies: list[ParsedPolicy]) -> str:
 
 def generate(input_path: Path, output_path: Path) -> None:
     policies = collect_policies(load_spec(input_path))
-    output_path.write_text(render_go(policies), encoding="utf-8")
+    output_path.write_text(render_go(policies), encoding="utf-8", newline="\n")
 
 
 def main() -> int:
