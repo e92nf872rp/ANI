@@ -1,5 +1,7 @@
 FROM golang:1.25.13-alpine AS build
 
+ENV GOPROXY=https://goproxy.cn,direct
+
 WORKDIR /src
 COPY runtimeadmin ./runtimeadmin
 COPY pkg ./pkg
