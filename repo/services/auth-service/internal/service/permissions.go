@@ -90,10 +90,16 @@ func (s *permissionStore) Allows(
 ) (bool, error) {
 	var permissions []Permission
 	var err error
-	switch principal.Kind {
-	case "user":
+	switch {
+	case principal.Kind == "user" && isServiceActorPrincipal(principal):
+		// 服务扮演的 platform user（IssueServiceToken 为 tenant-service /
+		// platform-settings-service 签发的形态）：SubjectID 是 magic UUID，
+		// users 表中不存在对应行；权威权限来自签名 token 的 permissions，
+		// 与 service 主体同信任模型，不查库。
+		permissions, err = permissionsFromScopes(principal.Permissions, principal.Domain)
+	case principal.Kind == "user":
 		permissions, err = s.userPermissions(ctx, principal)
-	case "api_key", "service":
+	case principal.Kind == "api_key", principal.Kind == "service":
 		permissions, err = permissionsFromScopes(principal.Permissions, principal.Domain)
 	default:
 		return false, errors.New("unsupported principal kind")
@@ -128,6 +134,14 @@ func permissionAllows(p Permission, resource, action, requiredBoundary string) b
 	default:
 		return false
 	}
+}
+
+// isServiceActorPrincipal 判断 user 主体是否为服务扮演形态：
+// tenant-service / platform-settings-service 经 IssueServiceToken 签的
+// platform user token，其 SubjectID 固定为 service actor magic UUID。
+// 该形态的权威权限来自签名 token，不查 users 表。
+func isServiceActorPrincipal(principal principalRecord) bool {
+	return principal.SubjectID == serviceActorUserID.String() && principal.Domain == "platform"
 }
 
 func decodePermissionRows(rows pgx.Rows) ([]Permission, error) {

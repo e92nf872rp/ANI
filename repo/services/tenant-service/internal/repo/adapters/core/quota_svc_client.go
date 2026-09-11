@@ -25,7 +25,7 @@ func NewQuotaSvcClient() ports.QuotaSvcClient {
 // ListQuotaMeta 调用 Core GET /admin/quota-meta。
 func (c *QuotaSvcClient) ListQuotaMeta(ctx context.Context) ([]ports.QuotaMeta, error) {
 	_ = ctx
-	raw, err := c.sdk.Request("GET", "/admin/quota-meta", anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", "/admin/quota-meta", anisdk.RequestOptions{})
 	if err != nil {
 		return nil, mapSDKError(err)
 	}
@@ -59,7 +59,7 @@ func (c *QuotaSvcClient) ListQuotaMeta(ctx context.Context) ([]ports.QuotaMeta, 
 func (c *QuotaSvcClient) GetQuota(ctx context.Context, tenantID uuid.UUID) ([]ports.CoreQuotaResult, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/quota", tenantID.String())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return nil, mapSDKError(err)
 	}
@@ -70,7 +70,7 @@ func (c *QuotaSvcClient) GetQuota(ctx context.Context, tenantID uuid.UUID) ([]po
 func (c *QuotaSvcClient) PutQuota(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/quota", tenantID.String())
-	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
+	raw, err := coreRequest(ctx, c.sdk, "PUT", path, anisdk.RequestOptions{
 		Body: map[string]any{"items": encodeQuotaItems(items)},
 	})
 	if err != nil {
@@ -83,7 +83,7 @@ func (c *QuotaSvcClient) PutQuota(ctx context.Context, tenantID uuid.UUID, items
 func (c *QuotaSvcClient) CreateQuota(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/quota", tenantID.String())
-	raw, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+	raw, err := coreRequest(ctx, c.sdk, "POST", path, anisdk.RequestOptions{
 		Body: map[string]any{"items": encodeQuotaItems(items)},
 	})
 	if err != nil {
@@ -96,7 +96,7 @@ func (c *QuotaSvcClient) CreateQuota(ctx context.Context, tenantID uuid.UUID, it
 func (c *QuotaSvcClient) UpsertQuota(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/quota/upsert", tenantID.String())
-	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
+	raw, err := coreRequest(ctx, c.sdk, "PUT", path, anisdk.RequestOptions{
 		Body: map[string]any{"items": encodeQuotaItems(items)},
 	})
 	if err != nil {
@@ -109,7 +109,7 @@ func (c *QuotaSvcClient) UpsertQuota(ctx context.Context, tenantID uuid.UUID, it
 func (c *QuotaSvcClient) DeleteQuota(ctx context.Context, tenantID uuid.UUID) error {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/quota", tenantID.String())
-	_, err := c.sdk.Request("DELETE", path, anisdk.RequestOptions{})
+	_, err := coreRequest(ctx, c.sdk, "DELETE", path, anisdk.RequestOptions{})
 	if err != nil {
 		return mapSDKError(err)
 	}

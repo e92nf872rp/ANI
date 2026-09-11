@@ -248,6 +248,93 @@ func TestParseMintCredentials(t *testing.T) {
 	}
 }
 
+// TestIssueServiceTokenPlatformAdminCaller 覆盖平台管理面调用方：
+// tenant-service / platform-settings-service 调 /admin/*（V2 policy 仅允许
+// PrincipalUser），必须签 platform user 形态而非 service 主体形态。
+func TestIssueServiceTokenPlatformAdminCaller(t *testing.T) {
+	svc, validator := newServiceTokenFixture(t)
+
+	for _, caller := range []string{"tenant-service", "platform-settings-service"} {
+		issued, err := svc.IssueServiceToken(context.Background(), &authv1.IssueServiceTokenRequest{
+			CallerService:    caller,
+			CallerSecret:     "mint-secret",
+			CredentialDomain: "platform",
+			Permissions:      []string{"scope:tenants:read"},
+			TtlSeconds:       300,
+		})
+		if err != nil {
+			t.Fatalf("IssueServiceToken(%s): %v", caller, err)
+		}
+		claims, err := validator.Validate(context.Background(), issued.GetAccessToken())
+		if err != nil {
+			t.Fatalf("Validate(%s): %v", caller, err)
+		}
+		if claims.Principal.Kind != "user" || claims.Principal.Domain != "platform" {
+			t.Fatalf("%s principal = %+v, want user/platform", caller, claims.Principal)
+		}
+		if claims.Principal.TenantID != "" {
+			t.Fatalf("%s tenant_id = %q, want empty", caller, claims.Principal.TenantID)
+		}
+		raw := decodeJWTClaims(t, issued.GetAccessToken())
+		if raw["sub"] != caller {
+			t.Fatalf("%s sub = %#v, want %q", caller, raw["sub"], caller)
+		}
+		if raw["uid"] != serviceActorUserID.String() {
+			t.Fatalf("%s uid = %#v, want magic UUID", caller, raw["uid"])
+		}
+		// deprecated legacy projection：scope=platform + roles=[platform-admin]，
+		// 与 IssuePlatformAccessToken 的平台用户形态一致，legacy 链直接放行。
+		if claims.Legacy.Scope != "platform" || claims.Legacy.Roles[0] != "platform-admin" {
+			t.Fatalf("%s legacy = %+v", caller, claims.Legacy)
+		}
+		// permissions 原样保留在 token 中（V2 审计链按需解析）。
+		if len(claims.Principal.Permissions) != 1 || claims.Principal.Permissions[0] != "scope:tenants:read" {
+			t.Fatalf("%s permissions = %#v", caller, claims.Principal.Permissions)
+		}
+	}
+}
+
+// TestIssueServiceTokenPlatformAdminCallerRejectsTenant 平台管理面调用方
+// 不允许携带 tenant_id（/admin/* 全部是平台边界）。
+func TestIssueServiceTokenPlatformAdminCallerRejectsTenant(t *testing.T) {
+	svc, _ := newServiceTokenFixture(t)
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	_, err := svc.IssueServiceToken(context.Background(), &authv1.IssueServiceTokenRequest{
+		CallerService: "tenant-service",
+		CallerSecret:  "mint-secret",
+		TenantId:      tenantID.String(),
+		Scope:         "scope:tenants:read",
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("tenant caller code = %v err = %v", status.Code(err), err)
+	}
+}
+
+// TestIssueServiceTokenServiceFormUnaffectedForInference 回归保护：
+// inference-service 仍走 service 主体形态，新分支不影响既有调用方。
+func TestIssueServiceTokenServiceFormUnaffectedForInference(t *testing.T) {
+	svc, validator := newServiceTokenFixture(t)
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	issued, err := svc.IssueServiceToken(context.Background(), &authv1.IssueServiceTokenRequest{
+		CallerService: "inference-service",
+		CallerSecret:  "mint-secret",
+		TenantId:      tenantID.String(),
+		Scope:         "scope:platform-workloads:write",
+	})
+	if err != nil {
+		t.Fatalf("IssueServiceToken: %v", err)
+	}
+	claims, err := validator.Validate(context.Background(), issued.GetAccessToken())
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if claims.Principal.Kind != "service" || claims.Principal.TenantID != tenantID.String() {
+		t.Fatalf("claims = %+v, want service/tenant", claims.Principal)
+	}
+}
+
 func newServiceTokenFixture(t *testing.T) (*AuthService, *JWTValidator) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -269,8 +356,12 @@ func newServiceTokenFixture(t *testing.T) (*AuthService, *JWTValidator) {
 		t.Fatalf("NewJWTValidator: %v", err)
 	}
 	return &AuthService{
-		jwt:         validator,
-		issuer:      issuer,
-		mintSecrets: map[string]string{"inference-service": "mint-secret"},
+		jwt:    validator,
+		issuer: issuer,
+		mintSecrets: map[string]string{
+			"inference-service":       "mint-secret",
+			"tenant-service":          "mint-secret",
+			"platform-settings-service": "mint-secret",
+		},
 	}, validator
 }

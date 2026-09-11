@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,58 @@ func newCoreSDKClient() anisdk.Client {
 	// 使用独立 http.Client，避免修改全局 http.DefaultClient。
 	c.HTTPClient = &http.Client{Timeout: defaultCoreAPITimeout}
 	return c
+}
+
+// coreMinter 是全局可选的动态 token minter；为 nil 时所有请求回退
+// CORE_API_TOKEN 静态 token（双层设计的兜底层）。由 SetupMinter 在进程启动时注入。
+var coreMinter *Minter
+
+// SetupMinter 注入 auth-service 动态 mint 客户端；addr/secret 任一为空返回 nil
+// 表示保持静态兜底。main.go 双 env（AUTH_SERVICE_GRPC_ADDR + AUTH_SERVICE_MINT_SECRET）
+// 都非空时才调用。
+func SetupMinter(addr, secret string) (*Minter, error) {
+	addr = strings.TrimSpace(addr)
+	secret = strings.TrimSpace(secret)
+	if addr == "" || secret == "" {
+		return nil, nil
+	}
+	minter, err := DialMinter(addr, secret)
+	if err != nil {
+		return nil, err
+	}
+	coreMinter = minter
+	return minter, nil
+}
+
+// applyAuthToken 给请求注入访问 Core 的凭证（双层设计）：
+// minter 可用时注入动态 mint 的 JWT（per-request Authorization 覆盖 SDK Token 字段），
+// 否则保持 SDK 构造时的静态 CORE_API_TOKEN。
+func applyAuthToken(ctx context.Context, headers map[string]string) (map[string]string, error) {
+	if coreMinter == nil {
+		return headers, nil
+	}
+	token, err := coreMinter.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: mint core token: %v", ports.ErrCoreUnavailable, err)
+	}
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	// SDK Request() 中 options.Headers 在 client.Token 之后应用，可覆盖 Authorization。
+	headers["Authorization"] = "Bearer " + token
+	return headers, nil
+}
+
+// coreRequest 是所有 Core SDK 调用的统一入口：先经 applyAuthToken 注入凭证，
+// 再透传请求 context。minter 不可用时回退静态 token。
+func coreRequest(ctx context.Context, sdk anisdk.Client, method, path string, opts anisdk.RequestOptions) (any, error) {
+	headers, err := applyAuthToken(ctx, opts.Headers)
+	if err != nil {
+		return nil, err
+	}
+	opts.Headers = headers
+	opts.Context = ctx
+	return sdk.Request(method, path, opts)
 }
 
 func mapSDKError(err error) error {
