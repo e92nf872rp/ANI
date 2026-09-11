@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>246</dd></div>
-          <div><dt>Schemas</dt><dd>336</dd></div>
+          <div><dt>Operations</dt><dd>247</dd></div>
+          <div><dt>Schemas</dt><dd>341</dd></div>
         </dl>
       </section>
 
@@ -1689,6 +1689,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/audit-logs</code></td>
+          <td><code>getPlatformAuditLogs</code></td>
+          <td>查询平台审计日志（k8s 控制面 write 审计）</td>
+          <td><code>scope:audit-log:read</code></td>
+          <td>200, 400, 401, 403, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/platform/capacity</code></td>
           <td><code>getPlatformCapacity</code></td>
           <td>查询平台容量态势汇总</td>
@@ -2290,6 +2298,11 @@
         <li><code>PasswordLoginRequest</code></li>
         <li><code>PlanBoundTenantCount</code></li>
         <li><code>PlanBoundTenantCountList</code></li>
+        <li><code>PlatformAuditLogDetail</code></li>
+        <li><code>PlatformAuditLogItem</code></li>
+        <li><code>PlatformAuditLogResponse</code></li>
+        <li><code>PlatformAuditResource</code></li>
+        <li><code>PlatformAuditUser</code></li>
         <li><code>PlatformCapacityResponse</code></li>
         <li><code>PlatformCapacitySummary</code></li>
         <li><code>PlatformComponent</code></li>
