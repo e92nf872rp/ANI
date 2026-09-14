@@ -8,5 +8,5 @@ import "golang.org/x/sys/unix"
 // archive windows do not pin the page cache on Linux workers.
 var (
 	archiveReleaseCache func(int, int64, int64, int) error = unix.Fadvise
-	archiveFADV         = int(unix.FADV_DONTNEED)
+	archiveFADV                                            = int(unix.FADV_DONTNEED)
 )

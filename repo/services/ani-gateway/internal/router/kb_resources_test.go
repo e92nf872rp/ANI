@@ -57,8 +57,8 @@ type fakeKBClient struct {
 	getDocResp *kbv1.KBDocument
 	getDocErr  error
 
-	queryResp *kbv1.QueryResponse
-	queryErr  error
+	queryResp    *kbv1.QueryResponse
+	queryErr     error
 	lastQueryReq *kbv1.QueryRequest
 
 	citationsErr    error

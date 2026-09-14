@@ -29,7 +29,7 @@ from app.core.config import settings
 # Per-model adapter cache: model name -> OpenAICompatibleEmbedding.
 # The entry registered by ``init_embedding_model`` is the default that
 # legacy ``get_embed_model()`` (no-arg) resolves to.
-_models: dict[str, "OpenAICompatibleEmbedding"] = {}
+_models: dict[str, OpenAICompatibleEmbedding] = {}
 _default_name = ""
 _lock = threading.Lock()
 
