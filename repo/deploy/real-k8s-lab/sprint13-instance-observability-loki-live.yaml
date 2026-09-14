@@ -32,6 +32,19 @@
 # runtime 注入：repo/services/ani-gateway/instance_observability_runtime.go
 #              环境变量 INSTANCE_OBSERVABILITY_LOG_STORE=loki
 #              INSTANCE_OBSERVABILITY_LOKI_URL=http://ani-loki.ani-s07-observability:3100
+#
+# 平台审计日志流水线（2026-09-10 追加，批次 PLATFORM-AUDIT-LOG）：
+# - Fluent Bit 追加审计流水线，采集 /etc/kubernetes/audit/audit.log 到
+#   Loki stream="kubernetes-audit"（gateway 平台审计日志接口的数据源，
+#   见 repo/pkg/adapters/runtime/loki_platform_audit.go，默认无需环境变量）。
+# - 前置依赖（运维必须先确认，均已在 ani-test2 master 节点完成）：
+#   1. kube-apiserver 启用审计（static pod manifest 加 --audit-log-path/
+#      --audit-policy-file 等 flag，policy 文件 /etc/kubernetes/audit/audit-policy.yaml）。
+#   2. audit-policy 顶层必须 omitStages: ["RequestReceived"]：该阶段记录无
+#      responseStatus 且与 ResponseComplete 的 auditID 相同，会形成重复记录
+#      （规则级 stages 字段在该版本 apiserver 实测不生效，必须用顶层 omitStages；
+#      policy 启动时一次性读取，改后必须重启 kube-apiserver）。
+#   3. 审计记录状态见 kjs-study/平台审计日志/kube-apiserver审计接流排查记录.md。
 # ============================================================
 
 # Namespace — 复用 ani-s07-observability（见
@@ -347,6 +360,8 @@ data:
       # 不加这一行会报 "parser 'cri' is not registered"，
       # 因为 Fluent Bit 3.x 默认不自动加载内置 parser 文件。
       Parsers_File  /fluent-bit/etc/parsers.conf
+      # 审计流水线 parser（k8s_audit，见 audit-parsers.conf）
+      Parsers_File  /etc/fluent-bit/audit-parsers.conf
 
     [INPUT]
       Name              tail
@@ -383,6 +398,50 @@ data:
       Labels          namespace=$namespace,pod=$pod,container=$container
       Line_Format     json
       Auto_Kubernetes_Labels Off
+
+    # ===== 审计流水线（kube-apiserver 审计 → Loki 独立 stream）=====
+    # 前置：master 节点 kube-apiserver 已启用审计并输出 /etc/kubernetes/audit/audit.log
+    # （DaemonSet 通过 k8saudit hostPath 只读挂载该目录）；audit-policy 顶层
+    # omitStages: ["RequestReceived"] 保证同一请求只写一条（见 yaml 头部说明）。
+    [INPUT]
+      Name              tail
+      Tag               audit.kubernetes
+      Path              /etc/kubernetes/audit/audit.log
+      Parser            k8s_audit
+      Read_from_Head    false
+      Buffer_Chunk_Size 256k
+      Buffer_Max_Size   2M
+      Refresh_Interval  5
+      Skip_Long_Lines   On
+      DB                /tmp/flb_audit.db
+      Inotify_Watcher   false
+
+    # 提取 user/verb/resource/namespace/name/code 为 Loki label
+    # （gateway 平台审计日志接口的过滤条件依赖这些 label）
+    [FILTER]
+      Name           lua
+      Match          audit.*
+      script         /etc/fluent-bit/extract_labels.lua
+      call           audit_labels
+
+    [OUTPUT]
+      Name            loki
+      Match           audit.*
+      Host            ani-loki.ani-s07-observability
+      Port            3100
+      Labels          job=fluent-bit,stream=kubernetes-audit,audit_user=$audit_user,audit_verb=$audit_verb,audit_resource=$audit_resource,audit_namespace=$audit_namespace,audit_name=$audit_name,audit_code=$audit_code
+      Line_Format     json
+      # Remove_Keys 必须保留 responseStatus：Metadata 级 responseStatus 只含
+      # code 与空 metadata（无敏感体），gateway 的 response_code 字段依赖它；
+      # 删掉会导致接口 response_code 恒为 0（实测踩坑）。
+      # requestObject/responseObject 在 Metadata 级本就不存在，删除为双保险。
+      Remove_Keys     requestObject,responseObject,request,response
+      Auto_Kubernetes_Labels Off
+  audit-parsers.conf: |
+    [PARSER]
+        Name        k8s_audit
+        Format      json
+        Time_Keep   On
   extract_labels.lua: |
     -- 从 Fluent Bit tail 的 Tag 提取 namespace/pod/container。
     -- Tag 形如：kube.var.log.pods.<namespace>_<pod>_<uid>.<container>.<restart>.log
@@ -414,6 +473,25 @@ data:
       end
       return 1, timestamp, record
     end
+
+    -- 审计流水线：提取 user/verb/resource/namespace/name/code 为 label 字段
+    -- （gateway 平台审计日志接口的 label 过滤依赖这些字段）；
+    -- 同时软加固：剥离 requestURI 中的敏感 query（token/key/secret/password）。
+    function audit_labels(tag, timestamp, record)
+        local u = record["user"] or {}
+        record["audit_user"] = u["username"] or ""
+        record["audit_groups"] = (u["groups"] and u["groups"][1]) or ""
+        local o = record["objectRef"] or {}
+        record["audit_resource"] = o["resource"] or ""
+        record["audit_namespace"] = o["namespace"] or ""
+        record["audit_name"] = o["name"] or ""
+        record["audit_verb"] = record["verb"] or ""
+        record["audit_code"] = string.format("%d", (record["responseStatus"] or {}).code or 0)
+        local uri = record["requestURI"] or ""
+        uri = string.gsub(uri, "([?&])(token|key|secret|password)=[^&]*", "%1%2=***")
+        record["requestURI"] = uri
+        return 1, timestamp, record
+    end
 ---
 # ============================================================
 # Fluent Bit DaemonSet — 每节点一份，采集节点日志
@@ -442,6 +520,10 @@ spec:
         ani.dev/slice: s07-instance-observability
     spec:
       serviceAccountName: ani-fluent-bit
+      # 审计日志文件 /etc/kubernetes/audit/audit.log 通常仅 root 可读，
+      # fluent-bit 需要 root 才能采集（仅读取，不做写操作）
+      securityContext:
+        runAsUser: 0
       tolerations:
         # 允许在所有节点（含 master/control-plane）运行，确保覆盖全部日志
         - key: node-role.kubernetes.io/control-plane
@@ -476,6 +558,11 @@ spec:
             # 否则触发 "not a directory" mount 错误（实测在 containerd 1.7 + K8s 1.36）。
             - name: config
               mountPath: /etc/fluent-bit
+            # 审计流水线：master 节点 kube-apiserver 的审计输出目录（其余节点该
+            # 目录不存在，DirectoryOrCreate 会创建空目录，tail 无文件不报错）
+            - name: k8saudit
+              mountPath: /etc/kubernetes/audit
+              readOnly: true
       volumes:
         - name: varlog
           hostPath:
@@ -483,3 +570,9 @@ spec:
         - name: config
           configMap:
             name: ani-fluent-bit-config
+        # 审计流水线：master 节点 kube-apiserver 审计输出（static pod flag
+        # --audit-log-path=/etc/kubernetes/audit/audit.log）
+        - name: k8saudit
+          hostPath:
+            path: /etc/kubernetes/audit
+            type: DirectoryOrCreate

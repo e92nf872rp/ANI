@@ -1113,6 +1113,92 @@ components:
         real_provider: { type: boolean }
         reason:        { type: string, nullable: true }
 
+    PlatformAuditLogResponse:
+      type: object
+      description: "平台审计日志（kube-apiserver 控制面 write 审计）查询响应。total 为近似量；游标翻页基于末条 timestamp。"
+      required: [items, next_after, total_approx, dev_profile]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformAuditLogItem' }
+          description: "按 timestamp(+auditID) 全局倒序的一页数据。"
+        next_after:
+          type: string
+          nullable: true
+          description: "下一页游标（末条 timestamp，RFC3339）；nil 表示已无更多。"
+        total_approx:
+          type: integer
+          format: int64
+          minimum: 0
+          description: "近似总量（count_over_time 按 step 聚合），非精确值。"
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformAuditLogItem:
+      type: object
+      description: "单条 k8s 控制面审计记录（Metadata 级，不包含请求体）。"
+      required: [audit_id, timestamp, verb, user, resource, response_code, detail]
+      properties:
+        audit_id:
+          type: string
+          description: "K8s auditID，配合 timestamp 构成全局游标键。"
+        timestamp:
+          type: string
+          format: date-time
+          description: "requestReceivedTimestamp（RFC3339 UTC）。"
+        verb:
+          type: string
+          enum: [create, update, patch, delete]
+        user:
+          $ref: '#/components/schemas/PlatformAuditUser'
+        resource:
+          $ref: '#/components/schemas/PlatformAuditResource'
+        response_code:
+          type: integer
+          description: "apiserver 响应状态码（responseStatus.code）。"
+        detail:
+          $ref: '#/components/schemas/PlatformAuditLogDetail'
+
+    PlatformAuditUser:
+      type: object
+      description: "K8s 原生操作者身份（不映射 ANI 用户）。"
+      required: [username, groups]
+      properties:
+        username:
+          type: string
+          description: "k8s 用户名（如 system:serviceaccount:* / system:masters）。"
+        groups:
+          type: array
+          items: { type: string }
+          description: "k8s 用户所属 group 列表（空为无）。"
+
+    PlatformAuditResource:
+      type: object
+      description: "被操作的 K8s 资源引用。"
+      required: [namespace, resource, name]
+      properties:
+        namespace:
+          type: string
+          description: "资源所在命名空间（命名空间级资源；集群级为空串）。"
+        resource:
+          type: string
+          description: "K8s resource 复数（如 deployments）。"
+        name:
+          type: string
+          description: "资源名称。"
+
+    PlatformAuditLogDetail:
+      type: object
+      description: "审计详情（已脱敏：不含请求体，敏感 query 已置 ***）。"
+      required: [request_uri, user_agent]
+      properties:
+        request_uri:
+          type: string
+          description: "脱敏后的请求 URI（敏感 query 置 ***）。"
+        user_agent:
+          type: string
+          description: "User-Agent。"
+
     PlatformCapacityResponse:
       type: object
       description: "平台容量态势汇总（整平台 = 1 个默认区域；只读，无区域 CRUD）。"
@@ -4410,7 +4496,7 @@ components:
         display_name:  { type: string, nullable: true }
         role:          { type: string, enum: [tenant-admin, user, auditor] }
         status:        { type: string, enum: [active, disabled] }
-        source:        { type: string, enum: [local, third_party], description: "由存储 username 前缀推断：oidc: → third_party；其余（含 local:）→ local" }
+        source:        { type: string, enum: [local, third_party, unknown], description: "由 username 前缀推断：oidc: → third_party；local: → local；其余 → unknown" }
         last_login_at: { type: string, format: date-time, nullable: true }
         created_at:    { type: string, format: date-time }
         updated_at:    { type: string, format: date-time }
@@ -4419,28 +4505,29 @@ components:
     PlatformUser:
       type: object
       description: "平台运营账号详情；tenant_id 固定为空，不含 password_hash"
-      required: [id, email, username, display_name, role, status, source, created_at]
+      required: [id, email, username, display_name, role_id, role, status, source, created_at]
       properties:
         id:            { type: string, format: uuid }
         email:         { type: string, format: email }
         username:      { type: string }
         display_name:  { type: string }
-        role:          { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role_id:       { type: string, format: uuid, description: "当前绑定平台角色 id" }
+        role:          { type: string, description: "平台角色名；以 roles 表（tenant_id IS NULL）为准，不写死枚举" }
         status:        { type: string, enum: [active, disabled] }
-        source:        { type: string, enum: [local, third_party], description: "由 username 前缀推断：oidc: -> third_party；local: -> local" }
+        source:        { type: string, enum: [local, third_party, unknown], description: "由 username 前缀推断：oidc: → third_party；local: → local；其余 → unknown" }
         last_login_at: { type: string, format: date-time, nullable: true }
         created_at:    { type: string, format: date-time }
 
     PlatformUserCreateRequest:
       type: object
       description: "创建平台运营账号；明文密码仅本次请求透传，明文不落日志/审计/响应"
-      required: [idempotency_key, email, username, display_name, role, password]
+      required: [idempotency_key, email, username, display_name, role_id, password]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        email:           { type: string, format: email, description: "RFC 5322，全局唯一" }
-        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号；Core 侧会拼接 local: 前缀" }
+        email:           { type: string, format: email, description: "RFC 5322；平台侧允许重复" }
+        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号；Core 侧拼接 local: 前缀后全局唯一" }
         display_name:    { type: string, minLength: 1, maxLength: 128 }
-        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role_id:         { type: string, format: uuid, description: "平台角色 id：roles.tenant_id IS NULL 且 name 以 platform- 为前缀" }
         password:        { type: string, minLength: 8, maxLength: 64, description: "至少包含大写/小写/数字/特殊字符中的三类" }
 
     PlatformUserListResponse:
@@ -4454,10 +4541,10 @@ components:
     PlatformUserRoleUpdateRequest:
       type: object
       description: "修改平台运营账号角色"
-      required: [idempotency_key, role]
+      required: [idempotency_key, role_id]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role_id:         { type: string, format: uuid, description: "目标平台角色 id；合法性由 roles 表校验" }
 
     PlatformUserResetPasswordRequest:
       type: object
@@ -4473,6 +4560,38 @@ components:
       required: [idempotency_key]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+
+    PlatformRole:
+      type: object
+      description: "平台内置角色；permissions 为 roles.permissions JSONB 原样"
+      required: [id, name, permissions]
+      properties:
+        id:          { type: string, format: uuid }
+        name:        { type: string }
+        permissions:
+          type: array
+          description: "roles.permissions JSONB 原样（resource/actions/scope）"
+          items: { type: object, additionalProperties: true }
+
+    PlatformRoleListResponse:
+      type: object
+      description: "平台内置角色列表（不分页）"
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PlatformRole' } }
+
+    PlatformUserPermissionsResponse:
+      type: object
+      description: "平台运营账号当前绑定角色及其 permissions JSONB 原样"
+      required: [user_id, role_id, role, permissions]
+      properties:
+        user_id:     { type: string, format: uuid }
+        role_id:     { type: string, format: uuid }
+        role:        { type: string, description: "当前绑定角色名（platform-admin/ops/readonly 等）" }
+        permissions:
+          type: array
+          description: "该角色 roles.permissions JSONB 原样"
+          items: { type: object, additionalProperties: true }
 
     TenantUserListResponse:
       type: object
@@ -4646,6 +4765,11 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     LastPlatformAdmin:
       description: 唯一活跃 platform-admin 不可禁用/删除（code=LAST_PLATFORM_ADMIN）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    StatusUnchanged:
+      description: 目标状态与当前状态相同，不可重复启用/停用（code=STATUS_UNCHANGED）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -8495,6 +8619,96 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
+  /platform/audit-logs:
+    get:
+      operationId: getPlatformAuditLogs
+      x-ani-rbac-scope: "scope:audit-log:read"
+      x-ani-authz:
+        version: v1
+        resource: audit-log
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      summary: 查询平台审计日志（k8s 控制面 write 审计）
+      description: |
+        平台级（跨租户）只读审计检索。数据源为 kube-apiserver 审计日志（Metadata 级，
+        仅 write verb：create/update/patch/delete），操作者为 K8s 原生身份。
+        返回按 timestamp(+auditID) 全局倒序的一页，游标翻页（after=末条 timestamp），
+        total 为近似量（count_over_time）。Loki 不可用或查询失败时直接返回错误
+        （503/500，不降级不返回假数据）；空流返回 items:[]。租户 token 访问必须 403。
+      tags: [PlatformAuditLog]
+      parameters:
+        - name: time_from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: 查询窗口起点（RFC3339），必须与 time_to 成对且 time_from<=time_to。
+        - name: time_to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: 查询窗口终点（RFC3339），必须与 time_from 成对且 time_from<=time_to。
+        - name: user
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 按操作者过滤（audit_user 标签）。
+        - name: verb
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [create, update, patch, delete]
+          description: 按动作过滤（audit_verb 标签）。
+        - name: resource_type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 按资源类型过滤（audit_resource 标签，K8s resource 复数）。
+        - name: namespace
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 按命名空间过滤（audit_namespace 标签）。
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: 游标（上一页末条 timestamp，RFC3339），配合时间窗口实现不重复翻页。
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+          description: 每页条数，默认 20，上限 100，超限钳制为 100。
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 可选全文检索（|~），限时间窗使用，谨慎。
+      responses:
+        "200":
+          description: 平台审计日志记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAuditLogResponse'
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
   /metering/token-usage:
     post:
       operationId: reportTokenUsage
@@ -10081,7 +10295,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "ROLE_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT" }
+        "409": { $ref: '#/components/responses/Conflict', description: "USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT" }
     get:
       operationId: listPlatformUsers
       summary: 平台运营账号列表
@@ -10091,10 +10305,10 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
-        - { name: role, in: query, schema: { type: string, enum: [platform-admin, platform-ops, platform-readonly] } }
+        - { name: role_id, in: query, schema: { type: string, format: uuid }, description: "按平台角色 id 过滤" }
         - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
-        - { name: source, in: query, schema: { type: string, enum: [local, oidc] }, description: "按 username 前缀过滤；oidc 结果在响应中映射为 third_party" }
-        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+        - { name: source, in: query, schema: { type: string, enum: [local, third_party] }, description: "按 username 前缀过滤；third_party → oidc:%" }
+        - { name: search, in: query, schema: { type: string }, description: "对外 username 模糊匹配（不含 local:/oidc: 前缀）" }
       responses:
         "200":
           description: 平台运营账号列表
@@ -10103,6 +10317,41 @@ paths:
               schema: { $ref: '#/components/schemas/PlatformUserListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+
+  /admin/platform-users/roles:
+    get:
+      operationId: listPlatformUserRoles
+      summary: 查询平台内置角色列表
+      description: 返回 roles 表中 tenant_id IS NULL 且 name 以 platform- 为前缀的全部角色；permissions JSONB 原样返回。
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      responses:
+        "200":
+          description: 平台内置角色列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformRoleListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /admin/platform-users/{userId}/permissions:
+    get:
+      operationId: getPlatformUserPermissions
+      summary: 查询平台运营账号当前角色权限
+      description: JOIN users/user_roles/roles 返回该账号绑定角色的 permissions JSONB 原样。
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 平台运营账号权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformUserPermissionsResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/PlatformUserNotFound' }
 
   /admin/platform-users/{userId}:
     get:
@@ -10170,6 +10419,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND / ROLE_NOT_FOUND" }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/LastPlatformAdmin', description: "LAST_PLATFORM_ADMIN / ROLE_CHANGE_INVALID" }
 
   /admin/platform-users/{userId}/reset-password:
     post:
@@ -10221,7 +10471,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/PlatformUserNotFound' }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
-        "422": { $ref: '#/components/responses/LastPlatformAdmin' }
+        "422": { $ref: '#/components/responses/LastPlatformAdmin', description: "LAST_PLATFORM_ADMIN / STATUS_UNCHANGED" }
 
   /admin/platform-users/{userId}/enable:
     post:
@@ -10246,6 +10496,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/PlatformUserNotFound' }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/StatusUnchanged', description: "STATUS_UNCHANGED" }
 
   # ===== Tenant Users (平台级租户用户/角色，供 Services UserSvcClient 调用) =====
 

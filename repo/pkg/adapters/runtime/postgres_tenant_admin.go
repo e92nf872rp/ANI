@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -377,7 +376,7 @@ func (u *PostgresTenantAdmin) GetRolePermissions(ctx context.Context, tenantID, 
 		if roleTenant != nil && *roleTenant != tid {
 			return ports.ErrUserNotFound
 		}
-		perms, decodeErr := decodeRolePermissionsJSON(permRaw)
+		permMaps, decodeErr := decodeRolePermissionsJSON(permRaw)
 		if decodeErr != nil {
 			return decodeErr
 		}
@@ -385,7 +384,7 @@ func (u *PostgresTenantAdmin) GetRolePermissions(ctx context.Context, tenantID, 
 			UserID:      uid.String(),
 			TenantID:    userTenantID.String(),
 			Role:        roleName,
-			Permissions: perms,
+			Permissions: rolePermissionsAsAny(permMaps),
 		}
 		if roleID != nil {
 			out.RoleID = roleID.String()
@@ -435,11 +434,11 @@ func (u *PostgresTenantAdmin) ListAssignableRoles(ctx context.Context, tenantID 
 				return fmt.Errorf("scan assignable role: %w", scanErr)
 			}
 			ref.TenantID = tenantID
-			perms, decodeErr := decodeRolePermissionsJSON(permRaw)
+			permMaps, decodeErr := decodeRolePermissionsJSON(permRaw)
 			if decodeErr != nil {
 				return decodeErr
 			}
-			ref.Permissions = perms
+			ref.Permissions = rolePermissionsAsAny(permMaps)
 			out = append(out, ref)
 		}
 		return rows.Err()
@@ -450,18 +449,15 @@ func (u *PostgresTenantAdmin) ListAssignableRoles(ctx context.Context, tenantID 
 	return out, nil
 }
 
-func decodeRolePermissionsJSON(raw []byte) ([]any, error) {
-	if len(raw) == 0 {
-		return []any{}, nil
+func rolePermissionsAsAny(perms []map[string]any) []any {
+	if len(perms) == 0 {
+		return []any{}
 	}
-	var perms []any
-	if err := json.Unmarshal(raw, &perms); err != nil {
-		return nil, fmt.Errorf("decode role permissions: %w", err)
+	out := make([]any, 0, len(perms))
+	for _, p := range perms {
+		out = append(out, p)
 	}
-	if perms == nil {
-		return []any{}, nil
-	}
-	return perms, nil
+	return out
 }
 
 func (u *PostgresTenantAdmin) SetStatus(ctx context.Context, tenantID, userID, status string) error {

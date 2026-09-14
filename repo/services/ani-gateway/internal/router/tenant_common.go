@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +58,24 @@ func cursorLimit(c *app.RequestContext) int32 {
 		}
 	}
 	return limit
+}
+
+// parseCursorLimitQuery 解析 limit；缺省 20、上限 100；非法值返回 error。
+func parseCursorLimitQuery(c *app.RequestContext) (int32, error) {
+	limit := int32(20)
+	raw := strings.TrimSpace(c.Query("limit"))
+	if raw == "" {
+		return limit, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("limit must be a positive integer")
+	}
+	limit = int32(n)
+	if limit > 100 {
+		limit = 100
+	}
+	return limit, nil
 }
 
 // nullIfEmpty 空串映射为 JSON null（OpenAPI next_cursor nullable：null = 已无更多）。

@@ -178,6 +178,7 @@ def generate_go(root: Path, layer: str, config: dict[str, str], metadata: dict[s
 
 import (
 \t"bytes"
+\t"context"
 \t"crypto/rand"
 \t"encoding/json"
 \t"encoding/hex"
@@ -218,14 +219,16 @@ func (err APIError) Error() string {{
 }}
 
 type Client struct {{
-\tBaseURL string
-\tToken   string
+\tBaseURL    string
+\tToken      string
+\tHTTPClient *http.Client // optional; nil 时使用 http.DefaultClient（调用方应注入带 Timeout 的 client，避免改全局 DefaultClient）
 }}
 
 type RequestOptions struct {{
 \tBody    map[string]any
 \tParams  map[string]string
 \tHeaders map[string]string
+\tContext context.Context // optional; 用于取消/超时，nil 时等价 Background
 }}
 
 func NewClient(baseURL string, token string) Client {{
@@ -248,7 +251,11 @@ func (client Client) Request(method string, path string, options RequestOptions)
 \t\t}}
 \t\tbody = bytes.NewReader(payload)
 \t}}
-\treq, err := http.NewRequest(strings.ToUpper(method), requestURL, body)
+\tctx := options.Context
+\tif ctx == nil {{
+\t\tctx = context.Background()
+\t}}
+\treq, err := http.NewRequestWithContext(ctx, strings.ToUpper(method), requestURL, body)
 \tif err != nil {{
 \t\treturn nil, err
 \t}}
@@ -262,7 +269,11 @@ func (client Client) Request(method string, path string, options RequestOptions)
 \tfor key, value := range options.Headers {{
 \t\treq.Header.Set(key, value)
 \t}}
-\tresp, err := http.DefaultClient.Do(req)
+\thc := client.HTTPClient
+\tif hc == nil {{
+\t\thc = http.DefaultClient
+\t}}
+\tresp, err := hc.Do(req)
 \tif err != nil {{
 \t\treturn nil, err
 \t}}

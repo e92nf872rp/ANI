@@ -20,6 +20,10 @@ class ServicesBoundaryValidationTest(unittest.TestCase):
         self.assertIn("envoy-authz-adapter", guard.SERVICES_OWNED_SOURCE_ROOTS)
         self.assertIn("services/envoy-authz-adapter", guard.GO_SCAN_ROOTS)
 
+    def test_platform_settings_service_is_classified_as_services_owned_source(self) -> None:
+        self.assertIn("platform-settings-service", guard.SERVICES_OWNED_SOURCE_ROOTS)
+        self.assertIn("services/platform-settings-service", guard.GO_SCAN_ROOTS)
+        
     def test_model_fetcher_is_a_services_owned_source_root(self) -> None:
         self.assertIn("model-fetcher", guard.SERVICES_OWNED_SOURCE_ROOTS)
         self.assertIn("services/model-fetcher", guard.GO_SCAN_ROOTS)
@@ -28,11 +32,14 @@ class ServicesBoundaryValidationTest(unittest.TestCase):
         result = guard.validate_workspace(guard.ROOT, run_spec_split=False)
 
         self.assertEqual(result.error_count, 0)
-        # 4 accepted baseline exceptions remain: the ai/rag-engine pymilvus
-        # entry was removed with the RAG architecture compliance refactor
-        # (issue-028~039); before the .venv scan fix this test could not
-        # reach the assertion at all (UnicodeDecodeError).
-        self.assertEqual(result.warning_count, 4)
+        # 7 accepted baseline exceptions remain: inference-service bootstrap
+        # wiring (main.go + config.go) and model-service bootstrap/ports
+        # coupling (main.go, config.go, model-import-worker main.go ×2,
+        # importer/worker.go); the ai/rag-engine pymilvus entry was removed
+        # with the RAG architecture compliance refactor (issue-028~039);
+        # before the .venv scan fix this test could not reach the assertion
+        # at all (UnicodeDecodeError).
+        self.assertEqual(result.warning_count, 7)
 
     def test_unregistered_core_internal_go_import_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

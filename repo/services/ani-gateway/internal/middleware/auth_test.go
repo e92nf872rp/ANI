@@ -90,6 +90,9 @@ func TestPlatformLogin_TenantIsolation(t *testing.T) {
 		{"tenant token on quotas list denied", "/api/v1/quotas", "tenant", false},
 		{"platform token on quotas/me denied", "/api/v1/quotas/me", "platform", false},
 		{"tenant token on quotas/me allowed", "/api/v1/quotas/me", "tenant", true},
+		// 平台审计日志：/api/v1/platform/* 前缀，仅 scope=platform（租户 token 403）
+		{"platform token on platform audit-logs", "/api/v1/platform/audit-logs", "platform", true},
+		{"tenant token on platform audit-logs denied", "/api/v1/platform/audit-logs", "tenant", false},
 		// 异步任务查询：handler 按 token 上下文 tenant_id 隔离，platform（BOSS
 		// 提交 gpu_partition 后轮询）与 tenant 双域放行
 		{"platform token on tasks get", "/api/v1/tasks/0198c5a2-7b1e-7f3a-9c1d-2e4f6a8b0c1d", "platform", true},

@@ -15,6 +15,7 @@ use (
 	./services/pkg
 	./services/task-service
 	./services/tenant-service
+	./services/platform-settings-service
 	./tools/kms-sm4-live-fixture
 )
 

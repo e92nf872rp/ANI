@@ -134,6 +134,11 @@ allowed:
     imports:
       - github.com/jackc/pgx/v5/pgxpool
     reason: tenant plan audit repository is a bounded persistence module; direct pgx keeps audit-log writes and RLS rows explicit
+  - path: services/platform-settings-service/internal/repo/adapters/postgres/platform_admin_audit_store.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: platform admin audit repository is a bounded persistence module; direct pgxpool keeps audit-log writes explicit without Core SQL on users/roles
   - path: services/tenant-service/internal/repo/adapters/postgres/tenant_store.go
     coupling_level: bounded_direct
     imports:

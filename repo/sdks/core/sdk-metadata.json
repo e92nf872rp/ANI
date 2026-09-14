@@ -35,6 +35,12 @@
       "scope": "scope:users:write"
     },
     {
+      "operationId": "listPlatformUserRoles",
+      "method": "GET",
+      "path": "/admin/platform-users/roles",
+      "scope": "scope:users:read"
+    },
+    {
       "operationId": "deletePlatformUser",
       "method": "DELETE",
       "path": "/admin/platform-users/{userId}",
@@ -57,6 +63,12 @@
       "method": "POST",
       "path": "/admin/platform-users/{userId}/enable",
       "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getPlatformUserPermissions",
+      "method": "GET",
+      "path": "/admin/platform-users/{userId}/permissions",
+      "scope": "scope:users:read"
     },
     {
       "operationId": "resetPlatformUserPassword",
@@ -1139,6 +1151,12 @@
       "scope": "scope:platform-workloads:read"
     },
     {
+      "operationId": "getPlatformAuditLogs",
+      "method": "GET",
+      "path": "/platform/audit-logs",
+      "scope": "scope:audit-log:read"
+    },
+    {
       "operationId": "getPlatformCapacity",
       "method": "GET",
       "path": "/platform/capacity",
@@ -1626,6 +1644,11 @@
     "PasswordLoginRequest",
     "PlanBoundTenantCount",
     "PlanBoundTenantCountList",
+    "PlatformAuditLogDetail",
+    "PlatformAuditLogItem",
+    "PlatformAuditLogResponse",
+    "PlatformAuditResource",
+    "PlatformAuditUser",
     "PlatformCapacityResponse",
     "PlatformCapacitySummary",
     "PlatformComponent",
@@ -1638,12 +1661,15 @@
     "PlatformPasswordLoginRequest",
     "PlatformRegion",
     "PlatformRegionCapacity",
+    "PlatformRole",
+    "PlatformRoleListResponse",
     "PlatformServiceHealthComponent",
     "PlatformServiceHealthResponse",
     "PlatformUser",
     "PlatformUserCreateRequest",
     "PlatformUserIdempotentRequest",
     "PlatformUserListResponse",
+    "PlatformUserPermissionsResponse",
     "PlatformUserResetPasswordRequest",
     "PlatformUserRoleUpdateRequest",
     "PlatformWorkload",
@@ -1947,6 +1973,7 @@
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",
     "ROLE_CHANGE_INVALID",
+    "STATUS_UNCHANGED",
     "TENANT_NOT_FOUND",
     "TENANT_PLAN_NOT_FOUND",
     "UNAUTHORIZED",

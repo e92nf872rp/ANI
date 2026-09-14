@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>141</dd></div>
-          <div><dt>Schemas</dt><dd>152</dd></div>
+          <div><dt>Operations</dt><dd>142</dd></div>
+          <div><dt>Schemas</dt><dd>153</dd></div>
         </dl>
       </section>
 
@@ -733,7 +733,15 @@
           <td><code>enablePlatformAdmin</code></td>
           <td>启用平台运营账号（需 platform-admin）</td>
           <td><code></code></td>
-          <td>200, 401, 403, 404, 409</td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-admins/{userId}/permissions</code></td>
+          <td><code>getPlatformAdminPermissions</code></td>
+          <td>查询平台运营账号当前角色权限（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -749,7 +757,7 @@
           <td><code>updatePlatformAdminRole</code></td>
           <td>修改平台运营账号角色（需 platform-admin）</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404, 409, 422</td>
+          <td>200, 400, 401, 403, 404, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1391,6 +1399,7 @@
         <li><code>PlatformAdminDetail</code></li>
         <li><code>PlatformAdminListItem</code></li>
         <li><code>PlatformAdminListResponse</code></li>
+        <li><code>PlatformAdminPermissionsResponse</code></li>
         <li><code>PlatformAdminRoleUpdateRequest</code></li>
         <li><code>PlatformRole</code></li>
         <li><code>PlatformRoleListResponse</code></li>

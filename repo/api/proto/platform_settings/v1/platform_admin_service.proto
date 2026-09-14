@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package platform_settings.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/platform_settings/v1;platformsettingsv1";
+
+// PlatformAdminService manages BOSS platform-admin lifecycle (create / list / detail /
+// roles / permissions / change role / reset password / disable / enable / delete / audit logs).
+// The gateway handles auth/scope/idempotency and forwards to this service over gRPC.
+service PlatformAdminService {
+  rpc CreatePlatformAdmin(CreatePlatformAdminRequest) returns (common.v1.IdempotentResult);
+  rpc ListPlatformAdmins(ListPlatformAdminsRequest) returns (ListPlatformAdminsResponse);
+  rpc ListPlatformAdminRoles(ListPlatformAdminRolesRequest) returns (ListPlatformAdminRolesResponse);
+  rpc GetPlatformAdmin(GetPlatformAdminRequest) returns (PlatformAdminDetail);
+  rpc GetPlatformAdminPermissions(GetPlatformAdminPermissionsRequest) returns (PlatformAdminPermissions);
+  rpc UpdatePlatformAdminRole(UpdatePlatformAdminRoleRequest) returns (common.v1.IdempotentResult);
+  rpc ResetPlatformAdminPassword(ResetPlatformAdminPasswordRequest) returns (common.v1.IdempotentResult);
+  rpc DisablePlatformAdmin(DisablePlatformAdminRequest) returns (common.v1.IdempotentResult);
+  rpc EnablePlatformAdmin(EnablePlatformAdminRequest) returns (common.v1.IdempotentResult);
+  rpc DeletePlatformAdmin(DeletePlatformAdminRequest) returns (common.v1.IdempotentResult);
+  rpc ListPlatformAdminAuditLogs(ListPlatformAdminAuditLogsRequest) returns (ListPlatformAdminAuditLogsResponse);
+}
+
+message CreatePlatformAdminRequest {
+  string idempotency_key = 1;
+  string email = 2;
+  string username = 3;
+  string display_name = 4;
+  string role_id = 5; // roles.id UUID
+  string password = 6;
+}
+
+message ListPlatformAdminsRequest {
+  string role_id = 1; // roles.id UUID；空 = 不过滤
+  string status = 2;
+  string source = 3;
+  string search = 4;
+  common.v1.CursorPageRequest page = 5;
+}
+
+message ListPlatformAdminsResponse {
+  repeated PlatformAdminListItem items = 1;
+  string next_cursor = 2;
+}
+
+message ListPlatformAdminRolesRequest {}
+
+message ListPlatformAdminRolesResponse {
+  repeated PlatformRole items = 1;
+}
+
+message GetPlatformAdminRequest {
+  string user_id = 1;
+}
+
+message GetPlatformAdminPermissionsRequest {
+  string user_id = 1;
+}
+
+message UpdatePlatformAdminRoleRequest {
+  string user_id = 1;
+  string role_id = 2; // roles.id UUID
+  string idempotency_key = 3;
+}
+
+message ResetPlatformAdminPasswordRequest {
+  string user_id = 1;
+  string new_password = 2;
+  string idempotency_key = 3;
+}
+
+message DisablePlatformAdminRequest {
+  string user_id = 1;
+  string idempotency_key = 2;
+}
+
+message EnablePlatformAdminRequest {
+  string user_id = 1;
+  string idempotency_key = 2;
+}
+
+message DeletePlatformAdminRequest {
+  string user_id = 1;
+  string idempotency_key = 2;
+}
+
+message ListPlatformAdminAuditLogsRequest {
+  string user_id = 1;
+  string action = 2;
+  string result = 3;
+  common.v1.CursorPageRequest page = 4;
+}
+
+message ListPlatformAdminAuditLogsResponse {
+  repeated PlatformAdminAuditLog items = 1;
+  string next_cursor = 2;
+}
+
+message PlatformAdminListItem {
+  string id = 1;
+  string username = 2;
+  string display_name = 3;
+  string role = 4;
+  string status = 5;
+  string source = 6;
+  google.protobuf.Timestamp last_login_at = 7;
+  string role_id = 8;
+}
+
+message PlatformAdminDetail {
+  string id = 1;
+  string email = 2;
+  string username = 3;
+  string display_name = 4;
+  string role = 5;
+  string status = 6;
+  string source = 7;
+  google.protobuf.Timestamp last_login_at = 8;
+  google.protobuf.Timestamp created_at = 9;
+  string role_id = 10;
+}
+
+// PlatformRole 对齐 Core：id + name + permissions JSONB 原样数组。
+message PlatformRole {
+  string id = 1;
+  string name = 2;
+  // roles.permissions JSONB 原样（resource/actions/scope）
+  repeated google.protobuf.Struct permissions = 3;
+}
+
+// PlatformAdminPermissions 对齐 Core PlatformUserPermissionsResponse。
+message PlatformAdminPermissions {
+  string user_id = 1;
+  string role_id = 2;
+  string role = 3;
+  repeated google.protobuf.Struct permissions = 4;
+}
+
+message PlatformAdminAuditLog {
+  string id = 1;
+  string action = 2;
+  string resource = 3;
+  string result = 4;
+  google.protobuf.Struct details = 5;
+  google.protobuf.Timestamp created_at = 6;
+  // 操作者（audit_logs.user_id）；系统触发或未记录时为 null。
+  google.protobuf.StringValue user_id = 7;
+}

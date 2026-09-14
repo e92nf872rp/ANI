@@ -174,11 +174,6 @@ func (t *PostgresTenant) CreateTenant(ctx context.Context, in ports.CreateTenant
 	return out, nil
 }
 
-func isPGUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
-
 func (t *PostgresTenant) ListTenants(ctx context.Context, filter ports.ListTenantsFilter) (ports.TenantListResult, error) {
 	limit := filter.Limit
 	if limit <= 0 {

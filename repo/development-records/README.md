@@ -18,6 +18,11 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | MODEL-CONFIG-M3 | KB 推理模型动态切换两功能点：SSE 流式查询接口补 `inference_service_name` query 参数契约声明与 gateway 测试断言（Go handler 链路 M1 轮已实现，本批补契约+断言）；建库请求/响应与 KB 详情契约新增可选 `default_inference_service`（proto CreateKBRequest field 9 / KnowledgeBase field 14，Go+Python stub 再生成），迁移 `20260911000100` 为 knowledge_bases 加可空 TEXT 列（repo 层空串归一化为 NULL，行为与升级前一致），kb-service repo 1 写 4 读 + grpc_server 写入/回落/审计快照（快照断言加 `default_inference_service: None`）+ query_orchestrator 回落链透传；gateway SSE/同步 Query/CreateKB 三链路断言 + 建库 handler 缺口按契约补齐（fake client 双向断言）。三级回落链 `request.inference_service_name → kb_cfg["default_inference_service"] → "default"`，回落在 kb-service 收口、gateway 只透传；该字段只影响生成路由不触发索引重建（对比 embedding_model 属 NOT NULL 且修改需重建索引）。验证：kb-service pytest 359 passed（基线 354+5 新）+ gateway go test 四包 ok + `make validate-services` 全绿；local verified，live 验证待执行；`deploy/migrations/20260911000100_kb_default_inference_service.sql` 为未跟踪新文件必须随批次提交 | model-config-m3-kb-default-inference-service.md |
+### BOSS 平台审计日志读取（2026-09，分支 feat/platform-audit-log）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-AUDIT-LOG | BOSS 平台只读审计日志查询接口：Core OpenAPI 契约优先新增 `GET /api/v1/platform/audit-logs`（time_from/time_to 必填成对、user/verb/resource_type/namespace/after/page_size/keyword 过滤，page_size 默认 20 上限 100 钳制），数据源 kube-apiserver Metadata 级 write 审计经 fluent-bit 接流 Loki；`pkg/ports/platform_audit.go` 新接口 + loki_platform_audit.go real adapter（query_range + LogQL label 过滤 + timestamp+auditID 全局倒序游标分页 + count_over_time 近似总量）+ gateway 路由与装配 + authz/Core SDK 生成物（+12 策略/+7 各语言，validate_gateway_authz_drift 零漂移）；修复 `scripts/generate_gateway_authz.py` Windows 写 CRLF 导致生成全量漂移（newline=\\"\\n\\"）；新增/增量单测全 PASS，平台/租户隔离红线由 middleware 锁定；K8s 测试环境（ani-test2）真实控制面审计接流端到端验证通过（real_provider=true，T-2/T-7/T-8）；**2026-09-10 auditlog3 重构（镜像 test2-20260910-auditlog3）：按用户决策删除 `AUDIT_LOG_PROVIDER` env 分派与 local 降级 adapter（local_platform_audit.go 及其测试整体删除），默认直连 Loki、Loki 失败直接 500 `PLATFORM_AUDIT_FAILED` 不降级（单测断言反转为必须报错），deployment 已移除全部 AUDIT env 实测通过（real_provider=true、total_approx=95296，T-9a）；过渡方案，后续独立审计服务替代】** | platform-audit-log.md |
 
 ### 平台组件状态与组件诊断（2026-09，分支 feat/component-status）
 
@@ -809,6 +814,22 @@
 | ARCH-ADAPTER-GUARD-A | 组件 SDK 直接导入扫描与 allowlist 护栏 | arch-adapter-guard-a-component-imports.md |
 | ARCH-ADAPTER-C | 第一批迁移（CacheStore + MessageBus）| arch-adapter-c-first-migration.md |
 | ARCH-ADAPTER-C-2 | pgx/metadata 依赖 bounded_direct 分类 | arch-adapter-c-2-metadata-boundaries.md |
+
+### BOSS 平台运营账号（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-ADMIN-ISSUE-01 | OpenAPI/Services 契约：platform-admins 路径与 schema（#001） | platform-admin-issue-001-openapi-contract.md |
+| PLATFORM-ADMIN-ISSUE-02 | platform-settings-service 骨架 + gRPC/proto（#002） | platform-admin-issue-002-service-skeleton.md |
+| PLATFORM-ADMIN-ISSUE-03 | 审计表迁移 + audit store adapter（#003） | platform-admin-issue-003-database-migration.md |
+| PLATFORM-ADMIN-ISSUE-04 | Services 网关 platform-admins 路由注册（#004） | platform-admin-issue-004-services-link.md |
+| PLATFORM-ADMIN-ISSUE-05 | 创建运营账号 API（#005） | platform-admin-issue-005-create-api.md |
+| PLATFORM-ADMIN-ISSUE-06 | 列表 + 详情 API（#006） | platform-admin-issue-006-list-detail-api.md |
+| PLATFORM-ADMIN-ISSUE-07 | Core 角色列表 + 账号权限查询（#007） | platform-admin-issue-007-core-platform-roles-api.md |
+| PLATFORM-ADMIN-ISSUE-08 | Services 改角色 + last-admin + 幂等边界（#008） | platform-admin-issue-008-roles-change-role-api.md |
+| PLATFORM-ADMIN-ISSUE-09 | 禁用/启用/软删除 + STATUS_UNCHANGED（#009） | platform-admin-issue-009-disable-enable-delete-api.md |
+| PLATFORM-ADMIN-ISSUE-10 | 重置密码 + OpenAPI path 修正 + Store 单测（#010） | platform-admin-issue-010-reset-password-api.md |
+| PLATFORM-ADMIN-ISSUE-11 | 操作历史查询 + 操作者 user_id + 测试补强（#011） | platform-admin-issue-011-audit-logs-api.md |
 
 ### M2 Gateway / Auth（2026-05）
 

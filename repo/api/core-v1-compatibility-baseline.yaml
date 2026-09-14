@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-09-07'
+generated_at: '2026-09-10'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -102,10 +102,11 @@ paths:
         schema:
           type: string
       - in: query
-        name: role
+        name: role_id
         required: false
         schema:
           type: string
+          format: uuid
       - in: query
         name: status
         required: false
@@ -148,6 +149,20 @@ paths:
         '404':
           schema: '{}'
         '409':
+          schema: '{}'
+  /admin/platform-users/roles:
+    get:
+      operation_id: listPlatformUserRoles
+      rbac_scope: scope:users:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformRoleListResponse
+        '401':
+          schema: '{}'
+        '403':
           schema: '{}'
   /admin/platform-users/{userId}:
     delete:
@@ -246,6 +261,30 @@ paths:
           schema: '{}'
         '409':
           schema: '{}'
+        '422':
+          schema: '{}'
+  /admin/platform-users/{userId}/permissions:
+    get:
+      operation_id: getPlatformUserPermissions
+      rbac_scope: scope:users:read
+      parameters:
+      - in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformUserPermissionsResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /admin/platform-users/{userId}/reset-password:
     post:
       operation_id: resetPlatformUserPassword
@@ -299,6 +338,8 @@ paths:
         '404':
           schema: '{}'
         '409':
+          schema: '{}'
+        '422':
           schema: '{}'
   /admin/quota-meta:
     get:
@@ -375,6 +416,61 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+  /admin/tenants:
+    get:
+      operation_id: listTenants
+      rbac_scope: scope:tenant:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: status
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: search
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    post:
+      operation_id: createTenant
+      rbac_scope: scope:tenant:write
+      parameters: []
+      request_body_required: true
+      request_schema: TenantCreateRequest
+      responses:
+        '200':
+          schema: Tenant
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '409':
+          schema: '{}'
   /admin/tenants/{tenant_id}:
     get:
       operation_id: getTenant
@@ -391,6 +487,165 @@ paths:
       responses:
         '200':
           schema: Tenant
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    put:
+      operation_id: updateTenant
+      rbac_scope: scope:tenant:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: TenantUpdateRequest
+      responses:
+        '200':
+          schema: Tenant
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/auth:
+    get:
+      operation_id: getTenantAuth
+      rbac_scope: scope:tenant:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantAuthConfig
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    put:
+      operation_id: updateTenantAuth
+      rbac_scope: scope:tenant:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: TenantAuthUpdateRequest
+      responses:
+        '200':
+          schema: TenantAuthConfig
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/disable:
+    post:
+      operation_id: disableTenant
+      rbac_scope: scope:tenant:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: Tenant
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/freeze:
+    post:
+      operation_id: freezeTenant
+      rbac_scope: scope:tenant:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: Tenant
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/lifecycle:
+    get:
+      operation_id: listTenantLifecycle
+      rbac_scope: scope:tenant:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: action
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantLifecycleListResponse
+        '400':
+          schema: '{}'
         '401':
           schema: '{}'
         '403':
@@ -650,6 +905,30 @@ paths:
         '401':
           schema: '{}'
         '403':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/unfreeze:
+    post:
+      operation_id: unfreezeTenant
+      rbac_scope: scope:tenant:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: Tenant
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
           schema: '{}'
   /admin/tenants/{tenant_id}/user-lookup:
     get:
@@ -1507,6 +1786,11 @@ paths:
         required: false
         schema:
           type: string
+      - in: query
+        name: in_use
+        required: false
+        schema:
+          type: boolean
       request_body_required: false
       request_schema: '{}'
       responses:
@@ -1772,6 +2056,33 @@ paths:
         '401':
           schema: '{}'
         '403':
+          schema: '{}'
+  /gpu-inventory/gpu-partitions:
+    post:
+      operation_id: createGPUPartition
+      rbac_scope: scope:gpu-inventory:write
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: true
+      request_schema: GPUPartitionCreateRequest
+      responses:
+        '202':
+          schema: GPUPartitionTaskAccepted
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '422':
+          schema: '{}'
+        '503':
           schema: '{}'
   /gpu-inventory/occupancy:
     get:
@@ -4661,6 +4972,131 @@ paths:
           schema: '{}'
         '503':
           schema: '{}'
+  /platform/components:
+    get:
+      operation_id: getPlatformComponents
+      rbac_scope: scope:observability:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformComponentStatusResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /platform/components/{component_name}/logs:
+    get:
+      operation_id: listPlatformComponentLogs
+      rbac_scope: scope:observability:read
+      parameters:
+      - in: path
+        name: component_name
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: level
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformComponentLogListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: ErrorResponse
+        '503':
+          schema: ErrorResponse
+  /platform/components/{component_name}/logs/stream:
+    get:
+      operation_id: streamPlatformComponentLogs
+      rbac_scope: scope:observability:read
+      parameters:
+      - in: path
+        name: component_name
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: level
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+      - in: query
+        name: interval_seconds
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 30
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: '{}'
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: ErrorResponse
+        '503':
+          schema: ErrorResponse
+  /platform/components/{component_name}/metrics:
+    get:
+      operation_id: getPlatformComponentMetrics
+      rbac_scope: scope:observability:read
+      parameters:
+      - in: path
+        name: component_name
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformComponentMetrics
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: ErrorResponse
+        '503':
+          schema: ErrorResponse
   /platform/services/health:
     get:
       operation_id: getPlatformServiceHealth
@@ -5551,6 +5987,11 @@ paths:
         required: false
         schema:
           type: string
+      - in: query
+        name: in_use
+        required: false
+        schema:
+          type: boolean
       request_body_required: false
       request_schema: '{}'
       responses:
@@ -7902,6 +8343,11 @@ schemas:
         signature:
           type: string
         enum: []
+      shares:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
       status:
         signature:
           type: string
@@ -7960,6 +8406,46 @@ schemas:
         signature:
           type: integer
           minimum: 0
+        enum: []
+  GPUPartitionCreateRequest:
+    type: object
+    required:
+    - shares
+    properties:
+      shares:
+        signature:
+          type: integer
+        enum:
+        - 2
+        - 4
+        - 8
+  GPUPartitionTaskAccepted:
+    type: object
+    required:
+    - progress_pct
+    - status
+    - task_id
+    - task_type
+    properties:
+      progress_pct:
+        signature:
+          type: integer
+          minimum: 0
+          maximum: 100
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - running
+      task_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      task_type:
+        signature:
+          type: string
         enum: []
   GPUSchedulingQueue:
     type: object
@@ -11290,6 +11776,246 @@ schemas:
           format: int64
           minimum: 0
         enum: []
+  PlatformComponent:
+    type: object
+    required:
+    - group
+    - kind
+    - name
+    - namespace
+    - status
+    properties:
+      desired_replicas:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 0
+        enum: []
+      group:
+        signature:
+          type: string
+        enum:
+        - service
+        - dependency
+        - platform
+      kind:
+        signature:
+          type: string
+        enum:
+        - Deployment
+        - StatefulSet
+        - DaemonSet
+      name:
+        signature:
+          type: string
+        enum: []
+      namespace:
+        signature:
+          type: string
+        enum: []
+      ready_replicas:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 0
+        enum: []
+      reason:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      scrape_status:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - reachable
+        - unreachable
+        - unknown
+      status:
+        signature:
+          type: string
+        enum:
+        - running
+        - degraded
+        - stopped
+        - unknown
+      version:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  PlatformComponentGroup:
+    type: object
+    required:
+    - components
+    - name
+    properties:
+      components:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformComponent'
+        enum: []
+      name:
+        signature:
+          type: string
+        enum:
+        - service
+        - dependency
+        - platform
+  PlatformComponentLogEntry:
+    type: object
+    required:
+    - level
+    - message
+    - timestamp
+    properties:
+      container:
+        signature:
+          type: string
+        enum: []
+      level:
+        signature:
+          type: string
+        enum: []
+      message:
+        signature:
+          type: string
+        enum: []
+      pod:
+        signature:
+          type: string
+        enum: []
+      stream:
+        signature:
+          type: string
+        enum: []
+      timestamp:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  PlatformComponentLogListResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - total
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformComponentLogEntry'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  PlatformComponentMetrics:
+    type: object
+    required:
+    - component
+    - dev_profile
+    - timestamp
+    properties:
+      component:
+        signature:
+          $ref: '#/components/schemas/PlatformComponentRef'
+        enum: []
+      cpu_cores:
+        signature:
+          type: number
+          format: double
+          nullable: true
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      memory_total_mb:
+        signature:
+          type: number
+          format: double
+          nullable: true
+        enum: []
+      memory_used_mb:
+        signature:
+          type: number
+          format: double
+          nullable: true
+        enum: []
+      network_rx_bytes_per_sec:
+        signature:
+          type: number
+          format: double
+          nullable: true
+        enum: []
+      network_tx_bytes_per_sec:
+        signature:
+          type: number
+          format: double
+          nullable: true
+        enum: []
+      timestamp:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  PlatformComponentRef:
+    type: object
+    required:
+    - group
+    - name
+    - namespace
+    properties:
+      group:
+        signature:
+          type: string
+        enum:
+        - service
+        - dependency
+        - platform
+      name:
+        signature:
+          type: string
+        enum: []
+      namespace:
+        signature:
+          type: string
+        enum: []
+  PlatformComponentStatusResponse:
+    type: object
+    required:
+    - dev_profile
+    - groups
+    - observed_at
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      groups:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformComponentGroup'
+        enum: []
+      observed_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
   PlatformPasswordLoginRequest:
     type: object
     required:
@@ -11407,6 +12133,40 @@ schemas:
           format: int64
           minimum: 0
         enum: []
+  PlatformRole:
+    type: object
+    required:
+    - id
+    - name
+    - permissions
+    properties:
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      permissions:
+        signature:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        enum: []
+  PlatformRoleListResponse:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformRole'
+        enum: []
   PlatformServiceHealthComponent:
     type: object
     required:
@@ -11507,6 +12267,7 @@ schemas:
     - email
     - id
     - role
+    - role_id
     - source
     - status
     - username
@@ -11539,16 +12300,19 @@ schemas:
       role:
         signature:
           type: string
-        enum:
-        - platform-admin
-        - platform-ops
-        - platform-readonly
+        enum: []
+      role_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
       source:
         signature:
           type: string
         enum:
         - local
         - third_party
+        - unknown
       status:
         signature:
           type: string
@@ -11566,7 +12330,7 @@ schemas:
     - email
     - idempotency_key
     - password
-    - role
+    - role_id
     - username
     properties:
       display_name:
@@ -11591,13 +12355,11 @@ schemas:
           minLength: 8
           maxLength: 64
         enum: []
-      role:
+      role_id:
         signature:
           type: string
-        enum:
-        - platform-admin
-        - platform-ops
-        - platform-readonly
+          format: uuid
+        enum: []
       username:
         signature:
           type: string
@@ -11630,6 +12392,35 @@ schemas:
           type: string
           nullable: true
         enum: []
+  PlatformUserPermissionsResponse:
+    type: object
+    required:
+    - permissions
+    - role
+    - role_id
+    - user_id
+    properties:
+      permissions:
+        signature:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        enum: []
+      role:
+        signature:
+          type: string
+        enum: []
+      role_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      user_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
   PlatformUserResetPasswordRequest:
     type: object
     required:
@@ -11651,20 +12442,18 @@ schemas:
     type: object
     required:
     - idempotency_key
-    - role
+    - role_id
     properties:
       idempotency_key:
         signature:
           type: string
           format: uuid
         enum: []
-      role:
+      role_id:
         signature:
           type: string
-        enum:
-        - platform-admin
-        - platform-ops
-        - platform-readonly
+          format: uuid
+        enum: []
   PlatformWorkload:
     type: object
     required:
@@ -11921,6 +12710,10 @@ schemas:
         signature:
           $ref: '#/components/schemas/PlatformWorkloadMetadata'
         enum: []
+      model_materialization:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadModelMaterialization'
+        enum: []
       name:
         signature:
           type: string
@@ -12078,6 +12871,62 @@ schemas:
           type: string
           minLength: 1
         enum: []
+  PlatformWorkloadModelMaterialization:
+    type: object
+    required:
+    - checksum_sha256
+    - fetcher_image_ref
+    - model_service_grpc_addr
+    - model_version_id
+    - object_ref
+    - size_bytes
+    - target_path
+    - tenant_id
+    properties:
+      checksum_sha256:
+        signature:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        enum: []
+      fetcher_image_ref:
+        signature:
+          type: string
+          minLength: 1
+          pattern: ^.+@sha256:[a-f0-9]{64}$
+        enum: []
+      model_service_grpc_addr:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      model_version_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      object_ref:
+        signature:
+          type: string
+          minLength: 1
+          pattern: ^object://models/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[^/?#]+/[^/?#]+/[^/?#]+$
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+          format: int64
+          minimum: 1
+        enum: []
+      target_path:
+        signature:
+          type: string
+          minLength: 1
+          pattern: ^/(?!.*\\.\\.).+$
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
   PlatformWorkloadNetwork:
     type: object
     required:
@@ -12231,6 +13080,10 @@ schemas:
     - items
     - tenant_id
     properties:
+      gpu_reservation:
+        signature:
+          $ref: '#/components/schemas/ReservationView'
+        enum: []
       items:
         signature:
           type: array
@@ -12296,6 +13149,11 @@ schemas:
     - total
     - used
     properties:
+      available:
+        signature:
+          type: integer
+          format: int64
+        enum: []
       display_name:
         signature:
           type: string
@@ -14495,6 +15353,39 @@ schemas:
         enum:
         - disabled
         - enabled
+  StorageConsumerInfo:
+    type: object
+    required:
+    - instance_id
+    - instance_name
+    - kind
+    - state
+    properties:
+      instance_id:
+        signature:
+          type: string
+        enum: []
+      instance_name:
+        signature:
+          type: string
+        enum: []
+      kind:
+        signature:
+          type: string
+        enum:
+        - container
+        - vm
+        - batch_job
+        - sandbox
+      mount_path:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      state:
+        signature:
+          type: string
+        enum: []
   StorageFilesystem:
     type: object
     required:
@@ -15178,6 +16069,251 @@ schemas:
     - status
     - updated_at
     properties:
+      admin_count:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+      auth:
+        signature:
+          $ref: '#/components/schemas/TenantAuthSummary'
+        enum: []
+      contact_email:
+        signature:
+          type: string
+          format: email
+          nullable: true
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      disabled_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      display_name:
+        signature:
+          type: string
+        enum: []
+      frozen_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      plan_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - active
+        - frozen
+        - disabled
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      user_count:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+  TenantAuthConfig:
+    type: object
+    required:
+    - mfa_required
+    - sso_enabled
+    - updated_at
+    properties:
+      mfa_required:
+        signature:
+          type: boolean
+        enum: []
+      provider:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      sso_enabled:
+        signature:
+          type: boolean
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  TenantAuthSummary:
+    type: object
+    required:
+    - mfa_required
+    - sso_enabled
+    properties:
+      mfa_required:
+        signature:
+          type: boolean
+        enum: []
+      sso_enabled:
+        signature:
+          type: boolean
+        enum: []
+  TenantAuthUpdateRequest:
+    type: object
+    required: []
+    properties:
+      mfa_required:
+        signature:
+          type: boolean
+        enum: []
+      provider:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      sso_enabled:
+        signature:
+          type: boolean
+        enum: []
+  TenantCreateRequest:
+    type: object
+    required:
+    - admin_email
+    - admin_name
+    - admin_password_hash
+    - display_name
+    - email
+    - name
+    - plan_id
+    properties:
+      admin_email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      admin_name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      admin_password_hash:
+        signature:
+          type: string
+        enum: []
+      display_name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 3
+          maxLength: 40
+          pattern: ^[a-zA-Z0-9-]{3,40}$
+        enum: []
+      plan_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+  TenantLifecycleEntry:
+    type: object
+    required:
+    - action
+    - created_at
+    - id
+    properties:
+      action:
+        signature:
+          type: string
+        enum:
+        - create
+        - freeze
+        - unfreeze
+        - disable
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      reason:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      request_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      user_id:
+        signature:
+          type: string
+          format: uuid
+          nullable: true
+        enum: []
+  TenantLifecycleListResponse:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantLifecycleEntry'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  TenantListItem:
+    type: object
+    required:
+    - admin_count
+    - created_at
+    - display_name
+    - id
+    - name
+    - plan_id
+    - status
+    properties:
+      admin_count:
+        signature:
+          type: integer
+          format: int64
+        enum: []
       created_at:
         signature:
           type: string
@@ -15208,10 +16344,28 @@ schemas:
         - active
         - frozen
         - disabled
-      updated_at:
+  TenantListResponse:
+    type: object
+    required:
+    - items
+    - next_cursor
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantListItem'
+        enum: []
+      next_cursor:
         signature:
           type: string
-          format: date-time
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
         enum: []
   TenantPlanUpdateRequest:
     type: object
@@ -15261,6 +16415,21 @@ schemas:
           type: array
           items:
             $ref: '#/components/schemas/TenantSummary'
+        enum: []
+  TenantUpdateRequest:
+    type: object
+    required: []
+    properties:
+      contact_email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      display_name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
         enum: []
   TenantUser:
     type: object
@@ -15315,6 +16484,7 @@ schemas:
         enum:
         - local
         - third_party
+        - unknown
       status:
         signature:
           type: string

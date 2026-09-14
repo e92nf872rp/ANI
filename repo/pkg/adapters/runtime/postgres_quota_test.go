@@ -31,10 +31,11 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 		case **string:
 			if r.values[i] == nil {
 				*ptr = nil
-			} else if s, ok := r.values[i].(string); ok {
-				*ptr = &s
+			} else if sp, ok := r.values[i].(*string); ok {
+				*ptr = sp
 			} else {
-				*ptr = r.values[i].(*string)
+				s := r.values[i].(string)
+				*ptr = &s
 			}
 		case *bool:
 			*ptr = r.values[i].(bool)
@@ -45,10 +46,11 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 		case **time.Time:
 			if r.values[i] == nil {
 				*ptr = nil
-			} else if ts, ok := r.values[i].(time.Time); ok {
-				*ptr = &ts
+			} else if tp, ok := r.values[i].(*time.Time); ok {
+				*ptr = tp
 			} else {
-				*ptr = r.values[i].(*time.Time)
+				tm := r.values[i].(time.Time)
+				*ptr = &tm
 			}
 		case *[]byte:
 			*ptr = r.values[i].([]byte)
@@ -76,6 +78,7 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 type quotaFakeTx struct {
 	queryRows    []quotaFakeRow
 	queryResults []*quotaFakeRows
+	querySQLs    []string
 	execFn       func(sql string, args []any) int64
 	execErr      func(sql string, args []any) error
 	execSQLs     []string
@@ -103,7 +106,8 @@ func (tx *quotaFakeTx) Exec(_ context.Context, sql string, args ...any) (ports.C
 	return ports.CommandTag{RowsAffected: ra}, nil
 }
 
-func (tx *quotaFakeTx) Query(context.Context, string, ...any) (ports.Rows, error) {
+func (tx *quotaFakeTx) Query(_ context.Context, sql string, _ ...any) (ports.Rows, error) {
+	tx.querySQLs = append(tx.querySQLs, sql)
 	if len(tx.queryResults) == 0 {
 		return &quotaFakeRows{}, nil
 	}
@@ -112,7 +116,8 @@ func (tx *quotaFakeTx) Query(context.Context, string, ...any) (ports.Rows, error
 	return r, nil
 }
 
-func (tx *quotaFakeTx) QueryRow(_ context.Context, _ string, _ ...any) ports.Row {
+func (tx *quotaFakeTx) QueryRow(_ context.Context, sql string, _ ...any) ports.Row {
+	tx.querySQLs = append(tx.querySQLs, sql)
 	if len(tx.queryRows) == 0 {
 		return quotaFakeRow{err: ports.ErrUnsupported}
 	}

@@ -15,6 +15,8 @@
 > **ANI-GATEWAY-OPENAI-ROUTE-BOUNDARY（2026-09-07）：** ANI Gateway 已移除旧 `POST /v1/chat/completions` 占位代理，OpenAI chat/embedding 数据面归独立 Envoy AI Gateway；内部 vLLM OpenAI 路径不变。已审批的模型版本列表内部调用已接入，`GET /api/v1/svc/models/{model_id}/versions` live smoke 返回 200。该批次不改 v1/protobuf、不含 Console；Envoy 动态发布和真实模型 chat 成功响应仍未完成 live 验收。记录：`development-records/ani-gateway-openai-route-boundary.md`。
 > **标准状态 marker：** 真实服务器只读验证已完成；Rook-Ceph 正式部署已完成。Sprint 11 执行环境：正式部署执行环境。
 
+> **PLATFORM-AUDIT-LOG（2026-09-10，K8s 测试环境实测，auditlog3 重构后）：** BOSS 平台只读审计日志查询接口（分支 feat/platform-audit-log）：Core OpenAPI 契约优先新增 `GET /api/v1/platform/audit-logs`（time_from/time_to 必填成对，user/verb/resource_type/namespace/after/page_size/keyword 过滤，page_size 默认 20 上限 100 钳制；401/403/400/500 语义），数据源 kube-apiserver Metadata 级 write 审计经 fluent-bit 接流 Loki；ports `PlatformAuditService` + loki real adapter（query_range + LogQL label 过滤 + timestamp+auditID 全局倒序游标分页 + count_over_time 近似 total）+ gateway 路由与装配 + authz/Core SDK 生成物零漂移（validate_gateway_authz_drift no drift）；修复 generate_gateway_authz.py Windows 写 CRLF 致生成全量漂移（write_text newline="\n"）；新增/增量单测全 PASS，平台/租户隔离红线（tenant→403）由 middleware 锁定。K8s 测试环境 ani-test2 真实控制面审计接流已启用并端到端验证通过——kube-apiserver 审计（移走 manifests 目录 bak 备份文件后容器带 8 个 audit flag，真根因=bak 文件污染 manifests 目录）→ fluent-bit 审计流水线（audit-parsers.conf + extract_labels.lua audit_labels + hostPath + runAsUser:0）→ Loki `stream="kubernetes-audit"` 带 audit_* label → gateway，T-2 接流/T-7 脱敏/T-8 稳定性全通过。T-6c 租户 403 真实环境因无 tenant 登录端点回退单测锁定。**同日 auditlog3 重构（用户决策，过渡方案简化，镜像 `test2-20260910-auditlog3`）：删除 `AUDIT_LOG_PROVIDER` env 分派与 local 降级 adapter（`local_platform_audit.go` 及其测试整体删除、`ErrPlatformAuditUnsupported` 删除），gateway 启动默认直连 Loki（`AUDIT_LOG_LOKI_URL` 可覆盖地址），Loki 不可用/查询失败直接 500 `PLATFORM_AUDIT_FAILED` 不再降级；单测断言反转为必须报错（`TestPlatformAuditErrorWhenLokiUnavailable/Non200`），OpenAPI description 同步并重跑 SDK/API docs 生成物幂等零漂移；deployment 已 `kubectl set env AUDIT_LOG_PROVIDER-` 移除全部 AUDIT env，实测 T-9a 通过（`real_provider=true`、`provider=loki`、`total_approx=95296`、真实审计 items）。前端语义变化：Loki 失败为 5xx 而非 200+假数据，`dev_profile.real_provider` 恒 true。后续将由独立审计服务替代本过渡方案。** 详见 `development-records/platform-audit-log.md`（§10）与 `kjs-study/平台审计日志/kube-apiserver审计接流排查记录.md`。
+
 > **PLATFORM-COMPONENT-STATUS-A（2026-09-05，2026-09-07 补充决策）：** `LOCAL_VERIFIED + K8s 实测`（分支 feat/component-status）。BOSS 平台健康组件状态只读能力：`GET /platform/components`（22 组件静态注册表三组聚合，K8s REST 读取 + service 组融合 Prometheus `up`/`target_info` scrape_status，15s TTL 缓存，任一组件失败不阻塞 200）+ 组件诊断三接口 metrics/logs/logs-stream（Prometheus cAdvisor 快照、Loki 列表与 SSE 流，错误映射 400/404/503）；契约优先 + authz/Core SDK 生成物零漂移 + 35 个单测全 PASS；K8s 测试环境镜像 `dev-20260905-compdiag` 实测列表/指标/日志/SSE/401/404 全通过。产品决策 2026-09-07：原型 P99/错误率/依赖检查三列裁剪不做，metrics 契约 description 已改为产品边界声明。已知环境边界：并行会话用不带 target_info 埋点的镜像重部署 inference-service/model-service 会令观测 reader fail-closed（service 组 scrape_status=unknown、/platform/services/health 503），恢复带埋点镜像即自愈。详情见 `development-records/platform-component-status-a.md`。
 
 > **OBS-RUNTIME-P0（2026-09-04）：** `LIVE_VERIFIED`（范围仅限七服务监控可达性）。七服务已统一 runtimeadmin/OTel/Prometheus `ani-components` discovery，Core 新增 `GET /api/v1/platform/services/health` 并对 reachable/unreachable/unknown 与数据源不可用 fail closed；L0～L2、供应链门禁和隔离 namespace L3 的 discovery/up=0/missing-stale/Pod 删除恢复/Prometheus 故障均通过，清理后 namespace 不存在。BOSS/Console 前端按用户明确决定因 ANI 前端废弃而 `not_applicable`，只做接口验证；P1/L4、生产 rollout 与业务健康仍未验证。详情见 `development-records/service-runtime-observability-p0.md`。
@@ -404,6 +406,37 @@ make validate-doc-entrypoints
 git diff --check
 ```
 
+## BOSS 平台运营账号功能流（2026-09）
+
+> 独立于 Sprint 13/14 real provider 收敛的 BOSS 平台运营账号（platform-admin）后端功能开发流。覆盖 Core `PlatformUserAdminService` + 新建 `platform-settings-service` + Services Gateway `/api/v1/svc/platform-admins/*`。共 11 个后端 Issue（#001–#011），**后端 API 批次本地实现完成**；BOSS 前端（列表/创建向导/详情 Tabs）待后续批次。批次记录归档于 `development-records/platform-admin-issue-*.md`。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| #001 | OpenAPI 契约：Core `/admin/platform-users/*` + Services `/platform-admins/*` | ✅ 已完成 | `development-records/platform-admin-issue-001-openapi-contract.md` |
+| #002 | platform-settings-service 骨架 + gRPC/proto + 审计 store 端口 | ✅ 已完成 | `development-records/platform-admin-issue-002-service-skeleton.md` |
+| #003 | 审计表迁移 + `PlatformAdminAuditStore` postgres adapter | ✅ 已完成 | `development-records/platform-admin-issue-003-database-migration.md` |
+| #004 | Services 网关 platform-admins 路由注册 + Core admin 链路 | ✅ 已完成 | `development-records/platform-admin-issue-004-services-link.md` |
+| #005 | 创建运营账号 API（email 可重复、软删 username 唯一） | ✅ 已完成 | `development-records/platform-admin-issue-005-create-api.md` |
+| #006 | 列表 + 详情 API（游标分页、Core SDK 委托） | ✅ 已完成 | `development-records/platform-admin-issue-006-list-detail-api.md` |
+| #007 | Core 角色列表 + 账号权限矩阵查询 | ✅ 已完成 | `development-records/platform-admin-issue-007-core-platform-roles-api.md` |
+| #008 | 改角色 + last-admin 保护 + 幂等边界（仅外层网关） | ✅ 已完成 | `development-records/platform-admin-issue-008-roles-change-role-api.md` |
+| #009 | 禁用/启用/软删除 + `STATUS_UNCHANGED` | ✅ 已完成 | `development-records/platform-admin-issue-009-disable-enable-delete-api.md` |
+| #010 | 重置密码 + OpenAPI path 修正 + Store 单测 | ✅ 已完成 | `development-records/platform-admin-issue-010-reset-password-api.md` |
+| #011 | 操作历史查询 + 操作者 `user_id` + 测试补强 | ✅ 已完成（本地未提交） | `development-records/platform-admin-issue-011-audit-logs-api.md` |
+
+**当前边界：** #001–#011 后端 API 本地实现与 note-it 已完成；不含 BOSS 前端 Tab、真实 PG live gate、production ready 声明。合入前需全量 `make test` + `make validate-services` + `make validate-architecture`。
+
+验收命令：
+
+```bash
+cd repo
+python scripts/validate_services_route_contract.py
+go test ./services/platform-settings-service/internal/service/... -run "PlatformAdmin|AuditLog|ResetPassword|Disable|Enable|Delete|ChangeRole|Create|List|Get" -count=1
+go test ./services/ani-gateway/internal/router/... -run "PlatformAdmin|AuditLog|ResetPassword|DisableEnable|DeleteFlow|CreateFlow" -count=1
+go test ./services/platform-settings-service/internal/repo/adapters/postgres/... -count=1
+make test
+make validate-services
+```
 ## BOSS 租户管理员功能流（2026-08）
 
 > BOSS 平台租户管理员管理功能开发流，覆盖管理员全生命周期（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端实现 → 多轮 review-it → 文档对齐）。14 个 issue 全部实现完成。批次记录归档于 `development-records/tenant-admin-issue-*.md` 和 `tenant-admin-feature-batch.md`。

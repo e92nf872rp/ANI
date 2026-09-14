@@ -37,6 +37,13 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/admin/platform-users",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
+	"GET /api/v1/admin/platform-users/roles": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "listPlatformUserRoles",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/admin/platform-users/roles",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
 	"DELETE /api/v1/admin/platform-users/{userId}": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "deletePlatformUser",
@@ -63,6 +70,13 @@ var generatedCorePolicies = map[string]Policy{
 		OperationID:          "enablePlatformUser",
 		Method:               "POST",
 		PathTemplate:         "/api/v1/admin/platform-users/{userId}/enable",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
+	"GET /api/v1/admin/platform-users/{userId}/permissions": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "getPlatformUserPermissions",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/admin/platform-users/{userId}/permissions",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"POST /api/v1/admin/platform-users/{userId}/reset-password": {
@@ -1382,6 +1396,18 @@ var generatedCorePolicies = map[string]Policy{
 		Method:               "GET",
 		PathTemplate:         "/api/v1/platform-workloads/{workload_id}/logs",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}},
+	},
+	"GET /api/v1/platform/audit-logs": {
+		Source:               PolicySourceGenerated,
+		OperationID:          "getPlatformAuditLogs",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/platform/audit-logs",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+		Version:              "v1",
+		Resource:             "audit-log",
+		Action:               "read",
+		Boundary:             BoundaryPlatform,
+		PrincipalKinds:       []PrincipalKind{PrincipalUser},
 	},
 	"GET /api/v1/platform/capacity": {
 		Source:               PolicySourceGenerated,

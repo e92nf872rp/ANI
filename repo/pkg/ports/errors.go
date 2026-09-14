@@ -31,13 +31,25 @@ var (
 	ErrUserAlreadyTenantAdmin = errors.New("user already tenant admin")
 	ErrRoleChangeInvalid      = errors.New("role change invalid")
 	ErrPasswordSameAsOld      = errors.New("password same as old")
-	ErrUserStateInvalid       = errors.New("user state invalid")
+
+	// Platform user admin sentinel errors (users / user_roles / roles，平台维度)。
+	// 平台侧 email 允许重复，冲突仅 username。
+	ErrPlatformUserNotFound  = errors.New("platform user not found")
+	ErrRoleNotFound          = errors.New("role not found")
+	ErrUsernameAlreadyExists = errors.New("username already exists")
+	ErrLastPlatformAdmin     = errors.New("last platform admin")
+	ErrStatusUnchanged       = errors.New("status unchanged")
+	ErrValidationFailed      = errors.New("validation failed")
+
+	ErrUserStateInvalid = errors.New("user state invalid")
 	// Metadata transaction sentinel errors.
 	ErrMetadataTenantTxBegin    = errors.New("metadata tenant tx begin")
 	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")
 	ErrMetadataPlatformTxBegin  = errors.New("metadata platform tx begin")
 	ErrMetadataPlatformTxCommit = errors.New("metadata platform tx commit")
 
+	// ErrNotImplemented marks a port adapter method that is declared but not yet implemented.
+	ErrNotImplemented = errors.New("501 Not Implemented")
 	// Reservation sentinel errors (BOSS reservation management).
 	ErrReservationExceedsQuota = errors.New("allocated_gpu_count exceeds total quota")
 	ErrReservedInsufficient    = errors.New("reserved quota insufficient: allocated - used - reserved < request")

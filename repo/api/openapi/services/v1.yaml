@@ -1515,27 +1515,29 @@ components:
 
     PlatformAdminListItem:
       type: object
-      required: [id, username, display_name, role, status, source]
+      required: [id, username, display_name, role_id, role, status, source]
       properties:
         id:           { type: string, format: uuid }
         username:     { type: string }
         display_name: { type: string }
-        role:         { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role_id:      { type: string, format: uuid, description: "当前绑定平台角色 id" }
+        role:         { type: string, description: "平台角色名；以 Core roles 表 / GET /platform-admins/roles 为准，不在契约写死枚举" }
         status:       { type: string, enum: [active, disabled] }
-        source:       { type: string, enum: [local, third_party] }
+        source:       { type: string, enum: [local, third_party, unknown] }
         last_login_at: { type: string, format: date-time, nullable: true }
 
     PlatformAdminDetail:
       type: object
-      required: [id, email, username, display_name, role, status, source, created_at]
+      required: [id, email, username, display_name, role_id, role, status, source, created_at]
       properties:
         id:            { type: string, format: uuid }
         email:         { type: string, format: email }
         username:      { type: string }
         display_name:  { type: string }
-        role:          { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role_id:       { type: string, format: uuid, description: "当前绑定平台角色 id" }
+        role:          { type: string, description: "平台角色名；以 Core roles 表 / GET /platform-admins/roles 为准，不在契约写死枚举" }
         status:        { type: string, enum: [active, disabled] }
-        source:        { type: string, enum: [local, third_party] }
+        source:        { type: string, enum: [local, third_party, unknown] }
         last_login_at: { type: string, format: date-time, nullable: true }
         created_at:    { type: string, format: date-time }
 
@@ -1548,43 +1550,52 @@ components:
 
     PlatformAdminCreateRequest:
       type: object
-      required: [idempotency_key, email, username, display_name, role, password]
+      required: [idempotency_key, email, username, display_name, role_id, password]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        email:           { type: string, format: email, description: "RFC 5322" }
-        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号" }
+        email:           { type: string, format: email, description: "RFC 5322；允许重复" }
+        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号；全局唯一" }
         display_name:    { type: string, minLength: 1, maxLength: 128 }
-        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role_id:         { type: string, format: uuid, description: "平台角色 id：tenant_id IS NULL 且 name 以 platform- 为前缀" }
         password:        { type: string, minLength: 8, maxLength: 64, description: "四类中至少三类" }
 
     PlatformAdminRoleUpdateRequest:
       type: object
-      required: [idempotency_key, role]
+      required: [idempotency_key, role_id]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        role_id:         { type: string, format: uuid, description: "目标平台角色 id" }
 
     PlatformRole:
       type: object
-      required: [name, label, description, permissions]
+      description: "平台内置角色；permissions 为 roles.permissions JSONB 原样（对齐 Core）"
+      required: [id, name, permissions]
       properties:
-        name:        { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
-        label:       { type: string }
-        description: { type: string }
+        id:   { type: string, format: uuid }
+        name: { type: string, description: "平台角色名；以后端实际返回为准" }
         permissions:
-          type: object
-          required: [tenant_ops, resource_pool, platform_user, audit_export]
-          properties:
-            tenant_ops:    { type: string, enum: [read, write, none] }
-            resource_pool: { type: string, enum: [read, write, none] }
-            platform_user: { type: string, enum: [read, write, none] }
-            audit_export:  { type: string, enum: [read, write, none] }
+          type: array
+          description: "roles.permissions JSONB 原样（resource/actions/scope）"
+          items: { type: object, additionalProperties: true }
 
     PlatformRoleListResponse:
       type: object
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/PlatformRole' } }
+
+    PlatformAdminPermissionsResponse:
+      type: object
+      description: "平台运营账号当前绑定角色及其 permissions JSONB 原样（对齐 Core）"
+      required: [user_id, role_id, role, permissions]
+      properties:
+        user_id: { type: string, format: uuid }
+        role_id: { type: string, format: uuid }
+        role:    { type: string, description: "当前绑定角色名" }
+        permissions:
+          type: array
+          description: "该角色 roles.permissions JSONB 原样"
+          items: { type: object, additionalProperties: true }
 
     PlatformAdminAuditLog:
       type: object
@@ -1593,7 +1604,8 @@ components:
         id:         { type: string, format: uuid }
         action:     { type: string, description: "如 platform_admin.create / change_role / reset_password / disable / enable / delete" }
         resource:   { type: string }
-        result:     { type: string, enum: [success, failed] }
+        result:     { type: string, enum: [success, failure] }
+        user_id:    { type: string, format: uuid, nullable: true, description: "操作者（audit_logs.user_id）；未记录时为 null" }
         details:    { type: object, additionalProperties: true, nullable: true }
         created_at: { type: string, format: date-time }
 
@@ -4514,7 +4526,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
         "404": { $ref: '#/components/responses/NotFound', description: "ROLE_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT" }
+        "409": { $ref: '#/components/responses/Conflict', description: "USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT" }
     get:
       operationId: listPlatformAdmins
       summary: 平台运营账号列表（需 platform-admin / platform-ops / platform-readonly）
@@ -4522,10 +4534,10 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
-        - { name: role, in: query, schema: { type: string, enum: [platform-admin, platform-ops, platform-readonly] } }
+        - { name: role_id, in: query, schema: { type: string, format: uuid }, description: "按平台角色 id 过滤" }
         - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
-        - { name: source, in: query, schema: { type: string, enum: [local, oidc] }, description: "按 username 前缀过滤；oidc 结果在响应中映射为 third_party" }
-        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+        - { name: source, in: query, schema: { type: string, enum: [local, third_party] }, description: "按 username 前缀过滤；third_party → oidc:%" }
+        - { name: search, in: query, schema: { type: string }, description: "对外 username 模糊匹配（不含 local:/oidc: 前缀）" }
       responses:
         "200":
           description: 平台运营账号列表
@@ -4548,6 +4560,30 @@ paths:
               schema: { $ref: '#/components/schemas/PlatformRoleListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+
+  /platform-admins/{userId}/permissions:
+    get:
+      operationId: getPlatformAdminPermissions
+      summary: 查询平台运营账号当前角色权限（需 platform-admin / platform-ops / platform-readonly）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: platform_admin
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 平台运营账号权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformAdminPermissionsResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
 
   /platform-admins/{userId}:
     get:
@@ -4609,9 +4645,8 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
-        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
-        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "ROLE_CHANGE_INVALID" }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND / ROLE_NOT_FOUND" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_PLATFORM_ADMIN / ROLE_CHANGE_INVALID" }
 
   /platform-admins/{userId}/reset-password:
     post:
@@ -4660,7 +4695,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
         "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
-        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_PLATFORM_ADMIN" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_PLATFORM_ADMIN / STATUS_UNCHANGED" }
 
   /platform-admins/{userId}/enable:
     post:
@@ -4684,6 +4719,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
         "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "STATUS_UNCHANGED" }
 
   /platform-admins/{userId}/audit-logs:
     get:
@@ -4695,7 +4731,7 @@ paths:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
         - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
-        - { name: result, in: query, schema: { type: string, enum: [success, failed] } }
+        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
       responses:
         "200":
           description: 平台运营账号操作历史

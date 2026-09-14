@@ -49,8 +49,11 @@ type RegisterOptions struct {
 	QuotaAdminService       ports.QuotaAdminService
 	PlatformWorkloadService ports.PlatformWorkloadService
 	TenantService           ports.TenantService
-	TenantPlanService       ports.TenantPlanService
-	TenantAdminService      ports.TenantAdminService
+	// PlatformUserAdminStore backs Core /admin/platform-users* endpoints.
+	// When nil those handlers are not registered.
+	PlatformUserAdminStore ports.PlatformUserAdminStore
+	TenantPlanService      ports.TenantPlanService
+	TenantAdminService     ports.TenantAdminService
 	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
 	// in gpu_spec_resources.go). When nil those handlers return 503.
 	GPUSpecStore ports.GPUSpecStore
@@ -74,6 +77,10 @@ type RegisterOptions struct {
 	// (GET /platform/capacity). When nil the handler falls back to the
 	// local deterministic adapter.
 	PlatformCapacityService ports.PlatformCapacityService
+	// PlatformAuditService backs the platform audit logs endpoint
+	// (GET /platform/audit-logs). Nil is not expected: main always wires
+	// the Loki-backed adapter (transitional design, no local fallback).
+	PlatformAuditService ports.PlatformAuditService
 	// ComponentStatusService backs the platform component status endpoint
 	// (GET /platform/components). When nil the handler falls back to the
 	// local deterministic adapter.
@@ -102,6 +109,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerAuth(v1)
 	registerMetering(v1, options.MeteringService)
 	registerPlatformCapacity(v1, options.PlatformCapacityService)
+	registerPlatformAudit(v1, options.PlatformAuditService)
 	registerComponentStatus(v1, options.ComponentStatusService)
 	registerComponentDiagnostics(v1, options.ComponentMetricsReader, options.ComponentLogReader)
 	registerHarbor(v1, options.ImageRegistry)
@@ -135,6 +143,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)
+	registerAdminPlatformUserResources(v1, options.PlatformUserAdminStore)
 	registerAdminTenantAdminResources(v1, options.TenantAdminService)
 	registerAdminTenantPlanResources(v1, options.TenantPlanService)
 	// GPU spec directory CRUD (POST/DELETE) + reservation management +
@@ -164,6 +173,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerSandboxes(svc)
 	registerTenant(svc)
 	registerTenantPlans(svc)
+	registerPlatformAdmins(svc)
 	registerTenantList(svc)
 	registerTenantAdmins(svc)
 

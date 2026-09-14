@@ -3,6 +3,7 @@ package anisdk
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -91,6 +92,7 @@ var Operations = []string{
 	"listPlatformAdminAuditLogs",
 	"disablePlatformAdmin",
 	"enablePlatformAdmin",
+	"getPlatformAdminPermissions",
 	"resetPlatformAdminPassword",
 	"updatePlatformAdminRole",
 	"listQuotaMeta",
@@ -234,6 +236,7 @@ var Paths = []string{
 	"GET /platform-admins/{userId}/audit-logs",
 	"POST /platform-admins/{userId}/disable",
 	"POST /platform-admins/{userId}/enable",
+	"GET /platform-admins/{userId}/permissions",
 	"POST /platform-admins/{userId}/reset-password",
 	"PUT /platform-admins/{userId}/role",
 	"GET /quota-meta",
@@ -402,6 +405,7 @@ var Schemas = []string{
 	"PlatformAdminDetail",
 	"PlatformAdminListItem",
 	"PlatformAdminListResponse",
+	"PlatformAdminPermissionsResponse",
 	"PlatformAdminRoleUpdateRequest",
 	"PlatformRole",
 	"PlatformRoleListResponse",
@@ -584,14 +588,16 @@ func (err APIError) Error() string {
 }
 
 type Client struct {
-	BaseURL string
-	Token   string
+	BaseURL    string
+	Token      string
+	HTTPClient *http.Client // optional; nil 时使用 http.DefaultClient（调用方应注入带 Timeout 的 client，避免改全局 DefaultClient）
 }
 
 type RequestOptions struct {
 	Body    map[string]any
 	Params  map[string]string
 	Headers map[string]string
+	Context context.Context // optional; 用于取消/超时，nil 时等价 Background
 }
 
 func NewClient(baseURL string, token string) Client {
@@ -614,7 +620,11 @@ func (client Client) Request(method string, path string, options RequestOptions)
 		}
 		body = bytes.NewReader(payload)
 	}
-	req, err := http.NewRequest(strings.ToUpper(method), requestURL, body)
+	ctx := options.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(method), requestURL, body)
 	if err != nil {
 		return nil, err
 	}
@@ -628,7 +638,11 @@ func (client Client) Request(method string, path string, options RequestOptions)
 	for key, value := range options.Headers {
 		req.Header.Set(key, value)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	hc := client.HTTPClient
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
