@@ -1348,6 +1348,18 @@ var generatedCorePolicies = map[string]Policy{
 		Boundary:             BoundaryTenant,
 		PrincipalKinds:       []PrincipalKind{PrincipalUser, PrincipalAPIKey},
 	},
+	"GET /api/v1/overview": {
+		Source:               PolicySourceGenerated,
+		OperationID:          "getConsoleOverview",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/overview",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+		Version:              "v1",
+		Resource:             "overview",
+		Action:               "get",
+		Boundary:             BoundaryTenant,
+		PrincipalKinds:       []PrincipalKind{PrincipalUser, PrincipalAPIKey},
+	},
 	"GET /api/v1/platform-workload-capabilities": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "getPlatformWorkloadCapabilities",

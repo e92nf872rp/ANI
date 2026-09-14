@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>247</dd></div>
-          <div><dt>Schemas</dt><dd>341</dd></div>
+          <div><dt>Operations</dt><dd>248</dd></div>
+          <div><dt>Schemas</dt><dd>350</dd></div>
         </dl>
       </section>
 
@@ -1633,6 +1633,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/overview</code></td>
+          <td><code>getConsoleOverview</code></td>
+          <td>查询 Console 首页概览统计</td>
+          <td><code>scope:instances:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/platform-workload-capabilities</code></td>
           <td><code>getPlatformWorkloadCapabilities</code></td>
           <td>查询平台工作负载能力</td>
@@ -2154,6 +2162,15 @@
         <li><code>BucketPrefixCreateRequest</code></li>
         <li><code>CloneSandboxCheckpointRequest</code></li>
         <li><code>CompleteOIDCLoginRequest</code></li>
+        <li><code>ConsoleInferenceServiceOverview</code></li>
+        <li><code>ConsoleInferenceServiceStatusDistribution</code></li>
+        <li><code>ConsoleInstanceOverview</code></li>
+        <li><code>ConsoleInstanceStateDistribution</code></li>
+        <li><code>ConsoleKnowledgeBaseOverview</code></li>
+        <li><code>ConsoleKnowledgeBaseStatusDistribution</code></li>
+        <li><code>ConsoleModelOverview</code></li>
+        <li><code>ConsoleModelStatusDistribution</code></li>
+        <li><code>ConsoleOverviewResponse</code></li>
         <li><code>CoreDevProfileInfo</code></li>
         <li><code>CreateAPIKeyRequest</code></li>
         <li><code>CreateAPIKeyResponse</code></li>
