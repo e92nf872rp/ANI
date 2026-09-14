@@ -356,6 +356,7 @@ async def test_kb_create_success_writes_audit_in_same_tx():
         "name": "kb", "description": "desc", "embedding_model": "bge-m3",
         "chunk_size": 512, "top_k": 5, "score_threshold": 0.3,
         "retrieval_mode": "hybrid", "status": "active", "doc_count": 0,
+        "default_inference_service": None,  # 未设置 → NULL 快照
     }
     assert args[6] is None and args[7] is None     # no error on success
     # Same transaction as the kb INSERT (audit commits iff the KB does).

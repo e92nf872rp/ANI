@@ -86,6 +86,7 @@ message CreateKBRequest {
   int32  top_k           = 6;   // default 5
   float  score_threshold = 7;   // default 0.3
   string retrieval_mode  = 8;   // vector | hybrid(默认) | keyword
+  string default_inference_service = 9; // default inference model (served_model_name); empty = "default"
 }
 
 message GetKBRequest {
@@ -172,7 +173,7 @@ message QueryRequest {
   string idempotency_key  = 5;   // prevents duplicate billing on retry
   int32  top_k            = 6;   // override KB default if nonzero
   float  score_threshold  = 7;   // override KB default if nonzero
-  string inference_service_name = 8; // which vLLM service to use; "default" if empty
+  string inference_service_name = 8; // which vLLM service to use; empty = KB default_inference_service, then "default"
   string retrieval_mode   = 9;   // override KB retrieval mode; empty = use KB
 }
 
@@ -202,7 +203,7 @@ message RetrieveRequest {
   string idempotency_key  = 5;   // prevents duplicate billing on retry
   int32  top_k            = 6;   // override KB default if nonzero
   float  score_threshold  = 7;   // override KB default if nonzero
-  string inference_service_name = 8; // which vLLM service to use; "default" if empty
+  string inference_service_name = 8; // which vLLM service to use; empty = KB default_inference_service, then "default"
   string retrieval_mode   = 9;   // override KB retrieval mode; empty = use KB
 }
 
@@ -255,6 +256,7 @@ message KnowledgeBase {
   int32  doc_count       = 10;
   google.protobuf.Timestamp created_at = 11;
   google.protobuf.Timestamp updated_at = 12;
+  string default_inference_service = 14; // default inference model (served_model_name); empty = "default"
 }
 
 message KBDocument {

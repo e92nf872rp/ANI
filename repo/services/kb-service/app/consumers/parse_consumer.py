@@ -262,8 +262,12 @@ class ParseConsumer:
             file_name = doc_row.get("file_name", "") or ""
 
         vector_store_id = ""
+        embedding_model = ""
         if kb_row:
             vector_store_id = str(kb_row.get("vector_store_id") or "")
+            # Per-KB embedding model (M2): write side uses the KB row's
+            # embedding_model so write and read always share one model.
+            embedding_model = str(kb_row.get("embedding_model") or "")
         if not vector_store_id:
             logger.error(
                 "parse_consumer: kb %s has no vector_store_id, skipping "
@@ -287,6 +291,7 @@ class ParseConsumer:
                 file_type=file_type,
                 chunk_size=int(chunk_size),
                 vector_store_id=vector_store_id,
+                embedding_model=embedding_model,
             )
         except Exception as exc:  # noqa: BLE001 — orchestrator handles errors
             logger.exception(

@@ -105,14 +105,15 @@ func kbWriteCtx(ctx context.Context, c *app.RequestContext) context.Context {
 // ── request body structs ────────────────────────────────────────────────────
 
 type createKnowledgeBaseRequest struct {
-	IdempotencyKey string  `json:"idempotency_key"`
-	Name           string  `json:"name"`
-	Description    string  `json:"description"`
-	EmbeddingModel string  `json:"embedding_model"`
-	ChunkSize      int32   `json:"chunk_size"`
-	TopK           int32   `json:"top_k"`
-	ScoreThreshold float32 `json:"score_threshold"`
-	RetrievalMode  string  `json:"retrieval_mode"`
+	IdempotencyKey          string  `json:"idempotency_key"`
+	Name                    string  `json:"name"`
+	Description             string  `json:"description"`
+	EmbeddingModel          string  `json:"embedding_model"`
+	ChunkSize               int32   `json:"chunk_size"`
+	TopK                    int32   `json:"top_k"`
+	ScoreThreshold          float32 `json:"score_threshold"`
+	RetrievalMode           string  `json:"retrieval_mode"`
+	DefaultInferenceService string  `json:"default_inference_service"`
 }
 
 // updateKnowledgeBaseRequest mirrors UpdateKnowledgeBaseRequest in
@@ -211,13 +212,14 @@ func (a *kbAPI) createKnowledgeBase(ctx context.Context, c *app.RequestContext) 
 		return
 	}
 	kb, err := a.client.CreateKB(kbWriteCtx(ctx, c), instanceTenantID(c), req.IdempotencyKey, &kbv1.CreateKBRequest{
-		Name:           req.Name,
-		Description:    req.Description,
-		EmbeddingModel: req.EmbeddingModel,
-		ChunkSize:      req.ChunkSize,
-		TopK:           req.TopK,
-		ScoreThreshold: req.ScoreThreshold,
-		RetrievalMode:  req.RetrievalMode,
+		Name:                    req.Name,
+		Description:             req.Description,
+		EmbeddingModel:          req.EmbeddingModel,
+		ChunkSize:               req.ChunkSize,
+		TopK:                    req.TopK,
+		ScoreThreshold:          req.ScoreThreshold,
+		RetrievalMode:           req.RetrievalMode,
+		DefaultInferenceService: req.DefaultInferenceService,
 	})
 	if err != nil {
 		writeKBError(c, err)
@@ -742,19 +744,20 @@ func (a *kbAPI) listKnowledgeBaseAuditLogs(ctx context.Context, c *app.RequestCo
 // shape matches the OpenAPI contract that Console/BOSS codegen against.
 
 type knowledgeBaseJSON struct {
-	TenantID       string  `json:"tenant_id"`
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	Description    string  `json:"description"`
-	EmbeddingModel string  `json:"embedding_model"`
-	ChunkSize      int32   `json:"chunk_size"`
-	TopK           int32   `json:"top_k"`
-	ScoreThreshold float32 `json:"score_threshold"`
-	RetrievalMode  string  `json:"retrieval_mode"`
-	Status         string  `json:"status"`
-	DocCount       int32   `json:"doc_count"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	TenantID                string  `json:"tenant_id"`
+	ID                      string  `json:"id"`
+	Name                    string  `json:"name"`
+	Description             string  `json:"description"`
+	EmbeddingModel          string  `json:"embedding_model"`
+	ChunkSize               int32   `json:"chunk_size"`
+	TopK                    int32   `json:"top_k"`
+	ScoreThreshold          float32 `json:"score_threshold"`
+	RetrievalMode           string  `json:"retrieval_mode"`
+	DefaultInferenceService string  `json:"default_inference_service"`
+	Status                  string  `json:"status"`
+	DocCount                int32   `json:"doc_count"`
+	CreatedAt               string  `json:"created_at"`
+	UpdatedAt               string  `json:"updated_at"`
 }
 
 type kbDocumentJSON struct {
@@ -858,19 +861,20 @@ func kbToJSON(kb *kbv1.KnowledgeBase) knowledgeBaseJSON {
 		return knowledgeBaseJSON{}
 	}
 	return knowledgeBaseJSON{
-		TenantID:       kb.GetTenantId(),
-		ID:             kb.GetId(),
-		Name:           kb.GetName(),
-		Description:    kb.GetDescription(),
-		EmbeddingModel: kb.GetEmbeddingModel(),
-		ChunkSize:      kb.GetChunkSize(),
-		TopK:           kb.GetTopK(),
-		ScoreThreshold: kb.GetScoreThreshold(),
-		RetrievalMode:  kb.GetRetrievalMode(),
-		Status:         kb.GetStatus(),
-		DocCount:       kb.GetDocCount(),
-		CreatedAt:      protoTimestampToRFC3339(kb.GetCreatedAt()),
-		UpdatedAt:      protoTimestampToRFC3339(kb.GetUpdatedAt()),
+		TenantID:                kb.GetTenantId(),
+		ID:                      kb.GetId(),
+		Name:                    kb.GetName(),
+		Description:             kb.GetDescription(),
+		EmbeddingModel:          kb.GetEmbeddingModel(),
+		ChunkSize:               kb.GetChunkSize(),
+		TopK:                    kb.GetTopK(),
+		ScoreThreshold:          kb.GetScoreThreshold(),
+		RetrievalMode:           kb.GetRetrievalMode(),
+		DefaultInferenceService: kb.GetDefaultInferenceService(),
+		Status:                  kb.GetStatus(),
+		DocCount:                kb.GetDocCount(),
+		CreatedAt:               protoTimestampToRFC3339(kb.GetCreatedAt()),
+		UpdatedAt:               protoTimestampToRFC3339(kb.GetUpdatedAt()),
 	}
 }
 

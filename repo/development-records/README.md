@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 模型配置动态切换 M3（2026-09-11）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| MODEL-CONFIG-M3 | KB 推理模型动态切换两功能点：SSE 流式查询接口补 `inference_service_name` query 参数契约声明与 gateway 测试断言（Go handler 链路 M1 轮已实现，本批补契约+断言）；建库请求/响应与 KB 详情契约新增可选 `default_inference_service`（proto CreateKBRequest field 9 / KnowledgeBase field 14，Go+Python stub 再生成），迁移 `20260911000100` 为 knowledge_bases 加可空 TEXT 列（repo 层空串归一化为 NULL，行为与升级前一致），kb-service repo 1 写 4 读 + grpc_server 写入/回落/审计快照（快照断言加 `default_inference_service: None`）+ query_orchestrator 回落链透传；gateway SSE/同步 Query/CreateKB 三链路断言 + 建库 handler 缺口按契约补齐（fake client 双向断言）。三级回落链 `request.inference_service_name → kb_cfg["default_inference_service"] → "default"`，回落在 kb-service 收口、gateway 只透传；该字段只影响生成路由不触发索引重建（对比 embedding_model 属 NOT NULL 且修改需重建索引）。验证：kb-service pytest 359 passed（基线 354+5 新）+ gateway go test 四包 ok + `make validate-services` 全绿；local verified，live 验证待执行；`deploy/migrations/20260911000100_kb_default_inference_service.sql` 为未跟踪新文件必须随批次提交 | model-config-m3-kb-default-inference-service.md |
+
 ### 平台组件状态与组件诊断（2026-09，分支 feat/component-status）
 
 | 批次 | 内容摘要 | 文件 |

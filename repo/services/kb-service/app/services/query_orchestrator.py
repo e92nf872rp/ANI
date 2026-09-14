@@ -115,6 +115,7 @@ class QueryOrchestrator:
         retrieval_mode: str,
         inference_service_name: str,
         vector_store_id: str,
+        embedding_model: str = "",
         history: list[dict[str, str]],
     ) -> QueryResult:
         """Run a synchronous RAG query and return a QueryResult.
@@ -138,6 +139,7 @@ class QueryOrchestrator:
             score_threshold=score_threshold,
             retrieval_mode=retrieval_mode,
             vector_store_id=vector_store_id,
+            embedding_model=embedding_model,
         )
 
         # 2. Gate ①: retrieval empty (legacy QAService lines 471-483).
@@ -219,6 +221,7 @@ class QueryOrchestrator:
         retrieval_mode: str,
         inference_service_name: str,
         vector_store_id: str,
+        embedding_model: str = "",
         history: list[dict[str, str]],
     ) -> AsyncIterator[Any]:
         """Streaming RAG query — async generator (issue-038: Retrieve RPC).
@@ -241,6 +244,7 @@ class QueryOrchestrator:
             score_threshold=score_threshold,
             retrieval_mode=retrieval_mode,
             vector_store_id=vector_store_id,
+            embedding_model=embedding_model,
         )
 
         # 2. Gate ①: retrieval empty → NO_RESULT, tokens=0 (LLM not called).

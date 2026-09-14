@@ -32,8 +32,9 @@ type fakeKBClient struct {
 	listKbsResp *kbv1.ListKBsResponse
 	listKbsErr  error
 
-	createKbResp *kbv1.KnowledgeBase
-	createKbErr  error
+	createKbResp    *kbv1.KnowledgeBase
+	createKbErr     error
+	lastCreateKbReq *kbv1.CreateKBRequest
 
 	getKbResp *kbv1.KnowledgeBase
 	getKbErr  error
@@ -58,6 +59,7 @@ type fakeKBClient struct {
 
 	queryResp *kbv1.QueryResponse
 	queryErr  error
+	lastQueryReq *kbv1.QueryRequest
 
 	citationsErr    error
 	sessionsErr     error
@@ -87,6 +89,7 @@ type fakeKBClient struct {
 func (f *fakeKBClient) CreateKB(_ context.Context, tenantID, idem string, req *kbv1.CreateKBRequest) (*kbv1.KnowledgeBase, error) {
 	f.lastTenantID = tenantID
 	f.lastIDemKey = idem
+	f.lastCreateKbReq = req
 	return f.createKbResp, f.createKbErr
 }
 func (f *fakeKBClient) GetKB(_ context.Context, tenantID, kbID string) (*kbv1.KnowledgeBase, error) {
@@ -137,10 +140,11 @@ func (f *fakeKBClient) DeleteDocument(_ context.Context, tenantID, kbID, docID s
 	f.lastDocID = docID
 	return &emptypb.Empty{}, f.deleteDocErr
 }
-func (f *fakeKBClient) Query(_ context.Context, tenantID, kbID, idem string, _ *kbv1.QueryRequest) (*kbv1.QueryResponse, error) {
+func (f *fakeKBClient) Query(_ context.Context, tenantID, kbID, idem string, req *kbv1.QueryRequest) (*kbv1.QueryResponse, error) {
 	f.lastTenantID = tenantID
 	f.lastKbID = kbID
 	f.lastIDemKey = idem
+	f.lastQueryReq = req
 	return f.queryResp, f.queryErr
 }
 func (f *fakeKBClient) ListKBCitations(_ context.Context, tenantID, kbID string, _ int32, _ string) (*kbv1.ListKBCitationsResponse, error) {
@@ -673,10 +677,13 @@ func TestKBRoutes_GrpcPassthroughList(t *testing.T) {
 // name from JSON to gRPC and returns 201 on success.
 func TestKBRoutes_GrpcPassthroughCreate(t *testing.T) {
 	client := &fakeKBClient{
-		createKbResp: &kbv1.KnowledgeBase{Id: "kb-new", Name: "alpha", Status: "active"},
+		createKbResp: &kbv1.KnowledgeBase{
+			Id: "kb-new", Name: "alpha", Status: "active",
+			DefaultInferenceService: "qwen3-32b",
+		},
 	}
 	h := setupKBTestServer(client)
-	createBody := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440001","name":"alpha"}`
+	createBody := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440001","name":"alpha","default_inference_service":"qwen3-32b"}`
 	resp := ut.PerformRequest(h.Engine, http.MethodPost,
 		"/api/v1/svc/knowledge-bases",
 		&ut.Body{Body: strings.NewReader(createBody), Len: len(createBody)},
@@ -693,6 +700,13 @@ func TestKBRoutes_GrpcPassthroughCreate(t *testing.T) {
 	_ = json.Unmarshal(resp.Body(), &body)
 	if body["id"] != "kb-new" {
 		t.Fatalf("id = %v, want kb-new", body["id"])
+	}
+	// 建库时选默认推理模型：JSON body → proto 字段，响应回显 default_inference_service。
+	if got := client.lastCreateKbReq.GetDefaultInferenceService(); got != "qwen3-32b" {
+		t.Fatalf("default_inference_service = %q, want qwen3-32b", got)
+	}
+	if body["default_inference_service"] != "qwen3-32b" {
+		t.Fatalf("body default_inference_service = %v, want qwen3-32b", body["default_inference_service"])
 	}
 }
 
@@ -825,7 +839,7 @@ func TestKBRoutes_QueryMapsSources(t *testing.T) {
 		},
 	}
 	h := setupKBTestServer(client)
-	queryBody := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440003","question":"what?"}`
+	queryBody := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440003","question":"what?","inference_service_name":"deepseek-v3"}`
 	resp := ut.PerformRequest(h.Engine, http.MethodPost,
 		"/api/v1/svc/knowledge-bases/kb-1/query",
 		&ut.Body{Body: strings.NewReader(queryBody), Len: len(queryBody)},
@@ -845,6 +859,10 @@ func TestKBRoutes_QueryMapsSources(t *testing.T) {
 	sources, _ := body["sources"].([]any)
 	if len(sources) != 1 {
 		t.Fatalf("sources = %d, want 1", len(sources))
+	}
+	// 同步 Query 请求级推理模型切换：JSON body → proto 字段 → kb-service 回落链。
+	if got := client.lastQueryReq.GetInferenceServiceName(); got != "deepseek-v3" {
+		t.Fatalf("inference_service_name = %q, want deepseek-v3", got)
 	}
 }
 

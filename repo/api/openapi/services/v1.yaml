@@ -395,6 +395,7 @@ components:
         name:            { type: string }
         description:     { type: string }
         embedding_model: { type: string }
+        default_inference_service: { type: string, description: "建库时选定的默认推理模型（served_model_name）；问答请求 inference_service_name 为空时回落到此值，再为空则由 rag-engine 默认模型（settings.vllm_model）接管" }
         chunk_size:       { type: integer, default: 512 }
         top_k:            { type: integer, default: 5 }
         score_threshold: { type: number, format: float, default: 0.3, description: "相似度阈值，非零覆盖默认值" }
@@ -429,7 +430,7 @@ components:
         idempotency_key:         { type: string, maxLength: 128, description: "防止重试导致重复计费" }
         top_k:                   { type: integer, default: 5, minimum: 1, maximum: 20 }
         score_threshold:         { type: number, format: float, default: 0.3, minimum: 0.0, maximum: 1.0, description: "相似度阈值，非零覆盖 KB 默认值" }
-        inference_service_name:  { type: string, nullable: true, description: "指定 vLLM 推理服务名；为空则用 default" }
+        inference_service_name:  { type: string, nullable: true, description: "指定 vLLM 推理服务名；为空则用 KB 默认推理模型（default_inference_service），再为空则由 rag-engine 默认模型（settings.vllm_model）接管" }
 
     KBQueryResponse:
       type: object
@@ -2498,7 +2499,8 @@ paths:
                 idempotency_key: { type: string, format: uuid }
                 name:            { type: string }
                 description:     { type: string }
-                embedding_model: { type: string, default: "bge-m3" }
+                embedding_model: { type: string, default: "BAAI/bge-m3" }
+                default_inference_service: { type: string, description: "默认推理模型（served_model_name）；为空则问答由 rag-engine 默认模型（settings.vllm_model）接管" }
                 chunk_size:      { type: integer, default: 1024, minimum: 1, maximum: 8192, description: "分块大小（tokens），与 KBConfig 边界一致" }
                 top_k:           { type: integer, default: 5, minimum: 1, maximum: 20 }
                 score_threshold: { type: number, format: float, default: 0.3, description: "相似度阈值，非零覆盖默认值" }
@@ -2715,6 +2717,10 @@ paths:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: question, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 2000 } }
         - { name: session_id, in: query, schema: { type: string, format: uuid } }
+        - { name: top_k, in: query, schema: { type: integer, minimum: 1, maximum: 20, default: 5, description: "Top-K 检索条数，非零覆盖 KB 默认值" } }
+        - { name: score_threshold, in: query, schema: { type: number, format: float, minimum: 0.0, maximum: 1.0, default: 0.3, description: "相似度阈值，非零覆盖 KB 默认值" } }
+        - { name: inference_service_name, in: query, schema: { type: string, description: "指定 vLLM 推理服务名；为空则用 KB 默认推理模型，再为空则由 rag-engine 默认模型（settings.vllm_model）接管" } }
+        - { name: retrieval_mode, in: query, schema: { type: string, enum: [vector, hybrid, keyword], description: "检索模式；为空则用 KB 默认值" } }
       responses:
         "200":
           description: SSE 流
@@ -2723,6 +2729,8 @@ paths:
               schema: { type: string }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { description: 推理服务暂不可用（inference.unavailable）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
   /knowledge-bases/{kb_id}/citations:
     get:

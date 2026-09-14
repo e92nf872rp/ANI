@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     # Redis (session cache) — maps to env REDIS_URL
     redis_url: str = "redis://localhost:6379/0"
 
+    # Embedding model defaults — maps to the shared env EMBEDDING_MODEL /
+    # EMBEDDING_DIM (same keys rag-engine reads; pydantic-settings is
+    # case-insensitive). Used by CreateKB as the fallback when the request
+    # omits embedding_model, and as the Core vector-store dimension. The
+    # default value mirrors the shared .env EMBEDDING_MODEL (SiliconFlow
+    # requires the full prefixed name "BAAI/bge-m3"; the bare alias is NOT
+    # recognised by the remote endpoint).
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

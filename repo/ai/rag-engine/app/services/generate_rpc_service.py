@@ -6,8 +6,9 @@ dependency). Reproduces the LlamaIndex ``ContextChatEngine`` +
 
 1. **Context repack** (reproduces ``CompactAndRefine._make_compact_text_chunks``):
    joins retrieved chunk texts and splits them into segments that each fit
-   within the LLM context window (rough char-based estimate: 1 token ≈ 4
-   chars). Each segment becomes a separate LLM call round.
+   within the LLM context window (CJK-aware token estimate: a CJK char ≈ 1
+   token, ASCII ≈ 4 chars per token). Each segment becomes a separate LLM
+   call round.
 2. **First round** (reproduces ``get_response_synthesizer`` initial call):
    ``[SYSTEM: DEFAULT_CONTEXT_TEMPLATE.format(context_str=segment_1),
    *chat_history, USER: question]``.
@@ -34,6 +35,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -64,10 +66,150 @@ DEFAULT_REFINE_TEMPLATE = (
 
 # vLLM request timeout (matches old OpenAILike timeout=120.0).
 LLM_TIMEOUT_SECONDS = 120.0
-# Rough chars-per-token estimate for context truncation (Plan §2.4).
-CHARS_PER_TOKEN = 4
-# Overhead chars reserved for system prompt + formatting beyond context_str.
-CONTEXT_OVERHEAD_CHARS = 200
+# Wall-clock budget for the whole multi-round generate (all segments).
+# The kb-service gRPC client applies a fixed 120s deadline to the Generate
+# RPC (RagEngineGRPCClient._timeout); without a server-side total budget,
+# N refine rounds × 120s each could exceed it and the whole answer would be
+# discarded as DEADLINE_EXCEEDED. The budget is slightly under the client
+# deadline so a round that would blow the deadline is skipped early and the
+# already-computed answer is returned instead.
+GENERATE_TOTAL_BUDGET_SECONDS = 110.0
+# ASCII chars per token (English density; Plan §2.4). CJK chars are counted
+# individually — a CJK char is ~1 token for Qwen-family tokenizers, so the
+# old flat 4-chars-per-token estimate under-counted Chinese text by ~4x and
+# overflowed small (1024-token) dev windows with a vLLM 400.
+ASCII_CHARS_PER_TOKEN = 4
+# Tokens reserved for prompt template literals + chat formatting beyond
+# question/history/context. Covers the longest template (refine, ~60 tokens)
+# with headroom.
+CONTEXT_OVERHEAD_TOKENS = 80
+# Minimum context tokens for a segment so tiny models still get usable context.
+MIN_CONTEXT_TOKENS = 50
+# Extra tokens shaved off every budget so estimate error can never overflow
+# the window (the estimate only stays an upper bound with a safety margin).
+TOKEN_SAFETY_MARGIN = 32
+# Per-message overhead tokens (chat template tags: <|im_start|>role\\n .. <|im_end|>).
+MESSAGE_OVERHEAD_TOKENS = 6
+
+
+def _is_cjk(ch: str) -> bool:
+    """True if ``ch`` is a CJK/fullwidth char (≈1 token each in Qwen BPE)."""
+    code = ord(ch)
+    return (
+        0x2E80 <= code <= 0x9FFF  # CJK radicals..CJK Unified Ideographs
+        or 0xAC00 <= code <= 0xD7AF  # Hangul syllables
+        or 0xF900 <= code <= 0xFAFF  # CJK compatibility ideographs
+        or 0xFF00 <= code <= 0xFF60  # fullwidth forms
+        or 0x3000 <= code <= 0x303F  # CJK punctuation
+    )
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate the token count of ``text`` (conservative upper bound).
+
+    Per-char classification: CJK chars count as 1 token each (Qwen BPE
+    is mostly one-token-per-char for Han/Hangul), other chars at
+    ``ASCII_CHARS_PER_TOKEN`` per token. Mixed CJK+ASCII text is counted
+    per category, so the bound holds for any mix.
+    """
+    if not text:
+        return 0
+    cjk = 0
+    other = 0
+    for ch in text:
+        if _is_cjk(ch):
+            cjk += 1
+        else:
+            other += 1
+    return cjk + (other + ASCII_CHARS_PER_TOKEN - 1) // ASCII_CHARS_PER_TOKEN
+
+
+def _estimate_messages_tokens(messages: list[dict]) -> int:
+    """Estimate the prompt token count of a chat message list."""
+    return sum(
+        _estimate_tokens(m.get("content", "")) + MESSAGE_OVERHEAD_TOKENS
+        for m in messages
+    )
+
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate ``text`` so its estimated tokens stay within ``max_tokens``.
+
+    Cuts at the char boundary where the running estimate reaches the budget
+    (head truncation — keep the beginning, matching the old [:max] cut).
+    """
+    if max_tokens <= 0 or not text:
+        return ""
+    used = 0
+    other_run = 0  # pending non-CJK chars not yet promoted to a token
+    for i, ch in enumerate(text):
+        if _is_cjk(ch):
+            used += 1 + (other_run + ASCII_CHARS_PER_TOKEN - 1) // ASCII_CHARS_PER_TOKEN
+            other_run = 0
+        else:
+            other_run += 1
+        pending = (
+            (other_run + ASCII_CHARS_PER_TOKEN - 1) // ASCII_CHARS_PER_TOKEN
+            if other_run
+            else 0
+        )
+        if used + pending > max_tokens:
+            return text[:i]
+    return text
+
+
+def _truncate_history(history: list[dict], max_tokens: int) -> list[dict]:
+    """Keep the most recent history messages within ``max_tokens``.
+
+    Oldest messages are dropped first (chat convention). If the newest
+    message alone exceeds the budget, its content is truncated.
+    """
+    if not history or max_tokens <= MESSAGE_OVERHEAD_TOKENS:
+        return []
+    kept: list[dict] = []
+    used = 0
+    for msg in reversed(history):
+        content = msg.get("content", "")
+        cost = _estimate_tokens(content) + MESSAGE_OVERHEAD_TOKENS
+        if used + cost <= max_tokens:
+            kept.append(msg)
+            used += cost
+            continue
+        if not kept:
+            # Newest message alone exceeds the budget → truncated copy.
+            kept.append(
+                {
+                    "role": msg.get("role", "user"),
+                    "content": _truncate_to_tokens(
+                        content, max_tokens - MESSAGE_OVERHEAD_TOKENS
+                    ),
+                }
+            )
+        break  # older messages no longer fit
+    kept.reverse()
+    return kept
+
+
+def _max_completion_tokens() -> int:
+    """Max completion tokens per LLM call, clamped to the model's window.
+
+    ``messages + max_tokens`` must fit ``vllm_context_window``; small dev
+    models (1024-token) reject the default 2048 with a 400. Reserves 512
+    tokens for messages, floor 64.
+    """
+    budget = settings.vllm_context_window - 512
+    return max(64, min(2048, budget))
+
+
+def _answer_reserve_tokens(max_tokens: int) -> int:
+    """Tokens reserved for the previous round's answer in refine prompts.
+
+    Refine rounds carry the previous answer inside the prompt; reserving a
+    slice of the completion budget (and truncating longer answers to it)
+    keeps ``messages + completion`` inside the window even on tiny dev
+    models. Production (32k) windows barely notice the reserve.
+    """
+    return max(64, max_tokens // 4)
 
 
 @functools.lru_cache(maxsize=1)
@@ -152,13 +294,14 @@ def _map_openai_exception(exc: Exception) -> Exception:
     raise RuntimeError(f"vLLM error: {exc}") from exc
 
 
-def _repack_context(context: list[dict], max_context_chars: int) -> list[str]:
-    """Split context texts into segments fitting within max_context_chars.
+def _repack_context(context: list[dict], max_context_tokens: int) -> list[str]:
+    """Split context texts into segments each fitting ``max_context_tokens``.
 
     Reproduces LlamaIndex ``CompactAndRefine._make_compact_text_chunks`` /
-    ``PromptHelper.repack`` behavior: each retrieved chunk's text is joined
-    with ``\\n\\n`` and the combined text is split into segments of at most
-    ``max_context_chars`` characters.
+    ``PromptHelper.repack`` behavior (token-budget aware, CJK-safe): each
+    retrieved chunk's text is joined with ``\\n\\n`` and the combined text
+    is split into segments of at most ``max_context_tokens`` estimated
+    tokens (a CJK char costs 1 token, not 1/4).
 
     A single chunk that exceeds the limit is split at the boundary (the
     remainder is truncated to the max, matching the old rough-truncation
@@ -174,15 +317,17 @@ def _repack_context(context: list[dict], max_context_chars: int) -> list[str]:
     full_text = "\n\n".join(c.get("content", "") for c in context)
     if not full_text.strip():
         return []
-    if len(full_text) <= max_context_chars:
+    if _estimate_tokens(full_text) <= max_context_tokens:
         return [full_text]
-    # Split into segments of max_context_chars (rough truncation).
+    # Split into segments of max_context_tokens (CJK-aware token estimate).
     segments: list[str] = []
     start = 0
     while start < len(full_text):
-        segment = full_text[start : start + max_context_chars]
+        segment = _truncate_to_tokens(full_text[start:], max_context_tokens)
+        if not segment:
+            break
         segments.append(segment)
-        start += max_context_chars
+        start += len(segment)
     return segments
 
 
@@ -229,31 +374,57 @@ class GenerateRPCService:
                 pass
             self._client = None
 
-    def _max_context_chars(self) -> int:
-        """Compute the max context chars per LLM call round.
+    def _max_context_tokens(
+        self,
+        question: str,
+        history: list[dict],
+        existing_answer: str = "",
+    ) -> tuple[int, list[dict]]:
+        """Compute the per-round context token budget + truncated history.
 
-        ``(context_window - max_tokens_reserve - overhead) * chars_per_token``
+        Budget = window − completion_reserve − overhead − safety −
+        question − existing_answer (refine rounds) − history (capped at
+        1/4 of the remainder). History is truncated to its cap and
+        returned alongside the budget so every round reuses the same
+        trimmed list — this is what keeps the *whole* message list under
+        the window (the old char-based budget only counted context).
+
+        Small dev models (1024-token) get a proportionally small budget;
+        production (32k) windows keep the full context in one segment.
         """
-        return max(
-            1,
-            (settings.vllm_context_window - 2048 - CONTEXT_OVERHEAD_CHARS)
-            * CHARS_PER_TOKEN,
+        available = (
+            settings.vllm_context_window
+            - _max_completion_tokens()
+            - CONTEXT_OVERHEAD_TOKENS
+            - TOKEN_SAFETY_MARGIN
+            - _estimate_tokens(question)
+            - MESSAGE_OVERHEAD_TOKENS
+            - _estimate_tokens(existing_answer)
         )
+        history_cap = max(0, available // 4)
+        trimmed_history = _truncate_history(history, history_cap)
+        ctx_budget = available - _estimate_messages_tokens(trimmed_history)
+        return max(MIN_CONTEXT_TOKENS, ctx_budget), trimmed_history
 
-    def _build_context_str(self, context: list[dict]) -> str:
-        """Assemble + truncate context (single-segment shortcut).
+    def _build_context_str(
+        self,
+        context: list[dict],
+        question: str = "",
+        history: list[dict] | None = None,
+        budget: int | None = None,
+    ) -> str:
+        """Assemble + truncate context to the token budget (single segment).
 
-        Kept for backward compatibility with tests. For the full multi-round
-        CompactAndRefine behavior, ``_repack_context`` + ``generate`` should
-        be used instead.
+        Kept for backward compatibility with tests. For the full
+        multi-round CompactAndRefine behavior, ``_repack_context`` +
+        ``generate`` should be used instead.
         """
         if not context:
             return ""
         context_str = "\n\n".join(c.get("content", "") for c in context)
-        max_chars = self._max_context_chars()
-        if len(context_str) > max_chars:
-            context_str = context_str[:max_chars]
-        return context_str
+        if budget is None:
+            budget, _ = self._max_context_tokens(question, history or [])
+        return _truncate_to_tokens(context_str, budget)
 
     def _build_initial_messages(
         self,
@@ -316,8 +487,16 @@ class GenerateRPCService:
         client: Any,
         messages: list[dict],
         max_tokens: int,
+        model: str = "",
     ) -> tuple[str, int, int]:
         """Make a single LLM call and return (answer, input_tokens, output_tokens).
+
+        Args:
+            client: OpenAI-compatible client (base_url unchanged per model).
+            messages: Chat messages.
+            max_tokens: Max output tokens.
+            model: Per-request model name (served_model_name routed by the
+                AI Gateway); empty falls back to ``settings.vllm_model``.
 
         Raises:
             TimeoutError: vLLM timed out.
@@ -325,7 +504,7 @@ class GenerateRPCService:
         """
         try:
             response = client.chat.completions.create(
-                model=settings.vllm_model,
+                model=model or settings.vllm_model,
                 messages=messages,
                 max_tokens=max_tokens,
             )
@@ -369,8 +548,9 @@ class GenerateRPCService:
             session_id: Session ID (echoed back in the response).
             context: Retrieved source chunks (list of dicts with ``content``).
             history: Chat history (includes current-turn user message).
-            inference_service_name: Reserved for per-request LLM routing
-                (not yet implemented; the default model is always used).
+            inference_service_name: Per-request model name (served_model_name
+                routed by the AI Gateway); empty falls back to the default
+                ``settings.vllm_model``.
             max_tokens: Max output tokens per round.
 
         Returns:
@@ -381,14 +561,23 @@ class GenerateRPCService:
             RuntimeError: vLLM unavailable / API error.
         """
         client = self._make_client()
-        max_ctx_chars = self._max_context_chars()
-        segments = _repack_context(context, max_ctx_chars)
+        max_tokens = min(max_tokens, _max_completion_tokens())
+
+        # Dynamic per-round budget: window − completion − overhead −
+        # question − history (capped) − safety. Refine rounds re-budget
+        # with the previous answer's cost so prompts never overflow.
+        first_budget, trimmed_history = self._max_context_tokens(
+            question, history
+        )
+        segments = _repack_context(context, first_budget)
 
         # No context → single call with empty context (matches old behavior).
         if not segments:
-            messages = self._build_initial_messages(question, "", history)
+            messages = self._build_initial_messages(
+                question, "", trimmed_history
+            )
             answer, input_tokens, output_tokens = self._call_llm(
-                client, messages, max_tokens
+                client, messages, max_tokens, model=inference_service_name
             )
             return {
                 "answer": answer,
@@ -400,18 +589,43 @@ class GenerateRPCService:
         # First round: QA call with the first context segment.
         answer, input_tokens, output_tokens = self._call_llm(
             client,
-            self._build_initial_messages(question, segments[0], history),
+            self._build_initial_messages(
+                question, segments[0], trimmed_history
+            ),
             max_tokens,
+            model=inference_service_name,
         )
 
         # Refine rounds: for each subsequent segment, refine the answer.
-        for segment in segments[1:]:
+        # Total wall-clock budget: stop refining (keep the current answer)
+        # when the next round would risk blowing the kb-service client's
+        # fixed 120s Generate deadline — a partial answer beats losing the
+        # whole response to DEADLINE_EXCEEDED.
+        deadline = time.monotonic() + GENERATE_TOTAL_BUDGET_SECONDS
+        answer_cap = _answer_reserve_tokens(max_tokens)
+        for round_no, segment in enumerate(segments[1:], start=2):
+            if time.monotonic() >= deadline:
+                logger.warning(
+                    "generate: total budget %.0fs exhausted before refine "
+                    "round %d/%d; returning current answer",
+                    GENERATE_TOTAL_BUDGET_SECONDS,
+                    round_no,
+                    len(segments),
+                )
+                break
+            if _estimate_tokens(answer) > answer_cap:
+                answer = _truncate_to_tokens(answer, answer_cap)
+            refine_budget, refine_history = self._max_context_tokens(
+                question, history, answer
+            )
+            segment = _truncate_to_tokens(segment, refine_budget)
             answer, in_tok, out_tok = self._call_llm(
                 client,
                 self._build_refine_messages(
-                    question, segment, answer, history
+                    question, segment, answer, refine_history
                 ),
                 max_tokens,
+                model=inference_service_name,
             )
             input_tokens += in_tok
             output_tokens += out_tok
@@ -446,12 +660,21 @@ class GenerateRPCService:
           as the final event (usage from the last chunk via
           ``stream_options={"include_usage": True}``).
         """
-        context_str = self._build_context_str(context)
-        messages = self._build_initial_messages(question, context_str, history)
+        # Single-round budget (same formula as generate's first round);
+        # context is truncated to it and history to its cap so the whole
+        # message list fits the window.
+        budget, trimmed_history = self._max_context_tokens(question, history)
+        context_str = self._build_context_str(
+            context, question, history, budget
+        )
+        messages = self._build_initial_messages(
+            question, context_str, trimmed_history
+        )
         client = self._make_client()
+        max_tokens = min(max_tokens, _max_completion_tokens())
         try:
             stream = client.chat.completions.create(
-                model=settings.vllm_model,
+                model=inference_service_name or settings.vllm_model,
                 messages=messages,
                 max_tokens=max_tokens,
                 stream=True,

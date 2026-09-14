@@ -12,7 +12,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class CreateKBRequest(_message.Message):
-    __slots__ = ("tenant_id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode")
+    __slots__ = ("tenant_id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode", "default_inference_service")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
@@ -21,6 +21,7 @@ class CreateKBRequest(_message.Message):
     TOP_K_FIELD_NUMBER: _ClassVar[int]
     SCORE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
     RETRIEVAL_MODE_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_INFERENCE_SERVICE_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     name: str
     description: str
@@ -29,7 +30,8 @@ class CreateKBRequest(_message.Message):
     top_k: int
     score_threshold: float
     retrieval_mode: str
-    def __init__(self, tenant_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ...) -> None: ...
+    default_inference_service: str
+    def __init__(self, tenant_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ..., default_inference_service: _Optional[str] = ...) -> None: ...
 
 class GetKBRequest(_message.Message):
     __slots__ = ("tenant_id", "kb_id")
@@ -274,7 +276,7 @@ class RetrieveErrorEvent(_message.Message):
     def __init__(self, message: _Optional[str] = ..., code: _Optional[str] = ...) -> None: ...
 
 class KnowledgeBase(_message.Message):
-    __slots__ = ("tenant_id", "id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode", "status", "doc_count", "created_at", "updated_at")
+    __slots__ = ("tenant_id", "id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode", "status", "doc_count", "created_at", "updated_at", "default_inference_service")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
@@ -288,6 +290,7 @@ class KnowledgeBase(_message.Message):
     DOC_COUNT_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_INFERENCE_SERVICE_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     id: str
     name: str
@@ -301,7 +304,8 @@ class KnowledgeBase(_message.Message):
     doc_count: int
     created_at: _timestamp_pb2.Timestamp
     updated_at: _timestamp_pb2.Timestamp
-    def __init__(self, tenant_id: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ..., status: _Optional[str] = ..., doc_count: _Optional[int] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    default_inference_service: str
+    def __init__(self, tenant_id: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ..., status: _Optional[str] = ..., doc_count: _Optional[int] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., default_inference_service: _Optional[str] = ...) -> None: ...
 
 class KBDocument(_message.Message):
     __slots__ = ("tenant_id", "kb_id", "id", "file_name", "file_type", "file_size_bytes", "parse_status", "chunk_count", "error_message", "custom_metadata", "created_at", "parsed_at")

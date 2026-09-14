@@ -24,10 +24,20 @@ import pytest
 from app.grpc import rag_pb2 as rag_pb
 from app.grpc.server import RagEngineServicer
 from app.services.generate_rpc_service import (
+    ASCII_CHARS_PER_TOKEN,
+    CONTEXT_OVERHEAD_TOKENS,
     DEFAULT_CONTEXT_TEMPLATE,
     DEFAULT_REFINE_TEMPLATE,
+    MIN_CONTEXT_TOKENS,
+    MESSAGE_OVERHEAD_TOKENS,
+    TOKEN_SAFETY_MARGIN,
     GenerateRPCService,
+    _estimate_messages_tokens,
+    _estimate_tokens,
+    _max_completion_tokens,
     _repack_context,
+    _truncate_history,
+    _truncate_to_tokens,
 )
 
 
@@ -135,17 +145,112 @@ def test_build_context_str_joins_with_double_newline():
 
 
 def test_build_context_str_truncates_long_context(monkeypatch):
-    """Context longer than max_context_chars is truncated."""
+    """Context longer than the token budget is truncated (CJK-aware)."""
     from app.core.config import settings
 
-    monkeypatch.setattr(settings, "vllm_context_window", 4096)
+    monkeypatch.setattr(settings, "vllm_context_window", 1024)
     svc = GenerateRPCService()
-    # max_context_chars = (4096 - 2048 - 200) * 4 = 7392
+    # completion = min(2048, 1024-512) = 512
+    # available = 1024 - 512 - 80 - 32 - q_tokens - 6
     long_text = "x" * 10000
     context = [{"content": long_text}]
-    result = svc._build_context_str(context)
-    assert len(result) <= 7392
-    assert result == long_text[:7392]
+    result = svc._build_context_str(context, question="q")
+    budget = (
+        1024 - 512 - CONTEXT_OVERHEAD_TOKENS - TOKEN_SAFETY_MARGIN - 1 - 6
+    )
+    # ASCII: 4 chars/token → cut at budget*4 chars, estimate stays ≤ budget
+    assert len(result) == budget * ASCII_CHARS_PER_TOKEN
+    assert _estimate_tokens(result) <= budget
+    assert result == long_text[: budget * ASCII_CHARS_PER_TOKEN]
+
+
+def test_build_context_str_truncates_chinese_context(monkeypatch):
+    """中文 context 不再被 4-chars/token 低估（回归：vLLM 400 场景）。
+
+    1848 个中文字旧估算 = 462 tokens（放行），Qwen 实际 ~1800 tokens
+    → 溢出 1024 窗口。CJK 感知估算后单字 1 token，被截到预算内。
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "vllm_context_window", 1024)
+    svc = GenerateRPCService()
+    chinese = "测" * 1848  # 旧估算: 1848//4 = 462 tokens (under-counted)
+    context = [{"content": chinese}]
+    result = svc._build_context_str(context, question="你好")
+    budget = (
+        1024
+        - 512
+        - CONTEXT_OVERHEAD_TOKENS
+        - TOKEN_SAFETY_MARGIN
+        - 2  # "你好" = 2 CJK tokens
+        - 6
+    )
+    # 新估算: 1848 CJK = 1848 tokens > budget → 截断
+    assert len(result) <= budget
+    assert _estimate_tokens(result) <= budget
+    assert result == "测" * budget
+
+
+def test_max_context_tokens_small_window(monkeypatch):
+    """A 1024-token dev model still gets a usable (>= MIN) context budget."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "vllm_context_window", 1024)
+    svc = GenerateRPCService()
+    # completion = max(64, min(2048, 1024-512)) = 512
+    # available = 1024 - 512 - 80 - 32 - 2(你好) - 6 = 392
+    # history_cap = 392 // 4 = 98 → empty history costs 0
+    # ctx_budget = 392 - 0 = 392, floored at MIN_CONTEXT_TOKENS
+    budget, trimmed_history = svc._max_context_tokens("你好", [])
+    assert trimmed_history == []
+    assert budget >= MIN_CONTEXT_TOKENS
+    assert budget == (
+        1024
+        - 512
+        - CONTEXT_OVERHEAD_TOKENS
+        - TOKEN_SAFETY_MARGIN
+        - 2
+        - MESSAGE_OVERHEAD_TOKENS
+    )
+
+
+def test_max_context_tokens_history_capped(monkeypatch):
+    """History is capped at 1/4 of the remaining budget (oldest dropped)."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "vllm_context_window", 1024)
+    svc = GenerateRPCService()
+    # available = 392 (same as above) → history_cap = 98 tokens
+    history = [
+        {"role": "user", "content": "旧消息一"},
+        {"role": "assistant", "content": "旧回答二"},
+        {"role": "user", "content": "你好"},
+    ]
+    budget, trimmed = svc._max_context_tokens("你好", history)
+    # 3 messages ≈ 3*(content + 6) tokens; 旧消息一(4)+6 + 旧回答二(4)+6
+    # + 你好(2)+6 = 28 ≤ 98 → all kept, budget reduced accordingly
+    assert len(trimmed) == 3
+    assert budget == 392 - _estimate_messages_tokens(trimmed)
+    # Long history: oldest dropped first
+    long_history = [
+        {"role": "user", "content": "很长的历史消息" * 50},
+        {"role": "assistant", "content": "很长的回答" * 50},
+    ]
+    _, trimmed2 = svc._max_context_tokens("你好", long_history)
+    assert len(trimmed2) < len(long_history)
+    assert _estimate_messages_tokens(trimmed2) <= 98
+
+
+def test_max_completion_tokens_clamped_to_window(monkeypatch):
+    """Small models never request more completion tokens than the window."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "vllm_context_window", 1024)
+    # window 1024 → reserve 512 → completion 512 (not the default 2048)
+    assert _max_completion_tokens() == 512
+    monkeypatch.setattr(settings, "vllm_context_window", 32768)
+    # large window → capped at 2048 as before
+    assert _max_completion_tokens() == 2048
 
 
 def test_build_context_str_short_context_not_truncated():
@@ -177,27 +282,105 @@ def test_repack_context_single_segment():
 
 
 def test_repack_context_multiple_segments():
-    """Context exceeding max â†?split into multiple segments."""
+    """Context exceeding max split into multiple segments (token budget)."""
     long_text = "x" * 100
     context = [{"content": long_text}]
-    segments = _repack_context(context, 30)
-    # 100 chars / 30 per segment = 4 segments (30+30+30+10)
-    assert len(segments) == 4
-    assert len(segments[0]) == 30
-    assert len(segments[1]) == 30
-    assert len(segments[2]) == 30
-    assert len(segments[3]) == 10
+    segments = _repack_context(context, 10)
+    # ASCII: 4 chars/token, budget 10 tokens = 40 chars per segment
+    # 100 chars = 40 + 40 + 20 = 3 segments
+    assert len(segments) == 3
+    assert len(segments[0]) == 40
+    assert len(segments[1]) == 40
+    assert len(segments[2]) == 20
     # Verify total content preserved
     assert "".join(segments) == long_text
+
+
+def test_repack_context_cjk_segments():
+    """CJK context: 1 char = 1 token (not 1/4) - the vLLM 400 regression."""
+    chinese = "测" * 200  # 200 CJK chars = 200 tokens
+    context = [{"content": chinese}]
+    segments = _repack_context(context, 50)
+    # Old char-based estimate: 200 chars would be one segment (overflow).
+    # CJK-aware: 200 tokens / 50 = 4 segments, 50 chars each.
+    assert len(segments) == 4
+    assert all(len(s) == 50 for s in segments)
+    assert "".join(segments) == chinese
+
+
+def test_repack_context_mixed_cjk_ascii():
+    """Mixed CJK+ASCII text: per-char classification keeps the bound."""
+    # 4 CJK chars (4 tokens) + 6 non-CJK chars " world" (ceil(6/4)=2)
+    # → total 6 tokens; per-char classification handles the mix.
+    mixed = "你好世界 world"
+    assert _estimate_tokens(mixed) == 6
+    # 200 CJK + 400 ASCII = 200 + 100 = 300 tokens
+    text = "测" * 200 + "x" * 400
+    context = [{"content": text}]
+    segments = _repack_context(context, 100)
+    assert all(_estimate_tokens(s) <= 100 for s in segments)
+    assert "".join(segments) == text
 
 
 def test_repack_context_joins_before_splitting():
     """Multiple chunks are joined with \\n\\n before splitting."""
     context = [{"content": "aaa"}, {"content": "bbb"}]
     segments = _repack_context(context, 10)
-    # "aaa\n\nbbb" = 9 chars, fits in 10
+    # "aaa\n\nbbb" = 9 chars = ceil(9/4) = 3 tokens, fits in 10
     assert len(segments) == 1
     assert segments[0] == "aaa\n\nbbb"
+
+
+# ── _estimate_tokens / _truncate_to_tokens / _truncate_history ────────────────
+
+
+def test_estimate_tokens_cjk_and_ascii():
+    """CJK chars count as 1 token each; ASCII at 4 chars per token."""
+    assert _estimate_tokens("") == 0
+    assert _estimate_tokens("hello") == 2  # ceil(5/4)
+    assert _estimate_tokens("你好") == 2  # 1 token per CJK char
+    assert _estimate_tokens("你好 world") == 4  # 2 CJK + ceil(7/4)
+    assert _estimate_tokens("你好世界") == 4
+
+
+def test_truncate_to_tokens_ascii_ceil_boundary():
+    """Tail ASCII run counts via ceil: budget 1 fits exactly 4 chars.
+
+    Regression: the first version only counted full 4-char runs and let
+    a 5-char tail through, overflowing the budget.
+    """
+    assert _truncate_to_tokens("aaaa", 1) == "aaaa"
+    assert _truncate_to_tokens("aaaaa", 1) == "aaaa"
+    assert _truncate_to_tokens("aa", 1) == "aa"
+    assert _truncate_to_tokens("", 5) == ""
+    assert _truncate_to_tokens("abc", 0) == ""
+
+
+def test_truncate_to_tokens_cjk():
+    """CJK text truncates at exactly max_tokens chars."""
+    assert _truncate_to_tokens("你好世界", 2) == "你好"
+    assert _truncate_to_tokens("测" * 100, 50) == "测" * 50
+    # Mixed: 2 CJK + 4 ASCII = 3 tokens, budget 2 → only the CJK part.
+    assert _truncate_to_tokens("你好abcd", 2) == "你好"
+
+
+def test_truncate_history_keeps_newest():
+    """Oldest messages are dropped first; newest survives alone."""
+    history = [
+        {"role": "user", "content": "a"},  # oldest
+        {"role": "assistant", "content": "b"},
+        {"role": "user", "content": "c"},  # newest
+    ]
+    # Budget fits exactly one message (1 token + 6 overhead)
+    kept = _truncate_history(history, 7)
+    assert kept == [{"role": "user", "content": "c"}]
+    assert _truncate_history([], 100) == []
+    # Newest alone exceeding the budget → truncated copy, not dropped.
+    kept2 = _truncate_history(
+        [{"role": "user", "content": "测" * 100}], 20
+    )
+    assert len(kept2) == 1
+    assert len(kept2[0]["content"]) == 14  # 20 - 6 overhead
 
 
 # â”€â”€ _build_refine_messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -635,7 +818,7 @@ async def test_grpc_generate_timeout_deadline_exceeded(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_grpc_generate_default_max_tokens(monkeypatch):
-    """max_tokens=0 â†?default 2048."""
+    """max_tokens=0 â†' default 2048."""
     captured = []
 
     class _FakeCompletions:
@@ -650,6 +833,153 @@ async def test_grpc_generate_default_max_tokens(monkeypatch):
     req = rag_pb.GenerateRequest(question="q", session_id="s", max_tokens=0)
     await servicer.Generate(req, ctx)
     assert captured[0]["max_tokens"] == 2048
+
+
+# ── Per-request LLM model routing (inference_service_name) ──────────────────
+
+
+def test_generate_routes_model_param(monkeypatch):
+    """Generate passes inference_service_name as the model kwarg."""
+    svc = GenerateRPCService()
+    captured = []
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.append(kwargs)
+            return _make_fake_response()
+
+    _patch_openai(monkeypatch, _FakeCompletions)
+
+    svc.generate(
+        question="q",
+        session_id="s",
+        context=[{"content": "ctx"}],
+        history=[],
+        inference_service_name="qwen3-8b",
+    )
+    assert captured[0]["model"] == "qwen3-8b"
+
+
+def test_generate_default_model_fallback(monkeypatch):
+    """Empty inference_service_name falls back to settings.vllm_model."""
+    from app.core.config import settings
+
+    svc = GenerateRPCService()
+    captured = []
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.append(kwargs)
+            return _make_fake_response()
+
+    _patch_openai(monkeypatch, _FakeCompletions)
+
+    svc.generate(
+        question="q",
+        session_id="s",
+        context=[{"content": "ctx"}],
+        history=[],
+        inference_service_name="",
+    )
+    assert captured[0]["model"] == settings.vllm_model
+
+
+def test_generate_multi_round_model_param_all_rounds(monkeypatch):
+    """Multi-round generate routes the model on every round."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "vllm_context_window", 4096)
+    svc = GenerateRPCService()
+    captured = []
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.append(kwargs)
+            return _make_fake_response(answer="a")
+
+    _patch_openai(monkeypatch, _FakeCompletions)
+
+    long_text = "x" * 20000  # forces multi-round
+    svc.generate("q", "s", [{"content": long_text}], [], inference_service_name="svc-a")
+    assert len(captured) > 1
+    for call in captured:
+        assert call["model"] == "svc-a"
+
+
+def test_generate_stream_routes_model_param(monkeypatch):
+    """GenerateStream passes inference_service_name as the model kwarg."""
+    svc = GenerateRPCService()
+
+    class _FakeChunk:
+        def __init__(self, choices=None, usage=None):
+            self.choices = choices
+            self.usage = usage
+
+    chunks = [_FakeChunk(usage=MagicMock(prompt_tokens=1, completion_tokens=1))]
+    captured = []
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.append(kwargs)
+            return iter(chunks)
+
+    _patch_openai(monkeypatch, _FakeCompletions)
+
+    list(
+        svc.generate_stream(
+            "q", "s", [{"content": "ctx"}], [], inference_service_name="qwen3-8b"
+        )
+    )
+    assert captured[0]["model"] == "qwen3-8b"
+
+
+def test_generate_stream_default_model_fallback(monkeypatch):
+    """GenerateStream empty inference_service_name falls back to settings."""
+    from app.core.config import settings
+
+    svc = GenerateRPCService()
+
+    class _FakeChunk:
+        def __init__(self, choices=None, usage=None):
+            self.choices = choices
+            self.usage = usage
+
+    chunks = [_FakeChunk(usage=MagicMock(prompt_tokens=1, completion_tokens=1))]
+    captured = []
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.append(kwargs)
+            return iter(chunks)
+
+    _patch_openai(monkeypatch, _FakeCompletions)
+
+    list(svc.generate_stream("q", "s", [], [], inference_service_name=""))
+    assert captured[0]["model"] == settings.vllm_model
+
+
+@pytest.mark.asyncio
+async def test_grpc_generate_inference_service_name_routed(monkeypatch):
+    """gRPC Generate RPC: inference_service_name → model kwarg."""
+    captured = []
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.append(kwargs)
+            return _make_fake_response()
+
+    _patch_openai(monkeypatch, _FakeCompletions)
+
+    servicer = RagEngineServicer()
+    ctx = FakeContext()
+    req = rag_pb.GenerateRequest(
+        question="q",
+        session_id="s",
+        inference_service_name="qwen3-8b",
+    )
+    await servicer.Generate(req, ctx)
+    assert ctx.aborted_code is None
+    assert captured[0]["model"] == "qwen3-8b"
 
 
 if __name__ == "__main__":

@@ -163,10 +163,11 @@ def _make_doc_row(file_type="pdf", file_name="test.pdf"):
     }
 
 
-def _make_kb_row(vector_store_id=VECTOR_STORE_ID):
+def _make_kb_row(vector_store_id=VECTOR_STORE_ID, embedding_model="bge-m3"):
     return {
         "id": KB_ID,
         "vector_store_id": vector_store_id,
+        "embedding_model": embedding_model,
         "chunk_size": 1024,
     }
 
@@ -316,6 +317,7 @@ async def test_process_message_dispatches_to_orchestrator():
     assert call["file_type"] == "pdf"
     assert call["chunk_size"] == 1024
     assert call["vector_store_id"] == VECTOR_STORE_ID
+    assert call["embedding_model"] == "bge-m3"
 
 
 @pytest.mark.asyncio

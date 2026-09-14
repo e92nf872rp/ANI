@@ -227,6 +227,13 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             #     step 5 below, which self-heals by reusing the row.)
             # No SAVEPOINT needed: create_kb runs in its own transaction, so
             # the connection is clean when the exception is caught.
+            # embedding_model 兜底：未显式传入时用 env 的 EMBEDDING_MODEL
+            # （与 rag-engine 读同一份 .env，键一致；SiliconFlow 只认全名
+            # 前缀，如 "BAAI/bge-m3"）。只求值一次，DB 行与 Core 向量库
+            # 共用同一变量，防止两处表达式日后单边改动导致静默漂移。
+            embedding_model = (
+                request.embedding_model or settings.embedding_model
+            )
             try:
                 async with conn.transaction():
                     kb_row = await kb_repo.create_kb(
@@ -234,13 +241,17 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                         tenant_id=tenant_id,
                         name=request.name,
                         description=request.description,
-                        embedding_model=request.embedding_model or "bge-m3",
+                        embedding_model=embedding_model,
                         chunk_size=request.chunk_size or 1024,
                         top_k=request.top_k or 5,
                         # 未显式传入时落库存 0（表示未设置；运行时由 rag-engine 的
                         # DEFAULT_SCORE_THRESHOLD 兜底），而不是硬编码 0.3。
                         score_threshold=request.score_threshold or 0.0,
                         retrieval_mode=request.retrieval_mode or "hybrid",
+                        # 建库时选定的默认推理模型；空串落库为 NULL（未设置），
+                        # 问答时由三级回落链解析（request → KB 行 → ""，
+                        # rag-engine 端由 settings.vllm_model 接管）。
+                        default_inference_service=request.default_inference_service or "",
                     )
                     # audit kb.create (plan §6.3) — same transaction as the kb
                     # INSERT, so the audit row exists iff the KB does.
@@ -268,16 +279,38 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             kb_id = str(kb_row["id"])
 
         # 4. Core POST /vector-stores (SPEC §6.1)
+        # 维度探测：用选定的 embedding 模型实测一条短文本，取返回的
+        # dimension 作为 collection 维度——collection 随模型自动切换，
+        # 不再固定读 env 的 EMBEDDING_DIM。探测失败（网络异常/模型名
+        # 无效等）不阻断建库：回落 env 值并记 warning。
+        probe_dim = 0
+        try:
+            if self._rag_engine_grpc_client_factory is not None:
+                rag_engine_grpc = self._rag_engine_grpc_client_factory()
+            else:
+                rag_engine_grpc = _default_rag_engine_grpc_client()
+            _, probe_dim = await rag_engine_grpc.embed(
+                texts=["dimension probe"], model=embedding_model
+            )
+        except Exception as exc:  # noqa: BLE001 — 探测仅降级，不阻断建库
+            logger.warning(
+                "embedding dimension probe failed (model=%s), "
+                "falling back to EMBEDDING_DIM=%s: %s",
+                embedding_model,
+                settings.embedding_dim,
+                exc,
+            )
+        dimension = probe_dim or settings.embedding_dim
         vector_store_id = ""
         try:
             async with self._core_client_factory(tenant_id) as core:
-                # dimension: bge-m3 = 1024; fallback to 1024 when unknown.
-                dim = 1024
+                # 优先用上方实测维度；探测失败回落 env 值。
                 vs_resp = await core.create_vector_store(
                     name=_vector_store_name(kb_id),
-                    dimension=dim,
+                    dimension=dimension,
                     metric="cosine",
-                    embedding_model=request.embedding_model or "bge-m3",
+                    # 与上方 kb_repo.create_kb 用同一局部变量（同一模型）。
+                    embedding_model=embedding_model,
                     idempotency_key=idem_key,
                 )
                 # Persist the Core-returned vector store id (Plan §3.1).
@@ -1206,6 +1239,10 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             # 未设置(0)时透传给 rag-engine，由 DEFAULT_SCORE_THRESHOLD 兜底。
             "score_threshold": kb_row.get("score_threshold") or 0.0,
             "retrieval_mode": kb_row.get("retrieval_mode") or "hybrid",
+            "embedding_model": kb_row.get("embedding_model") or "",
+            "default_inference_service": str(
+                kb_row.get("default_inference_service") or ""
+            ),
         }
 
         # 3-4. persist user message + Redis cache (best-effort).
@@ -1253,8 +1290,13 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             top_k=top_k,
             score_threshold=score_threshold,
             retrieval_mode=retrieval_mode,
-            inference_service_name=request.inference_service_name or "default",
+            inference_service_name=(
+                request.inference_service_name
+                or kb_cfg["default_inference_service"]
+                or ""
+            ),
             vector_store_id=str(kb_row.get("vector_store_id") or ""),
+            embedding_model=kb_cfg["embedding_model"],
             cache=cache,
         )
         answer = result.answer
@@ -1434,6 +1476,10 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             "top_k": kb_row.get("top_k") or 5,
             "score_threshold": kb_row.get("score_threshold") or 0.0,
             "retrieval_mode": kb_row.get("retrieval_mode") or "hybrid",
+            "embedding_model": kb_row.get("embedding_model") or "",
+            "default_inference_service": str(
+                kb_row.get("default_inference_service") or ""
+            ),
         }
 
         # 3-4. persist user message + Redis cache (mirror Query).
@@ -1467,7 +1513,11 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             else kb_cfg["score_threshold"]
         )
         retrieval_mode = request.retrieval_mode or kb_cfg["retrieval_mode"] or "hybrid"
-        inference_service_name = request.inference_service_name or "default"
+        inference_service_name = (
+            request.inference_service_name
+            or kb_cfg["default_inference_service"]
+            or ""
+        )
         vector_store_id = str(kb_row.get("vector_store_id") or "")
 
         # 6. Load chat history (includes current-turn user, already persisted).
@@ -1519,6 +1569,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             retrieval_mode=retrieval_mode,
             inference_service_name=inference_service_name,
             vector_store_id=vector_store_id,
+            embedding_model=kb_cfg["embedding_model"],
             history=history,
         ):
             if isinstance(ev, StreamTokenEvent):
@@ -1659,6 +1710,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         retrieval_mode: str,
         inference_service_name: str,
         vector_store_id: str,
+        embedding_model: str = "",
         cache: Any,
     ) -> QueryResult:
         """QueryOrchestrator: retrieve → gates → Generate RPC.
@@ -1708,6 +1760,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             retrieval_mode=retrieval_mode,
             inference_service_name=inference_service_name,
             vector_store_id=vector_store_id,
+            embedding_model=embedding_model,
             history=history,
         )
 
@@ -2716,6 +2769,9 @@ def _kb_row_to_pb(row: dict[str, Any]) -> kb_pb.KnowledgeBase:
         top_k=row.get("top_k") or 0,
         score_threshold=row.get("score_threshold") or 0.0,
         retrieval_mode=row.get("retrieval_mode") or "",
+        default_inference_service=str(
+            row.get("default_inference_service") or ""
+        ),
         status=row.get("status") or "",
         doc_count=row.get("doc_count") or 0,
         created_at=_ts(row.get("created_at")),
@@ -2948,6 +3004,7 @@ def _kb_audit_snapshot(kb_row: dict[str, Any] | None) -> dict[str, Any] | None:
         "top_k": kb_row.get("top_k"),
         "score_threshold": kb_row.get("score_threshold"),
         "retrieval_mode": kb_row.get("retrieval_mode"),
+        "default_inference_service": kb_row.get("default_inference_service"),
         "status": kb_row.get("status"),
         "doc_count": kb_row.get("doc_count"),
     }

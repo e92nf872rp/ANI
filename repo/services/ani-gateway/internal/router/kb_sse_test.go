@@ -215,7 +215,7 @@ func TestSSE_NewPath_TokenSourcesDone(t *testing.T) {
 		KBClient: kbClient,
 	})
 	resp := ut.PerformRequest(h.Engine, http.MethodGet,
-		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi", nil,
+		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi&inference_service_name=qwen3-32b", nil,
 		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
 	).Result()
 
@@ -257,6 +257,10 @@ func TestSSE_NewPath_TokenSourcesDone(t *testing.T) {
 	}
 	if kbClient.lastReq.GetQuestion() != "hi" || kbClient.lastReq.GetKbId() != "kb-1" {
 		t.Fatalf("retrieve req = %+v, want question=hi kb=kb-1", kbClient.lastReq)
+	}
+	// 流式场景请求级推理模型切换：query 参数 → proto 字段 → kb-service 回落链。
+	if got := kbClient.lastReq.GetInferenceServiceName(); got != "qwen3-32b" {
+		t.Fatalf("inference_service_name = %q, want qwen3-32b", got)
 	}
 }
 
