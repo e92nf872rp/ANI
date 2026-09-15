@@ -106,6 +106,30 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		}, nil
 	}
 
+	if request.Action == ports.WorkloadLifecycleSnapshot && record.Kind == ports.WorkloadKindVM {
+		if err := e.applyKubeVirtSnapshot(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "snapshot accepted by KubeVirt lifecycle executor",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
+	if request.Action == ports.WorkloadLifecycleRollback && record.Kind == ports.WorkloadKindVM {
+		if err := e.applyKubeVirtRestore(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "restore accepted by KubeVirt lifecycle executor",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
 	resource, err := resourceFromRecord(record)
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
@@ -177,6 +201,150 @@ func kubeVirtVMResourceFromRecord(record ports.WorkloadInstanceRecord) (kubernet
 		}
 	}
 	return kubernetesResource{}, fmt.Errorf("%w: KubeVirt VirtualMachine resource ref is required for volume lifecycle execution", ports.ErrInvalid)
+}
+
+const (
+	kubeVirtSnapshotAPIVersion = "snapshot.kubevirt.io/v1beta1"
+	kubeVirtSnapshotPoll       = 3 * time.Second
+	kubeVirtSnapshotTimeout    = 5 * time.Minute
+	kubeVirtRestoreTimeout     = 5 * time.Minute
+)
+
+// applyKubeVirtSnapshot creates a VirtualMachineSnapshot CR named after the
+// instance snapshot record ID, then waits until KubeVirt reports the snapshot
+// Succeeded. The CR name doubles as the rollback target, so the record ID and
+// the provider snapshot stay 1:1.
+func (e *KubernetesLifecycleExecutor) applyKubeVirtSnapshot(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	vm, err := kubeVirtVMResourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	name := e.kubeVirtSnapshotCRName(request, record)
+	snapshot := kubernetesResource{
+		Provider: "kubevirt", APIGroup: "snapshot.kubevirt.io", APIVersion: "v1beta1",
+		Resource: "virtualmachinesnapshots", Kind: "VirtualMachineSnapshot",
+		Namespaced: true, Namespace: vm.Namespace, Name: name,
+	}
+	body, err := json.Marshal(map[string]any{
+		"apiVersion": kubeVirtSnapshotAPIVersion,
+		"kind":       "VirtualMachineSnapshot",
+		"metadata":   map[string]any{"name": name, "namespace": vm.Namespace},
+		"spec": map[string]any{
+			"source": map[string]any{"apiGroup": "kubevirt.io", "kind": "VirtualMachine", "name": vm.Name},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("%w: marshal VirtualMachineSnapshot manifest: %v", ports.ErrInvalid, err)
+	}
+	query := "fieldManager=" + url.QueryEscape(e.client.fieldManager) + "&force=true"
+	if _, err := e.client.do(ctx, http.MethodPatch, e.client.resourceURL(snapshot, query), kubernetesApplyPatchContentType, body); err != nil {
+		return fmt.Errorf("apply VirtualMachineSnapshot %q: %w", name, err)
+	}
+	return e.waitKubeVirtCRPhase(ctx, snapshot, "Succeeded", kubeVirtSnapshotTimeout, "snapshot")
+}
+
+// applyKubeVirtRestore restores the VM from the VirtualMachineSnapshot that
+// was created for the record snapshot ID. Snapshots recorded before
+// provider-backed snapshots existed have no cluster counterpart and are
+// rejected with a clear conflict instead of a raw 404.
+func (e *KubernetesLifecycleExecutor) applyKubeVirtRestore(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	vm, err := kubeVirtVMResourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	snapshotName := strings.ToLower(strings.TrimSpace(request.SnapshotID))
+	if snapshotName == "" {
+		return fmt.Errorf("%w: snapshot_id is required for VM rollback", ports.ErrInvalid)
+	}
+	snapshot := kubernetesResource{
+		Provider: "kubevirt", APIGroup: "snapshot.kubevirt.io", APIVersion: "v1beta1",
+		Resource: "virtualmachinesnapshots", Kind: "VirtualMachineSnapshot",
+		Namespaced: true, Namespace: vm.Namespace, Name: snapshotName,
+	}
+	if _, status, err := e.client.Do(ctx, http.MethodGet, e.client.resourceURL(snapshot, ""), "", nil); err != nil {
+		if status == http.StatusNotFound {
+			return fmt.Errorf("%w: provider snapshot %q not found in cluster; only snapshots created after provider-backed snapshots are rollback-able", ports.ErrConflict, snapshotName)
+		}
+		return err
+	}
+	// Restore CR name must be unique per rollback attempt: re-applying an
+	// already Completed VirtualMachineRestore would succeed without actually
+	// restoring again. The idempotency key keeps replays idempotent (same CR)
+	// while distinct requests get a fresh restore.
+	seed := snapshotIDPattern.ReplaceAllString(snapshotName+"-"+strings.TrimSpace(request.IdempotencyKey), "-")
+	if len(seed) > 200 {
+		seed = seed[:200]
+	}
+	restoreName := "restore-" + strings.ToLower(strings.Trim(seed, "-"))
+	restore := kubernetesResource{
+		Provider: "kubevirt", APIGroup: "snapshot.kubevirt.io", APIVersion: "v1beta1",
+		Resource: "virtualmachinerestores", Kind: "VirtualMachineRestore",
+		Namespaced: true, Namespace: vm.Namespace, Name: restoreName,
+	}
+	body, err := json.Marshal(map[string]any{
+		"apiVersion": kubeVirtSnapshotAPIVersion,
+		"kind":       "VirtualMachineRestore",
+		"metadata":   map[string]any{"name": restoreName, "namespace": vm.Namespace},
+		"spec": map[string]any{
+			"target":                     map[string]any{"apiGroup": "kubevirt.io", "kind": "VirtualMachine", "name": vm.Name},
+			"virtualMachineSnapshotName": snapshotName,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("%w: marshal VirtualMachineRestore manifest: %v", ports.ErrInvalid, err)
+	}
+	query := "fieldManager=" + url.QueryEscape(e.client.fieldManager) + "&force=true"
+	if _, err := e.client.do(ctx, http.MethodPatch, e.client.resourceURL(restore, query), kubernetesApplyPatchContentType, body); err != nil {
+		return fmt.Errorf("apply VirtualMachineRestore %q: %w", restoreName, err)
+	}
+	return e.waitKubeVirtCRPhase(ctx, restore, "Completed", kubeVirtRestoreTimeout, "restore")
+}
+
+// kubeVirtSnapshotCRName mirrors the snapshot record ID generated by
+// vmSnapshotFor so the instance record and the cluster CR refer to the same
+// object; CR names must be lowercase DNS-1123.
+func (e *KubernetesLifecycleExecutor) kubeVirtSnapshotCRName(request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) string {
+	idSeed := strings.TrimSpace(request.SnapshotID)
+	if idSeed == "" {
+		now := firstNonZeroTime(request.RequestedAt, e.now())
+		name := firstNonEmpty(strings.TrimSpace(request.SnapshotName), "snapshot-"+now.Format("20060102150405"))
+		idSeed = firstNonEmpty(strings.TrimSpace(request.IdempotencyKey), record.InstanceID+"-"+name+"-"+now.Format("20060102150405"))
+	}
+	return strings.ToLower(sanitizeSnapshotID(idSeed))
+}
+
+// waitKubeVirtCRPhase polls a snapshot.kubevirt.io CR until status.phase
+// reaches want, treating Failed as an immediate conflict.
+func (e *KubernetesLifecycleExecutor) waitKubeVirtCRPhase(ctx context.Context, resource kubernetesResource, want string, timeout time.Duration, noun string) error {
+	deadline := e.now().Add(timeout)
+	for {
+		body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
+		if err == nil {
+			var doc map[string]any
+			if json.Unmarshal(body, &doc) == nil {
+				switch kubeVirtCRPhase(doc) {
+				case want:
+					return nil
+				case "Failed":
+					return fmt.Errorf("%w: kubevirt %s %q reported Failed", ports.ErrConflict, noun, resource.Name)
+				}
+			}
+		}
+		if !e.now().Before(deadline) {
+			return fmt.Errorf("%w: kubevirt %s %q did not reach %s within %s", ports.ErrConflict, noun, resource.Name, want, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(kubeVirtSnapshotPoll):
+		}
+	}
+}
+
+func kubeVirtCRPhase(doc map[string]any) string {
+	status, _ := doc["status"].(map[string]any)
+	phase, _ := status["phase"].(string)
+	return phase
 }
 
 func kubeVirtVolumeName(record ports.WorkloadInstanceRecord, volumeID string) string {

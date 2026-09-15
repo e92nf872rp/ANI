@@ -888,6 +888,11 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		precheck.details["request_fingerprint"] = requestFingerprint
 	}
 	snapshot := vmSnapshotFor(record, request)
+	if snapshot != nil {
+		// Canonical snapshot ID shared with the provider CR name so rollback
+		// can map the record to its KubeVirt VirtualMachineSnapshot.
+		request.SnapshotID = snapshot.ID
+	}
 	volume := volumeAttachmentFor(record.Kind, request)
 	rollback := containerRollbackFor(record, request)
 	opID := ""
@@ -2053,9 +2058,12 @@ func terminationProtectedAction(action ports.WorkloadLifecycleAction) bool {
 
 func usesProviderLifecycle(kind ports.WorkloadKind, action ports.WorkloadLifecycleAction) bool {
 	switch action {
-	case ports.WorkloadLifecycleSnapshot,
-		ports.WorkloadLifecycleSetTerminationProtection:
+	case ports.WorkloadLifecycleSetTerminationProtection:
 		return false
+	case ports.WorkloadLifecycleSnapshot:
+		// VM snapshots are backed by a real KubeVirt VirtualMachineSnapshot CR;
+		// non-VM kinds keep metadata-only snapshots.
+		return kind == ports.WorkloadKindVM
 	case ports.WorkloadLifecycleAttachVolume,
 		ports.WorkloadLifecycleDetachVolume:
 		return kind == ports.WorkloadKindVM
@@ -2129,7 +2137,7 @@ func vmSnapshotFor(record ports.WorkloadInstanceRecord, request ports.WorkloadIn
 		Name:             name,
 		SourceInstanceID: record.InstanceID,
 		State:            "ready",
-		Reason:           "snapshot metadata recorded by local profile; provider snapshot execution is a follow-up capability",
+		Reason:           "snapshot backed by KubeVirt VirtualMachineSnapshot CR",
 		CreatedAt:        now,
 		ReadyAt:          now,
 	}

@@ -1088,13 +1088,11 @@ func TestLocalInstanceServiceVMSnapshotRecordsLocalProfile(t *testing.T) {
 		},
 	}
 	operations := NewLocalOperationStore()
-	lifecycle := &fakeLifecycleExecutor{}
 	service := NewLocalInstanceServiceWithOptions(
 		&fakeInstanceOrchestrator{},
 		store,
 		NewLocalInstanceOpsGuard(),
 		WithOperationStore(operations),
-		WithInstanceLifecycleExecutor(lifecycle),
 	)
 
 	record, err := service.Snapshot(context.Background(), ports.WorkloadInstanceLifecycleRequest{
@@ -1108,9 +1106,6 @@ func TestLocalInstanceServiceVMSnapshotRecordsLocalProfile(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
-	}
-	if lifecycle.calls != 0 {
-		t.Fatalf("lifecycle calls = %d, want 0 for local snapshot metadata", lifecycle.calls)
 	}
 	if store.upserts != 1 {
 		t.Fatalf("upserts = %d, want 1", store.upserts)
@@ -1143,6 +1138,47 @@ func TestLocalInstanceServiceVMSnapshotRecordsLocalProfile(t *testing.T) {
 	}
 	if len(operation.Steps) != 2 || operation.Steps[1].StepName != "create_snapshot" {
 		t.Fatalf("steps = %#v, want precheck + create_snapshot", operation.Steps)
+	}
+}
+
+func TestLocalInstanceServiceVMSnapshotCallsProviderWhenConfigured(t *testing.T) {
+	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "vm-a",
+		Name:       "vm-01",
+		Kind:       ports.WorkloadKindVM,
+		Provider:   "kubevirt",
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateRunning,
+		},
+	}}
+	operations := NewLocalOperationStore()
+	lifecycle := &fakeLifecycleExecutor{}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(operations),
+		WithInstanceLifecycleExecutor(lifecycle),
+	)
+
+	record, err := service.Snapshot(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "snap-vm-a",
+		TenantID:        "tenant-a",
+		InstanceID:      "vm-a",
+		SnapshotName:    "before-upgrade",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1500, 0),
+	})
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if lifecycle.calls != 1 || lifecycle.action != ports.WorkloadLifecycleSnapshot {
+		t.Fatalf("lifecycle calls=%d action=%s, want 1 snapshot", lifecycle.calls, lifecycle.action)
+	}
+	if len(record.Snapshots) != 1 {
+		t.Fatalf("snapshots = %d, want 1", len(record.Snapshots))
 	}
 }
 

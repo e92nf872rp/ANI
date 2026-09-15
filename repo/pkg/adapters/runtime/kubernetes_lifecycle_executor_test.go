@@ -3,12 +3,14 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kubercloud/ani/pkg/adapters/resilience"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -749,6 +751,132 @@ func TestKubernetesLifecycleExecutorRestartTimesOutWhenVMNeverStops(t *testing.T
 		if strings.HasSuffix(req, "/start") {
 			t.Fatalf("start issued before VM stopped: requests = %#v", requests)
 		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorSnapshotVMCreatesKubeVirtSnapshot(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			return crPhaseResponse("Succeeded"), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleSnapshot)
+	req.IdempotencyKey = "snap-key-01"
+	req.SnapshotName = "before-upgrade"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Snapshot Apply() error = %v", err)
+	}
+	want := []string{
+		"PATCH /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap-key-01",
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap-key-01",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRollbackVMCreatesKubeVirtRestore(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			return crPhaseResponse("Completed"), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRollback)
+	req.SnapshotID = "snap_1fc44f4a-70ea"
+	req.IdempotencyKey = "rollback-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Rollback Apply() error = %v", err)
+	}
+	want := []string{
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap_1fc44f4a-70ea",
+		"PATCH /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap_1fc44f4a-70ea-rollback-key-01",
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap_1fc44f4a-70ea-rollback-key-01",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRollbackVMRejectsMissingProviderSnapshot(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			return nil, &resilience.StatusError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"reason":"NotFound","message":"virtualmachinesnapshots not found"}`,
+			}
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRollback)
+	req.SnapshotID = "snap_metadata_only"
+	req.IdempotencyKey = "rollback-key-02"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+	for _, req := range requests {
+		if strings.Contains(req, "virtualmachinerestores") {
+			t.Fatalf("restore created without provider snapshot: requests = %#v", requests)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorRollbackVMFailsOnFailedSnapshot(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet {
+			return crPhaseResponse("Failed"), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRollback)
+	req.SnapshotID = "snap_failed"
+	req.IdempotencyKey = "rollback-key-03"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+}
+
+// crPhaseResponse returns a snapshot.kubevirt.io style object with the given
+// status.phase.
+func crPhaseResponse(phase string) *http.Response {
+	body := fmt.Sprintf(`{"status":{"phase":%q}}`, phase)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
 
