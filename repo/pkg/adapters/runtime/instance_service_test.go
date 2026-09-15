@@ -1117,7 +1117,7 @@ func TestLocalInstanceServiceVMSnapshotRecordsLocalProfile(t *testing.T) {
 		t.Fatalf("snapshots = %d, want 1", len(record.Snapshots))
 	}
 	snapshot := record.Snapshots[0]
-	if snapshot.ID != "snap_snap-vm-a" || snapshot.Name != "before-upgrade" || snapshot.State != "ready" {
+	if snapshot.ID != "snap-snap-vm-a" || snapshot.Name != "before-upgrade" || snapshot.State != "ready" {
 		t.Fatalf("snapshot = %+v, want ready named before-upgrade", snapshot)
 	}
 	if snapshot.SourceInstanceID != "vm-a" || !snapshot.ReadyAt.Equal(time.Unix(1500, 0)) {

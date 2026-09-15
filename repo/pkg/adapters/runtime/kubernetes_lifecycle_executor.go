@@ -207,7 +207,9 @@ const (
 	kubeVirtSnapshotAPIVersion = "snapshot.kubevirt.io/v1beta1"
 	kubeVirtSnapshotPoll       = 3 * time.Second
 	kubeVirtSnapshotTimeout    = 5 * time.Minute
-	kubeVirtRestoreTimeout     = 5 * time.Minute
+	// CSI RBD volume restore is slow: a ~20Gi root-volume rollback measured
+	// 5m13s on the real lab, so allow generous headroom.
+	kubeVirtRestoreTimeout = 15 * time.Minute
 )
 
 // applyKubeVirtSnapshot creates a VirtualMachineSnapshot CR named after the
@@ -247,12 +249,21 @@ func (e *KubernetesLifecycleExecutor) applyKubeVirtSnapshot(ctx context.Context,
 // was created for the record snapshot ID. Snapshots recorded before
 // provider-backed snapshots existed have no cluster counterpart and are
 // rejected with a clear conflict instead of a raw 404.
+//
+// KubeVirt refuses to restore a running VM ("Waiting for target VM to be
+// powered off ... will fail after 5m0s"), so a running target is stopped and
+// waited on first, then started again after the restore completes. The whole
+// flow runs detached from the request context so a client disconnect cannot
+// leave the VM powered off mid-restore.
 func (e *KubernetesLifecycleExecutor) applyKubeVirtRestore(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
 	vm, err := kubeVirtVMResourceFromRecord(record)
 	if err != nil {
 		return err
 	}
-	snapshotName := strings.ToLower(strings.TrimSpace(request.SnapshotID))
+	ctx = context.WithoutCancel(ctx)
+	// Legacy record IDs may contain underscores (pre DNS-1123 IDs); normalize
+	// so the lookup name matches how the snapshot CR was created.
+	snapshotName := strings.ToLower(sanitizeSnapshotID(strings.TrimSpace(request.SnapshotID)))
 	if snapshotName == "" {
 		return fmt.Errorf("%w: snapshot_id is required for VM rollback", ports.ErrInvalid)
 	}
@@ -267,11 +278,51 @@ func (e *KubernetesLifecycleExecutor) applyKubeVirtRestore(ctx context.Context, 
 		}
 		return err
 	}
+	wasRunning, err := e.kubeVirtVMRunning(ctx, vm)
+	if err != nil {
+		return err
+	}
+	if wasRunning {
+		if err := e.stop(ctx, vm); err != nil {
+			return fmt.Errorf("stop VM %q before restore: %w", vm.Name, err)
+		}
+		if err := e.waitKubeVirtVMStopped(ctx, vm); err != nil {
+			return err
+		}
+	}
+	if err := e.applyKubeVirtRestoreCR(ctx, vm, snapshotName, request.IdempotencyKey); err != nil {
+		return err
+	}
+	if wasRunning {
+		if err := e.start(ctx, vm); err != nil {
+			return fmt.Errorf("start VM %q after restore: %w", vm.Name, err)
+		}
+	}
+	return nil
+}
+
+// kubeVirtVMRunning reports whether the VirtualMachine currently reports
+// printableStatus Running.
+func (e *KubernetesLifecycleExecutor) kubeVirtVMRunning(ctx context.Context, vm kubernetesResource) (bool, error) {
+	body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(vm, ""), "", nil)
+	if err != nil {
+		return false, err
+	}
+	var doc map[string]any
+	if json.Unmarshal(body, &doc) != nil {
+		return false, nil
+	}
+	return phaseFromKubernetesObject(vm, doc) == "Running", nil
+}
+
+// applyKubeVirtRestoreCR applies the VirtualMachineRestore CR and waits for it
+// to complete.
+func (e *KubernetesLifecycleExecutor) applyKubeVirtRestoreCR(ctx context.Context, vm kubernetesResource, snapshotName string, idempotencyKey string) error {
 	// Restore CR name must be unique per rollback attempt: re-applying an
 	// already Completed VirtualMachineRestore would succeed without actually
 	// restoring again. The idempotency key keeps replays idempotent (same CR)
 	// while distinct requests get a fresh restore.
-	seed := snapshotIDPattern.ReplaceAllString(snapshotName+"-"+strings.TrimSpace(request.IdempotencyKey), "-")
+	seed := snapshotIDPattern.ReplaceAllString(snapshotName+"-"+strings.TrimSpace(idempotencyKey), "-")
 	if len(seed) > 200 {
 		seed = seed[:200]
 	}
@@ -297,7 +348,36 @@ func (e *KubernetesLifecycleExecutor) applyKubeVirtRestore(ctx context.Context, 
 	if _, err := e.client.do(ctx, http.MethodPatch, e.client.resourceURL(restore, query), kubernetesApplyPatchContentType, body); err != nil {
 		return fmt.Errorf("apply VirtualMachineRestore %q: %w", restoreName, err)
 	}
-	return e.waitKubeVirtCRPhase(ctx, restore, "Completed", kubeVirtRestoreTimeout, "restore")
+	// VirtualMachineRestore signals completion via status.complete (it has no
+	// status.phase), so it needs a dedicated wait.
+	return e.waitKubeVirtRestoreComplete(ctx, restore, kubeVirtRestoreTimeout)
+}
+
+// waitKubeVirtRestoreComplete polls a VirtualMachineRestore until
+// status.complete becomes true. Failed restores keep complete=false, so they
+// surface as a timeout conflict with the CR still inspectable in the cluster.
+func (e *KubernetesLifecycleExecutor) waitKubeVirtRestoreComplete(ctx context.Context, resource kubernetesResource, timeout time.Duration) error {
+	deadline := e.now().Add(timeout)
+	for {
+		body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
+		if err == nil {
+			var doc map[string]any
+			if json.Unmarshal(body, &doc) == nil {
+				status, _ := doc["status"].(map[string]any)
+				if complete, _ := status["complete"].(bool); complete {
+					return nil
+				}
+			}
+		}
+		if !e.now().Before(deadline) {
+			return fmt.Errorf("%w: kubevirt restore %q did not complete within %s", ports.ErrConflict, resource.Name, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(kubeVirtSnapshotPoll):
+		}
+	}
 }
 
 // kubeVirtSnapshotCRName mirrors the snapshot record ID generated by

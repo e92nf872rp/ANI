@@ -2133,7 +2133,7 @@ func vmSnapshotFor(record ports.WorkloadInstanceRecord, request ports.WorkloadIn
 	name := firstNonEmpty(request.SnapshotName, "snapshot-"+now.Format("20060102150405"))
 	idSeed := firstNonEmpty(request.IdempotencyKey, record.InstanceID+"-"+name+"-"+now.Format("20060102150405"))
 	return &ports.VMInstanceSnapshot{
-		ID:               "snap_" + sanitizeSnapshotID(idSeed),
+		ID:               "snap-" + sanitizeSnapshotID(idSeed),
 		Name:             name,
 		SourceInstanceID: record.InstanceID,
 		State:            "ready",
@@ -2143,10 +2143,12 @@ func vmSnapshotFor(record ports.WorkloadInstanceRecord, request ports.WorkloadIn
 	}
 }
 
-var snapshotIDPattern = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
+var snapshotIDPattern = regexp.MustCompile(`[^a-zA-Z0-9-]+`)
 
+// sanitizeSnapshotID produces a DNS-1123-safe segment: KubeVirt snapshot CR
+// names double as instance snapshot record IDs, so underscores are not allowed.
 func sanitizeSnapshotID(value string) string {
-	value = strings.Trim(snapshotIDPattern.ReplaceAllString(value, "_"), "_")
+	value = strings.Trim(snapshotIDPattern.ReplaceAllString(value, "-"), "-")
 	if value == "" {
 		return "local"
 	}

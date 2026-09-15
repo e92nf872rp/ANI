@@ -789,7 +789,10 @@ func TestKubernetesLifecycleExecutorRollbackVMCreatesKubeVirtRestore(t *testing.
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		if r.Method == http.MethodGet {
-			return crPhaseResponse("Completed"), nil
+			if strings.Contains(r.URL.Path, "/virtualmachinerestores/") {
+				return crCompleteResponse(), nil
+			}
+			return crPhaseResponse("Succeeded"), nil
 		}
 		return lifecycleResponse(), nil
 	})
@@ -806,12 +809,69 @@ func TestKubernetesLifecycleExecutorRollbackVMCreatesKubeVirtRestore(t *testing.
 		t.Fatalf("Rollback Apply() error = %v", err)
 	}
 	want := []string{
-		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap_1fc44f4a-70ea",
-		"PATCH /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap_1fc44f4a-70ea-rollback-key-01",
-		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap_1fc44f4a-70ea-rollback-key-01",
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap-1fc44f4a-70ea",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PATCH /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap-1fc44f4a-70ea-rollback-key-01",
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap-1fc44f4a-70ea-rollback-key-01",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+// Running-VM rollback must power the VM off before KubeVirt will restore it,
+// then start it again after the restore completes.
+func TestKubernetesLifecycleExecutorRollbackRunningVMStopsRestoresStarts(t *testing.T) {
+	var requests []string
+	var vmGets int
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			vmGets++
+			if vmGets == 1 {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Stopped"}}`)),
+			}, nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/virtualmachinerestores/"):
+			return crCompleteResponse(), nil
+		case r.Method == http.MethodGet:
+			return crPhaseResponse("Succeeded"), nil
+		default:
+			return lifecycleResponse(), nil
+		}
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRollback)
+	req.SnapshotID = "snap-1fc44f4a-70ea"
+	req.IdempotencyKey = "rollback-key-04"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Rollback Apply() error = %v", err)
+	}
+	want := []string{
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap-1fc44f4a-70ea",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PATCH /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap-1fc44f4a-70ea-rollback-key-04",
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap-1fc44f4a-70ea-rollback-key-04",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want stop-restore-start sequence %#v", requests, want)
 	}
 }
 
@@ -848,12 +908,29 @@ func TestKubernetesLifecycleExecutorRollbackVMRejectsMissingProviderSnapshot(t *
 }
 
 func TestKubernetesLifecycleExecutorRollbackVMFailsOnFailedSnapshot(t *testing.T) {
-	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
-		if r.Method == http.MethodGet {
-			return crPhaseResponse("Failed"), nil
-		}
-		return lifecycleResponse(), nil
-	})
+	// VirtualMachineRestore has no status.phase: a restore that never reaches
+	// status.complete=true must surface as a conflict timeout instead of
+	// blocking forever. A fast clock short-circuits the wait.
+	var requests []string
+	now := time.Unix(1000, 0)
+	clock := func() time.Time {
+		now = now.Add(kubeVirtRestoreTimeout + time.Minute)
+		return now
+	}
+	executor := NewKubernetesLifecycleExecutor(
+		newLifecycleRESTClient(t, func(r *http.Request) (*http.Response, error) {
+			requests = append(requests, r.Method+" "+r.URL.Path)
+			if r.Method == http.MethodGet {
+				if strings.Contains(r.URL.Path, "/virtualmachinerestores/") {
+					return crPhaseResponse("InProgress"), nil
+				}
+				return crPhaseResponse("Succeeded"), nil
+			}
+			return lifecycleResponse(), nil
+		}),
+		WithKubernetesLifecycleEnabled(true),
+		WithKubernetesLifecycleClock(clock),
+	)
 	record := lifecycleRecord()
 	record.Kind = ports.WorkloadKindVM
 	record.Name = "vm-01"
@@ -867,6 +944,15 @@ func TestKubernetesLifecycleExecutorRollbackVMFailsOnFailedSnapshot(t *testing.T
 	if !errors.Is(err, ports.ErrConflict) {
 		t.Fatalf("error = %v, want ErrConflict", err)
 	}
+	sawRestore := false
+	for _, req := range requests {
+		if strings.Contains(req, "virtualmachinerestores") {
+			sawRestore = true
+		}
+	}
+	if !sawRestore {
+		t.Fatalf("restore was never applied: requests = %#v", requests)
+	}
 }
 
 // crPhaseResponse returns a snapshot.kubevirt.io style object with the given
@@ -877,6 +963,16 @@ func crPhaseResponse(phase string) *http.Response {
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+// crCompleteResponse returns a VirtualMachineRestore style object whose
+// status.complete is true (VirtualMachineRestore has no status.phase).
+func crCompleteResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"status":{"complete":true}}`)),
 	}
 }
 
