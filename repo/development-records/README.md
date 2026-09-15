@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### VM 生命周期真实底座修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-VM-LIFECYCLE-HOTFIX-A | VM 真实底座（KubeVirt）生命周期五项能力修复，来源测试异常记录 VM 系列（PR #168）：① VM-02/03 数据盘新建盘真实建卷（`provisionVMDataDisks` 幂等建卷 + `vmVolumeClaimName` 映射修正 + 默认 StorageClass `ani-block`）；② VM-09 重启改 stop-等待停稳-start 确定性流程（原生 restart 子资源对 legacy `spec.running` 只停不启）；③ VM-07 快照回滚接入 `VirtualMachineSnapshot/Restore`（CR 名 DNS-1123 `snap-` 前缀、运行中回滚 stop-restore-start、按 `status.complete` 判完成、restore 15min 超时、RBAC 补 snapshot/restore 权限）；④ VM-10 重建落地（`applyKubeVirtRebuild`：停机-捕获 spec-删 CR-重建-开机，containerDisk 无状态语义即重装系统，数据盘 PVC 保留重挂）；⑤ VM-06 NFS 挂载 virtiofs（`applyKubeVirtFilesystem` 停机-改 spec(filesystems[].virtiofs+PVC 卷)-开机，virtiofs tag 限 36 字节 `kubeVirtFilesystemVolumeName` 去分隔符截断，`waitKubeVirtVMStopped` 严格等待 `printableStatus=="Stopped"` 防卡停机态，失败路径 best-effort 恢复开机）。环境侧：KubeVirt featureGates 需 `Snapshot`+`EnableVirtioFsStorageVolumes`。**live 验证 PASS（2026-09-15，ani-test2 隔离环境，镜像 `test2-20260915-b/c/i/k/n`）**：五项操作（数据盘创建/重启/快照回滚/重建/NFS 挂载卸载）逐项通过——PVC Bound + VMI Running、快照 Succeeded→restore complete=true→回 running、rebuild 后 VM CR uid 变更、virtiofs 设备写入 spec 且 detach 后移除 | instance-vm-lifecycle-hotfix-a.md |
+
 ### Console 首页概览统计聚合接口（2026-09，分支 feat/console-overview）
 
 | 批次 | 内容摘要 | 文件 |
