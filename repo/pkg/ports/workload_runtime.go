@@ -579,6 +579,11 @@ type WorkloadInstanceLifecycleRequest struct {
 	Revision         string
 	Replicas         *int32
 	ImageID          string
+	// ImageRef carries the registry ref resolved from ImageID for update_image.
+	// It is filled in by the service layer before fingerprinting so retries keep
+	// a stable intent fingerprint, and the lifecycle executor patches the
+	// workload with this ref.
+	ImageRef         string
 	Strategy         string
 	SecretID         string
 	BindingType      string

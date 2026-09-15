@@ -858,6 +858,19 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
+	// Resolve the update_image target before fingerprinting: ImageRef is part
+	// of the intent fingerprint, so it must be derived deterministically from
+	// image_id on both the first request and replays. Resolution reuses the
+	// create path (tenant project check, purpose validation, scan gate).
+	var updatedImage *ports.InstanceImageSummary
+	if request.Action == ports.WorkloadLifecycleUpdateImage && s.resources != nil {
+		summary, err := s.resolveLifecycleImage(ctx, record, request)
+		if err != nil {
+			return ports.WorkloadInstanceRecord{}, err
+		}
+		request.ImageRef = summary.Ref
+		updatedImage = &summary
+	}
 	requestFingerprint := ""
 	if s.operations != nil {
 		requestFingerprint, err = lifecycleIntentFingerprint(request)
@@ -1026,6 +1039,14 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		record.Container = rollback
 	}
 	applyApprovedLifecycleSummary(&record, request)
+	if updatedImage != nil {
+		record.Image = *updatedImage
+		if record.Container != nil {
+			// Mirror the scale behaviour: the reconciler observes the Deployment
+			// rollout and flips this to completed/failed.
+			record.Container.RolloutStatus = "progressing"
+		}
+	}
 	if resizeGPUSpec != nil {
 		record.Compute.SpecID = resizeGPUSpec.ID
 		record.Compute.GPUType = resizeGPUSpec.GPUType
@@ -1553,6 +1574,31 @@ func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request
 	case ports.WorkloadLifecycleSetTerminationProtection:
 		record.Lifecycle.TerminationProtection = *request.Enabled
 	}
+}
+
+// resolveLifecycleImage resolves an update_image target through the create
+// resource resolver so tenant project checks, image purpose validation and the
+// vulnerability scan gate apply exactly as on instance create. The minimal
+// spec only carries Kind + ImageID so no network/storage resolution runs.
+func (s *LocalInstanceService) resolveLifecycleImage(ctx context.Context, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) (ports.InstanceImageSummary, error) {
+	resolved, err := s.resources.ResolveCreate(ctx, ports.WorkloadResourceResolveRequest{
+		TenantID: request.TenantID,
+		UserID:   request.UserID,
+		Spec: ports.WorkloadSpec{
+			TenantID: record.TenantID,
+			Name:     record.Name,
+			Kind:     record.Kind,
+			ImageID:  strings.TrimSpace(request.ImageID),
+		},
+	})
+	if err != nil {
+		return ports.InstanceImageSummary{}, err
+	}
+	summary := resolved.Spec.ImageSummary
+	if strings.TrimSpace(summary.Ref) == "" {
+		return ports.InstanceImageSummary{}, fmt.Errorf("%w: resolved image %q has no registry ref", ports.ErrInvalid, request.ImageID)
+	}
+	return summary, nil
 }
 
 // resolveResizeGPUSpec validates the resize spec_id against the configured GPU

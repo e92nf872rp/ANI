@@ -154,6 +154,18 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		}, nil
 	}
 
+	if request.Action == ports.WorkloadLifecycleUpdateImage {
+		if err := e.applyKubernetesUpdateImage(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "image update accepted by Kubernetes lifecycle executor (targeted patch)",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
 	resource, err := resourceFromRecord(record)
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
@@ -907,6 +919,49 @@ func (e *KubernetesLifecycleExecutor) applyResize(ctx context.Context, request p
 	patch, err := e.buildResizePatch(ctx, request, record, resource.Name)
 	if err != nil {
 		return err
+	}
+	_, err = e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/strategic-merge-patch+json", patch)
+	return err
+}
+
+// applyKubernetesUpdateImage patches the running Deployment's container image
+// in place (触发滚动更新) instead of recreating the workload. Strategic-merge
+// keeps the containers list keyed by name so only the image field changes and
+// env/ports/volumes stay intact; rollout convergence is observed by the
+// reconciler like scale.
+func (e *KubernetesLifecycleExecutor) applyKubernetesUpdateImage(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
+		return fmt.Errorf("%w: image update is only supported for container and gpu_container instances", ports.ErrUnsupported)
+	}
+	imageRef := strings.TrimSpace(request.ImageRef)
+	if imageRef == "" {
+		return fmt.Errorf("%w: resolved image ref is required for update_image", ports.ErrInvalid)
+	}
+	resource, err := resourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	if resource.Kind != "Deployment" {
+		return fmt.Errorf("%w: image update is only supported for Deployment workloads, got %q", ports.ErrUnsupported, resource.Kind)
+	}
+	// The rendered pod template names its single container after the workload
+	// (podTemplate in dryrun_renderer.go), which equals the Deployment name.
+	patch, err := json.Marshal(map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  resource.Name,
+							"image": imageRef,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("%w: marshal image update patch: %v", ports.ErrInvalid, err)
 	}
 	_, err = e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/strategic-merge-patch+json", patch)
 	return err

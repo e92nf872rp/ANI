@@ -409,6 +409,62 @@ func TestKubernetesLifecycleExecutorScaleRejectsNonPositiveReplicas(t *testing.T
 	}
 }
 
+func TestKubernetesLifecycleExecutorUpdateImagePatchesDeploymentContainer(t *testing.T) {
+	var gotPath, gotBody, gotContentType string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		gotPath = r.URL.Path
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleUpdateImage)
+	req.ImageID = "image-new"
+	req.ImageRef = "registry.example/tenant-a/app:2"
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("UpdateImage Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	wantPath := "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	if gotContentType != "application/strategic-merge-patch+json" {
+		t.Fatalf("content type = %q, want strategic-merge patch", gotContentType)
+	}
+	for _, want := range []string{`"name":"app-01"`, `"image":"registry.example/tenant-a/app:2"`} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body = %s, want %s", gotBody, want)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorUpdateImageRequiresResolvedRef(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued without a resolved image ref: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleUpdateImage)
+	req.ImageID = "image-new"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if err == nil {
+		t.Fatalf("expected error for missing image ref, got nil")
+	}
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestKubernetesLifecycleExecutorResizeWithoutSpecIDPatchesCPUAndMemory(t *testing.T) {
 	var gotPath, gotBody, gotContentType string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {

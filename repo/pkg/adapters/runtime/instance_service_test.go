@@ -1516,6 +1516,49 @@ func TestLocalInstanceServiceClearsStaleImageMetadataOnUpdate(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceResolvesImageRefForUpdateImage(t *testing.T) {
+	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "container-a", Name: "app-01", Kind: ports.WorkloadKindContainer,
+		Image:     ports.InstanceImageSummary{ID: "image-old", Ref: "registry/old:tag"},
+		Container: &ports.ContainerInstanceStatus{Replicas: 2, RolloutStatus: "completed"},
+		Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	}}
+	resolver := &capturingInstanceResourceResolver{result: ports.WorkloadResourceResolveResult{
+		Spec: ports.WorkloadSpec{ImageSummary: ports.InstanceImageSummary{
+			ID: "image-new", Ref: "registry.example/tenant-a/app:2", Digest: "sha256:new", Name: "app", Tag: "2",
+		}},
+		ResourceRefs: []string{"image/registry.example/tenant-a/app:2"},
+	}}
+	lifecycle := &fakeLifecycleExecutor{}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{}, store, NewLocalInstanceOpsGuard(),
+		WithInstanceLifecycleExecutor(lifecycle),
+		WithInstanceResourceResolver(resolver),
+	)
+
+	record, err := service.ApplyLifecycle(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey: "update-image-resolved", TenantID: "tenant-a", InstanceID: "container-a",
+		Action: ports.WorkloadLifecycleUpdateImage, ImageID: "image-new",
+		UserID: "user-a", PermissionProof: "rbac:update:workload",
+	})
+	if err != nil {
+		t.Fatalf("ApplyLifecycle() error = %v", err)
+	}
+	if lifecycle.action != ports.WorkloadLifecycleUpdateImage {
+		t.Fatalf("executor action = %s, want update_image", lifecycle.action)
+	}
+	if lifecycle.lastRequest.ImageRef != "registry.example/tenant-a/app:2" {
+		t.Fatalf("executor image ref = %q, want resolved ref", lifecycle.lastRequest.ImageRef)
+	}
+	want := ports.InstanceImageSummary{ID: "image-new", Ref: "registry.example/tenant-a/app:2", Digest: "sha256:new", Name: "app", Tag: "2"}
+	if record.Image != want {
+		t.Fatalf("image = %+v, want %+v", record.Image, want)
+	}
+	if record.Container == nil || record.Container.RolloutStatus != "progressing" {
+		t.Fatalf("rollout status = %+v, want progressing", record.Container)
+	}
+}
+
 func TestLocalInstanceServiceRoutesVMRollbackThroughConfiguredProvider(t *testing.T) {
 	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
 		TenantID: "tenant-a", InstanceID: "vm-a", Kind: ports.WorkloadKindVM,
@@ -2440,13 +2483,15 @@ func (f *fakeInstanceStorageBinder) MountFilesystem(_ context.Context, request p
 }
 
 type fakeLifecycleExecutor struct {
-	calls  int
-	action ports.WorkloadLifecycleAction
+	calls       int
+	action      ports.WorkloadLifecycleAction
+	lastRequest ports.WorkloadInstanceLifecycleRequest
 }
 
 func (e *fakeLifecycleExecutor) Apply(_ context.Context, request ports.WorkloadInstanceLifecycleRequest, _ ports.WorkloadInstanceRecord) (ports.WorkloadInstanceLifecycleResult, error) {
 	e.calls++
 	e.action = request.Action
+	e.lastRequest = request
 	return ports.WorkloadInstanceLifecycleResult{
 		Action:   request.Action,
 		Accepted: true,
