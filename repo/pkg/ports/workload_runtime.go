@@ -542,6 +542,7 @@ type WorkloadInstanceListRequest struct {
 	Kind            WorkloadKind
 	State           WorkloadState
 	Keyword         string
+	SearchField     string // "id"/"name" 限定 target，空 = 全部字段（InstanceID+Name+Description）
 	CreatedAfter    time.Time
 	CreatedBefore   time.Time
 	SpecID          string
@@ -771,6 +772,7 @@ type WorkloadOperationListRequest struct {
 
 type WorkloadOperationListResult struct {
 	Items      []WorkloadOperationRecord
+	Total      int // 全量操作记录数（未分页前）
 	NextCursor string
 }
 

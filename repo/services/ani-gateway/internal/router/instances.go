@@ -1751,6 +1751,15 @@ func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 		if kind != "" && orphan.Kind != kind {
 			continue
 		}
+		// 孤儿实例同样要遵循请求里的过滤语义，否则与 store 记录不一致，live
+		// Kubernetes 实例会无条件返回（Bug-2：keyword/search_field 不生效；
+		// Bug-6：state 过滤不生效，state=running 会把 pending 孤儿也带回）。
+		if !runtimeadapter.MatchesInstanceKeyword(orphan, listReq) {
+			continue
+		}
+		if !runtimeadapter.MatchesInstanceState(orphan, listReq) {
+			continue
+		}
 		records = append(records, orphan)
 		existing[orphan.InstanceID] = struct{}{}
 	}
@@ -1781,6 +1790,7 @@ func instanceListRequestFromQuery(c *app.RequestContext, tenantID string, kind p
 		Kind:            kind,
 		State:           ports.WorkloadState(c.Query("state")),
 		Keyword:         c.Query("keyword"),
+		SearchField:     c.Query("search_field"),
 		CreatedAfter:    createdAfter,
 		CreatedBefore:   createdBefore,
 		SpecID:          c.Query("spec_id"),
@@ -2003,7 +2013,7 @@ func (api *instanceAPI) listOperations(ctx context.Context, c *app.RequestContex
 	for _, item := range result.Items {
 		items = append(items, operationResponseFromRecord(item))
 	}
-	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": result.NextCursor})
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": result.Total, "next_cursor": result.NextCursor})
 }
 
 func (api *instanceAPI) listLogs(ctx context.Context, c *app.RequestContext) {
