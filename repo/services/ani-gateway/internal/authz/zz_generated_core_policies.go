@@ -641,6 +641,13 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/gpu-inventory",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
+	"GET /api/v1/gpu-inventory/events": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "listGPUDeviceEvents",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/gpu-inventory/events",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
 	"POST /api/v1/gpu-inventory/gpu-partitions": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "createGPUPartition",

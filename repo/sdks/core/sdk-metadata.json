@@ -515,6 +515,12 @@
       "scope": "scope:gpu-inventory:read"
     },
     {
+      "operationId": "listGPUDeviceEvents",
+      "method": "GET",
+      "path": "/gpu-inventory/events",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
       "operationId": "createGPUPartition",
       "method": "POST",
       "path": "/gpu-inventory/gpu-partitions",
@@ -1563,6 +1569,8 @@
     "FilesystemMountTarget",
     "FilesystemMountTargetCreateRequest",
     "FilesystemMountTargetListResponse",
+    "GPUDeviceEvent",
+    "GPUDeviceEventListResponse",
     "GPUDeviceStatusUpdateRequest",
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
@@ -1927,6 +1935,7 @@
     "listStorageFilesystems",
     "listFilesystemMountTargets",
     "listGPUInventory",
+    "listGPUDeviceEvents",
     "listGPUSpecs",
     "listInstances",
     "listInstanceEvents",
