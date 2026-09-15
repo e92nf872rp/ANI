@@ -273,10 +273,17 @@ func ignoreKubeVirtLifecycleConflict(err error, messageSnippets ...string) error
 
 func (e *KubernetesLifecycleExecutor) restart(ctx context.Context, resource kubernetesResource) error {
 	if resource.Kind == "VirtualMachine" {
-		if err := e.stop(ctx, resource); err != nil {
-			return err
+		// KubeVirt's native restart subresource owns the full stop+start cycle
+		// and applies it asynchronously. A manual stop-then-start race leaves
+		// the VM permanently stopped: the start PUT lands while the VM is
+		// still stopping and is rejected, and no further start is issued.
+		_, err := e.client.do(ctx, http.MethodPut, e.client.host+kubeVirtVMSubresourcePath(resource.Namespace, resource.Name, "restart"), "", nil)
+		if err != nil && ignoreKubeVirtLifecycleConflict(err, "not running", "halted") == nil {
+			// Restarting a stopped VM conflicts; fall back to start so the
+			// user-visible intent (bring the instance back up) is honoured.
+			return e.start(ctx, resource)
 		}
-		return e.start(ctx, resource)
+		return err
 	}
 	body := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"ani.kubercloud.io/restarted-at":%q}}}}}`, e.now().UTC().Format(time.RFC3339))
 	_, err := e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/merge-patch+json", []byte(body))

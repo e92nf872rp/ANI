@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubercloud/ani/pkg/adapters/resilience"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -644,11 +645,63 @@ func TestKubernetesLifecycleExecutorResizeVMWithoutSpecIDRestarts(t *testing.T) 
 		t.Fatalf("Resize Apply() error = %v", err)
 	}
 	want := []string{
-		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
-		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/restart",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRestartsKubeVirtVMViaRestartSubresource(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleRestart), record); err != nil {
+		t.Fatalf("Restart Apply() error = %v", err)
+	}
+	want := []string{
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/restart",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want single native restart subresource call %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRestartsStoppedKubeVirtVMFallsBackToStart(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/restart") {
+			return nil, &resilience.StatusError{
+				StatusCode: http.StatusConflict,
+				Body:       `{"reason":"Conflict","message":"VM is not running"}`,
+			}
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleRestart), record); err != nil {
+		t.Fatalf("Restart Apply() error = %v", err)
+	}
+	want := []string{
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/restart",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want restart then start fallback %#v", requests, want)
 	}
 }
 
