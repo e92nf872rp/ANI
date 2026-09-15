@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Console 首页概览统计聚合接口（2026-09，分支 feat/console-overview）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GATEWAY-CONSOLE-OVERVIEW-A | Console 首页四类统计卡片聚合端点 `GET /api/v1/overview`（getConsoleOverview）：契约优先新增 v1.yaml 路径与 ConsoleOverviewResponse（tenant 边界 + x-ani-authz + scope:instances:read；实例 by_state 8 固定键 / 推理 6 键 / 模型 4 键 / 知识库 2 键，0 值不省略，均不含 deleted）；实现为 ani-gateway BFF 聚合——实例复用本进程实例链路（refresh+全量分页+孤儿合并，与 /instances 同口径），model/inference/kb 走既有 gRPC 客户端 cursor 翻页走尽按 status 计数，后端业务服务零改动；**部分成功语义（用户决策，覆盖初版整体 503）**：任一数据源失败该部分空计数（total=0 分布全 0）+ WARN 日志，整体仍 200，gRPC 未装配同走空部分；Core SDK 四语言/API docs/authz 生成物同步（323 routes 0 error）；单测 4 用例（计数一致性/翻页/deleted 与跨租户排除/部分成功）+ go build/test/validate-openapi-spec/validate-gateway-authz/validate-architecture 全绿；K8s 测试环境双环境实测——ani-test2（镜像 test2-20260914-g1→g2，计数与列表接口翻页全量逐字段一致、401/403、netpol 故障注入验证降级与 WARN、幂等 5 次、延迟 197~340ms）与 ani-system（镜像 dev-20260914-overview，只 set image 未改 env，etcd 预检 43%，租户 token 200 实例 54 等四类正常计数）；实测坑：修改 NetworkPolicy 后需重启 gateway pod 才生效（gRPC 复用旧 HTTP/2 长连接）；环境问题：ani-system model-service-gateway-ingress 未放行 ani-test2 gateway 源（既有 /svc/models 同样失败，已 patch 放行）。方案/测试报告/前端对接文档三份在 kjs-study/首页概览相关文档/（未入库） | gateway-console-overview-a.md |
+
 ### BOSS 平台审计日志读取（2026-09，分支 feat/platform-audit-log）
 
 | 批次 | 内容摘要 | 文件 |
