@@ -273,21 +273,52 @@ func ignoreKubeVirtLifecycleConflict(err error, messageSnippets ...string) error
 
 func (e *KubernetesLifecycleExecutor) restart(ctx context.Context, resource kubernetesResource) error {
 	if resource.Kind == "VirtualMachine" {
-		// KubeVirt's native restart subresource owns the full stop+start cycle
-		// and applies it asynchronously. A manual stop-then-start race leaves
-		// the VM permanently stopped: the start PUT lands while the VM is
-		// still stopping and is rejected, and no further start is issued.
-		_, err := e.client.do(ctx, http.MethodPut, e.client.host+kubeVirtVMSubresourcePath(resource.Namespace, resource.Name, "restart"), "", nil)
-		if err != nil && ignoreKubeVirtLifecycleConflict(err, "not running", "halted") == nil {
-			// Restarting a stopped VM conflicts; fall back to start so the
-			// user-visible intent (bring the instance back up) is honoured.
-			return e.start(ctx, resource)
+		// ANI VM manifests use legacy spec.running without a runStrategy, so
+		// KubeVirt's native restart subresource only performs the stop phase
+		// (it patches spec.running=false and no controller restarts the VM).
+		// Stop is asynchronous: a start issued while the VM is still shutting
+		// down is rejected, which left restarts permanently stopped (VM-09).
+		// So: stop, wait until the VM actually stopped, then start again.
+		if err := e.stop(ctx, resource); err != nil {
+			return err
 		}
-		return err
+		if err := e.waitKubeVirtVMStopped(ctx, resource); err != nil {
+			return err
+		}
+		return e.start(ctx, resource)
 	}
 	body := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"ani.kubercloud.io/restarted-at":%q}}}}}`, e.now().UTC().Format(time.RFC3339))
 	_, err := e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/merge-patch+json", []byte(body))
 	return err
+}
+
+const (
+	kubeVirtRestartPollInterval = 2 * time.Second
+	kubeVirtRestartStopTimeout  = 2 * time.Minute
+)
+
+// waitKubeVirtVMStopped polls the VirtualMachine until the graceful shutdown
+// triggered by the stop subresource has fully landed (printableStatus leaves
+// Running), so the follow-up start is guaranteed to be accepted.
+func (e *KubernetesLifecycleExecutor) waitKubeVirtVMStopped(ctx context.Context, resource kubernetesResource) error {
+	deadline := e.now().Add(kubeVirtRestartStopTimeout)
+	for {
+		body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
+		if err == nil {
+			var doc map[string]any
+			if json.Unmarshal(body, &doc) == nil && phaseFromKubernetesObject(resource, doc) != "Running" {
+				return nil
+			}
+		}
+		if !e.now().Before(deadline) {
+			return fmt.Errorf("%w: kubevirt VM %q did not stop within %s before restart", ports.ErrConflict, resource.Name, kubeVirtRestartStopTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(kubeVirtRestartPollInterval):
+		}
+	}
 }
 
 // applyResize rerenders the workload in place for a resize action via a

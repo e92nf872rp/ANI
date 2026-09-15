@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubercloud/ani/pkg/adapters/resilience"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -645,14 +644,16 @@ func TestKubernetesLifecycleExecutorResizeVMWithoutSpecIDRestarts(t *testing.T) 
 		t.Fatalf("Resize Apply() error = %v", err)
 	}
 	want := []string{
-		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/restart",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("requests = %#v, want %#v", requests, want)
 	}
 }
 
-func TestKubernetesLifecycleExecutorRestartsKubeVirtVMViaRestartSubresource(t *testing.T) {
+func TestKubernetesLifecycleExecutorRestartsKubeVirtVMViaStopWaitStart(t *testing.T) {
 	var requests []string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
@@ -668,21 +669,29 @@ func TestKubernetesLifecycleExecutorRestartsKubeVirtVMViaRestartSubresource(t *t
 		t.Fatalf("Restart Apply() error = %v", err)
 	}
 	want := []string{
-		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/restart",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("requests = %#v, want single native restart subresource call %#v", requests, want)
+		t.Fatalf("requests = %#v, want stop-wait-start sequence %#v", requests, want)
 	}
 }
 
-func TestKubernetesLifecycleExecutorRestartsStoppedKubeVirtVMFallsBackToStart(t *testing.T) {
+func TestKubernetesLifecycleExecutorRestartWaitsForVMToStopBeforeStart(t *testing.T) {
+	var gets int
 	var requests []string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
-		if strings.HasSuffix(r.URL.Path, "/restart") {
-			return nil, &resilience.StatusError{
-				StatusCode: http.StatusConflict,
-				Body:       `{"reason":"Conflict","message":"VM is not running"}`,
+		if r.Method == http.MethodGet {
+			gets++
+			if gets == 1 {
+				// First observation still reports Running: shutdown has not landed yet.
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+				}, nil
 			}
 		}
 		return lifecycleResponse(), nil
@@ -697,11 +706,49 @@ func TestKubernetesLifecycleExecutorRestartsStoppedKubeVirtVMFallsBackToStart(t 
 		t.Fatalf("Restart Apply() error = %v", err)
 	}
 	want := []string{
-		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/restart",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
 		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("requests = %#v, want restart then start fallback %#v", requests, want)
+		t.Fatalf("requests = %#v, want stop-poll-poll-start sequence %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRestartTimesOutWhenVMNeverStops(t *testing.T) {
+	var requests []string
+	now := time.Unix(1000, 0)
+	clock := func() time.Time {
+		now = now.Add(kubeVirtRestartStopTimeout + time.Minute)
+		return now
+	}
+	executor := NewKubernetesLifecycleExecutor(
+		newLifecycleRESTClient(t, func(r *http.Request) (*http.Response, error) {
+			requests = append(requests, r.Method+" "+r.URL.Path)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+			}, nil
+		}),
+		WithKubernetesLifecycleEnabled(true),
+		WithKubernetesLifecycleClock(clock),
+	)
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+
+	_, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleRestart), record)
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+	for _, req := range requests {
+		if strings.HasSuffix(req, "/start") {
+			t.Fatalf("start issued before VM stopped: requests = %#v", requests)
+		}
 	}
 }
 
