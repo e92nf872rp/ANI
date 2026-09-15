@@ -130,6 +130,30 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		}, nil
 	}
 
+	if request.Action == ports.WorkloadLifecycleRebuild && record.Kind == ports.WorkloadKindVM {
+		if err := e.applyKubeVirtRebuild(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "rebuild accepted by KubeVirt lifecycle executor",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
+	if request.Action == ports.WorkloadLifecycleAttachFilesystem || request.Action == ports.WorkloadLifecycleDetachFilesystem {
+		if err := e.applyKubeVirtFilesystem(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "filesystem change accepted by KubeVirt lifecycle executor",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
 	resource, err := resourceFromRecord(record)
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
@@ -187,6 +211,180 @@ func (e *KubernetesLifecycleExecutor) applyKubeVirtVolume(ctx context.Context, r
 	}
 	_, err = e.client.do(ctx, http.MethodPut, e.client.host+kubeVirtVMSubresourcePath(resource.Namespace, resource.Name, subresource), "application/json", body)
 	return err
+}
+
+// applyKubeVirtFilesystem attaches/detaches a shared filesystem PVC
+// (NFS/CephFS) to a VM via virtiofs. virtiofs cannot be hot-plugged through
+// the addvolume subresource (a shared-filesystem PVC presented as a virtio
+// disk lacks disk.img and crashes the VMI), so the spec is rewritten instead:
+// a running VM is stopped first, the spec is re-applied with (or without) the
+// virtiofs device plus its backing volume, and the VM is started again. The
+// flow runs detached from the request context (same as rollback/rebuild) so a
+// client disconnect cannot leave the VM stopped.
+func (e *KubernetesLifecycleExecutor) applyKubeVirtFilesystem(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	if record.Kind != ports.WorkloadKindVM {
+		return fmt.Errorf("%w: Kubernetes filesystem lifecycle execution is only supported for vm instances", ports.ErrUnsupported)
+	}
+	vm, err := kubeVirtVMResourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	filesystemID := strings.TrimSpace(request.FilesystemID)
+	if filesystemID == "" {
+		return fmt.Errorf("%w: filesystem_id is required for KubeVirt filesystem lifecycle execution", ports.ErrInvalid)
+	}
+	attach := request.Action == ports.WorkloadLifecycleAttachFilesystem
+	if attach && strings.TrimSpace(request.MountPath) == "" {
+		return fmt.Errorf("%w: mount_path is required to attach a filesystem", ports.ErrInvalid)
+	}
+	// Volume name doubles as the virtiofs tag the guest mounts by.
+	volumeName := kubeVirtFilesystemVolumeName(filesystemID)
+	claimName := storageProviderName("fs", filesystemID)
+
+	ctx = context.WithoutCancel(ctx)
+	wasRunning := false
+	if running, err := e.kubeVirtVMRunning(ctx, vm); err == nil && running {
+		wasRunning = true
+		if err := e.stop(ctx, vm); err != nil {
+			return fmt.Errorf("stop VM %q before filesystem %s: %w", vm.Name, request.Action, err)
+		}
+		if err := e.waitKubeVirtVMStopped(ctx, vm); err != nil {
+			// Best-effort: try to power the VM back on before surfacing
+			// the wait failure, otherwise it stays stopped.
+			if startErr := e.start(ctx, vm); startErr != nil {
+				return fmt.Errorf("%w (VM %q left stopped: start after wait failure also failed: %v)", err, vm.Name, startErr)
+			}
+			return err
+		}
+	}
+	// Anything that fails after the stop above would otherwise leave a
+	// previously running VM powered off; best-effort restore before returning.
+	restoreRunning := func(cause error) error {
+		if !wasRunning {
+			return cause
+		}
+		if startErr := e.start(ctx, vm); startErr != nil {
+			return fmt.Errorf("%w (VM %q left stopped: start after failure also failed: %v)", cause, vm.Name, startErr)
+		}
+		return cause
+	}
+	body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(vm, ""), "", nil)
+	if err != nil {
+		return restoreRunning(fmt.Errorf("read VM %q spec for filesystem %s: %w", vm.Name, request.Action, err))
+	}
+	var doc map[string]any
+	if json.Unmarshal(body, &doc) != nil {
+		return restoreRunning(fmt.Errorf("%w: VM %q spec is not valid JSON", ports.ErrInvalid, vm.Name))
+	}
+	spec, ok := doc["spec"].(map[string]any)
+	if !ok {
+		return restoreRunning(fmt.Errorf("%w: VM %q has no spec for filesystem %s", ports.ErrInvalid, vm.Name, request.Action))
+	}
+	applyKubeVirtFilesystemMutation(spec, volumeName, claimName, attach)
+	metadata := map[string]any{"name": vm.Name, "namespace": vm.Namespace}
+	if src, ok := doc["metadata"].(map[string]any); ok {
+		for _, key := range []string{"labels", "annotations"} {
+			if value, ok := src[key].(map[string]any); ok && len(value) > 0 {
+				metadata[key] = value
+			}
+		}
+	}
+	manifest, err := json.Marshal(map[string]any{
+		"apiVersion": "kubevirt.io/v1",
+		"kind":       "VirtualMachine",
+		"metadata":   metadata,
+		"spec":       spec,
+	})
+	if err != nil {
+		return restoreRunning(fmt.Errorf("%w: marshal VirtualMachine manifest for filesystem %s: %v", ports.ErrInvalid, request.Action, err))
+	}
+	query := "fieldManager=" + url.QueryEscape(e.client.fieldManager) + "&force=true"
+	if _, err := e.client.do(ctx, http.MethodPatch, e.client.resourceURL(vm, query), kubernetesApplyPatchContentType, manifest); err != nil {
+		return restoreRunning(fmt.Errorf("apply VM %q spec for filesystem %s: %w", vm.Name, request.Action, err))
+	}
+	// The stop above (when needed) left spec.running=false, so the explicit
+	// start owns power-on; a previously stopped VM stays stopped.
+	if wasRunning {
+		if err := e.start(ctx, vm); err != nil {
+			return fmt.Errorf("start VM %q after filesystem %s: %w", vm.Name, request.Action, err)
+		}
+	}
+	return nil
+}
+
+// kubeVirtFilesystemVolumeName derives the KubeVirt volume/filesystem device
+// name for a filesystem attach. The name doubles as the virtiofs mount tag,
+// and QEMU rejects tags longer than 36 bytes, so dashes are dropped from UUID
+// ids and the result is truncated to the limit. The mapping is deterministic
+// so detach finds the entry added by attach.
+func kubeVirtFilesystemVolumeName(filesystemID string) string {
+	name := strings.ToLower(strings.TrimSpace(filesystemID))
+	name = strings.ReplaceAll(name, "_", "-")
+	name = strings.ReplaceAll(name, "-", "")
+	name = "fs-" + name
+	if len(name) > 36 {
+		name = name[:36]
+	}
+	return name
+}
+
+// applyKubeVirtFilesystemMutation rewrites the VM pod template in place,
+// replacing any prior entry for the volume so repeated attach/detach calls are
+// idempotent.
+func applyKubeVirtFilesystemMutation(spec map[string]any, volumeName string, claimName string, attach bool) {
+	tmpl, ok := spec["template"].(map[string]any)
+	if !ok {
+		tmpl = map[string]any{}
+		spec["template"] = tmpl
+	}
+	podSpec, ok := tmpl["spec"].(map[string]any)
+	if !ok {
+		podSpec = map[string]any{}
+		tmpl["spec"] = podSpec
+	}
+	volumes := kubeVirtRemoveNamedEntry(asAnySlice(podSpec["volumes"]), volumeName)
+	if attach {
+		volumes = append(volumes, map[string]any{
+			"name":                  volumeName,
+			"persistentVolumeClaim": map[string]any{"claimName": claimName},
+		})
+	}
+	podSpec["volumes"] = volumes
+	domain, ok := podSpec["domain"].(map[string]any)
+	if !ok {
+		domain = map[string]any{}
+		podSpec["domain"] = domain
+	}
+	devices, ok := domain["devices"].(map[string]any)
+	if !ok {
+		devices = map[string]any{}
+		domain["devices"] = devices
+	}
+	filesystems := kubeVirtRemoveNamedEntry(asAnySlice(devices["filesystems"]), volumeName)
+	if attach {
+		filesystems = append(filesystems, map[string]any{
+			"name":     volumeName,
+			"virtiofs": map[string]any{},
+		})
+	}
+	devices["filesystems"] = filesystems
+}
+
+func asAnySlice(value any) []any {
+	items, _ := value.([]any)
+	return items
+}
+
+func kubeVirtRemoveNamedEntry(items []any, name string) []any {
+	kept := make([]any, 0, len(items))
+	for _, item := range items {
+		entry, ok := item.(map[string]any)
+		if ok && entry["name"] == name {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	return kept
 }
 
 func kubeVirtVMResourceFromRecord(record ports.WorkloadInstanceRecord) (kubernetesResource, error) {
@@ -351,6 +549,118 @@ func (e *KubernetesLifecycleExecutor) applyKubeVirtRestoreCR(ctx context.Context
 	// VirtualMachineRestore signals completion via status.complete (it has no
 	// status.phase), so it needs a dedicated wait.
 	return e.waitKubeVirtRestoreComplete(ctx, restore, kubeVirtRestoreTimeout)
+}
+
+// applyKubeVirtRebuild recreates the VirtualMachine object from its current
+// spec: stop (idempotent) → capture spec → delete the VM CR → wait for it to
+// disappear → re-apply the same spec → start again when it was running.
+//
+// The containerDisk system disk is image-derived, so the recreated VMI boots a
+// fresh system disk ("重装系统"); data volume claims are untouched and
+// re-attach automatically. The flow runs detached from the request context so
+// a client disconnect cannot leave the VM deleted or powered off.
+func (e *KubernetesLifecycleExecutor) applyKubeVirtRebuild(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	vm, err := kubeVirtVMResourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	ctx = context.WithoutCancel(ctx)
+	body, status, err := e.client.Do(ctx, http.MethodGet, e.client.resourceURL(vm, ""), "", nil)
+	if status == http.StatusNotFound {
+		return fmt.Errorf("%w: VM %q not found for rebuild", ports.ErrNotFound, vm.Name)
+	}
+	if err != nil {
+		return err
+	}
+	var current map[string]any
+	if json.Unmarshal(body, &current) != nil {
+		current = nil
+	}
+	wasRunning := phaseFromKubernetesObject(vm, current) == "Running"
+	if wasRunning {
+		if err := e.stop(ctx, vm); err != nil {
+			return fmt.Errorf("stop VM %q before rebuild: %w", vm.Name, err)
+		}
+		if err := e.waitKubeVirtVMStopped(ctx, vm); err != nil {
+			return err
+		}
+	}
+	// Capture the spec after the stop: spec.running now reflects the stopped
+	// desired state, so re-applying it cannot race the controller into an
+	// unwanted boot; the explicit start below owns power-on.
+	body, err = e.client.do(ctx, http.MethodGet, e.client.resourceURL(vm, ""), "", nil)
+	if err != nil {
+		return fmt.Errorf("read VM %q spec for rebuild: %w", vm.Name, err)
+	}
+	var doc map[string]any
+	if json.Unmarshal(body, &doc) != nil {
+		return fmt.Errorf("%w: VM %q spec is not valid JSON", ports.ErrInvalid, vm.Name)
+	}
+	spec, ok := doc["spec"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("%w: VM %q has no spec to rebuild from", ports.ErrInvalid, vm.Name)
+	}
+	// The re-apply manifest must carry name/namespace explicitly: server-side
+	// apply on the resource URL derives the object name from the body, and the
+	// captured metadata keeps only carry-over fields.
+	metadata := map[string]any{"name": vm.Name, "namespace": vm.Namespace}
+	if src, ok := doc["metadata"].(map[string]any); ok {
+		for _, key := range []string{"labels", "annotations"} {
+			if value, ok := src[key].(map[string]any); ok && len(value) > 0 {
+				metadata[key] = value
+			}
+		}
+	}
+	if _, _, err := e.client.Do(ctx, http.MethodDelete, e.client.resourceURL(vm, ""), "", nil); err != nil {
+		return fmt.Errorf("delete VM %q for rebuild: %w", vm.Name, err)
+	}
+	if err := e.waitKubeVirtVMGone(ctx, vm); err != nil {
+		return err
+	}
+	manifest, err := json.Marshal(map[string]any{
+		"apiVersion": "kubevirt.io/v1",
+		"kind":       "VirtualMachine",
+		"metadata":   metadata,
+		"spec":       spec,
+	})
+	if err != nil {
+		return fmt.Errorf("%w: marshal rebuilt VirtualMachine manifest: %v", ports.ErrInvalid, err)
+	}
+	// Re-apply must create the object from scratch: the captured spec is used
+	// verbatim via a forced server-side apply on the deleted-then-recreated CR.
+	query := "fieldManager=" + url.QueryEscape(e.client.fieldManager) + "&force=true"
+	if _, err := e.client.do(ctx, http.MethodPatch, e.client.resourceURL(vm, query), kubernetesApplyPatchContentType, manifest); err != nil {
+		return fmt.Errorf("re-apply VM %q after rebuild: %w", vm.Name, err)
+	}
+	if wasRunning {
+		if err := e.start(ctx, vm); err != nil {
+			return fmt.Errorf("start VM %q after rebuild: %w", vm.Name, err)
+		}
+	}
+	return nil
+}
+
+// waitKubeVirtVMGone polls until the VirtualMachine object disappears so the
+// re-apply creates a fresh object instead of patching the old one.
+func (e *KubernetesLifecycleExecutor) waitKubeVirtVMGone(ctx context.Context, resource kubernetesResource) error {
+	deadline := e.now().Add(kubeVirtRestartStopTimeout)
+	for {
+		_, status, err := e.client.Do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
+		if status == http.StatusNotFound {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("poll VM %q deletion: %w", resource.Name, err)
+		}
+		if !e.now().Before(deadline) {
+			return fmt.Errorf("%w: kubevirt VM %q was not deleted within %s during rebuild", ports.ErrConflict, resource.Name, kubeVirtRestartStopTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(kubeVirtRestartPollInterval):
+		}
+	}
 }
 
 // waitKubeVirtRestoreComplete polls a VirtualMachineRestore until
@@ -546,15 +856,21 @@ const (
 )
 
 // waitKubeVirtVMStopped polls the VirtualMachine until the graceful shutdown
-// triggered by the stop subresource has fully landed (printableStatus leaves
-// Running), so the follow-up start is guaranteed to be accepted.
+// triggered by the stop subresource has fully landed (printableStatus reaches
+// the terminal "Stopped" state and the VMI is gone), so the follow-up spec
+// rewrite and start are guaranteed to be accepted.
 func (e *KubernetesLifecycleExecutor) waitKubeVirtVMStopped(ctx context.Context, resource kubernetesResource) error {
 	deadline := e.now().Add(kubeVirtRestartStopTimeout)
 	for {
 		body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
 		if err == nil {
 			var doc map[string]any
-			if json.Unmarshal(body, &doc) == nil && phaseFromKubernetesObject(resource, doc) != "Running" {
+			// Require the terminal "Stopped" status, not merely "not
+			// Running": during graceful shutdown printableStatus passes
+			// through Stopping/Terminating while the VMI is still being
+			// deleted, and a spec rewrite + start issued in that window is
+			// rejected (the VMI still exists), leaving the VM stopped.
+			if json.Unmarshal(body, &doc) == nil && phaseFromKubernetesObject(resource, doc) == "Stopped" {
 				return nil
 			}
 		}

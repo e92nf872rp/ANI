@@ -348,6 +348,16 @@ func lifecycleResponse() *http.Response {
 	}
 }
 
+// lifecycleVMStoppedResponse reports the terminal "Stopped" printableStatus:
+// the state waitKubeVirtVMStopped requires before the follow-up start.
+func lifecycleVMStoppedResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Stopped"}}`)),
+	}
+}
+
 func TestKubernetesLifecycleExecutorScalesDeploymentReplicas(t *testing.T) {
 	var gotPath, gotBody string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
@@ -632,7 +642,7 @@ func TestKubernetesLifecycleExecutorResizeVMWithoutSpecIDRestarts(t *testing.T) 
 	var requests []string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
-		return lifecycleResponse(), nil
+		return lifecycleVMStoppedResponse(), nil
 	})
 	record := lifecycleRecord()
 	record.Kind = ports.WorkloadKindVM
@@ -659,7 +669,7 @@ func TestKubernetesLifecycleExecutorRestartsKubeVirtVMViaStopWaitStart(t *testin
 	var requests []string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
-		return lifecycleResponse(), nil
+		return lifecycleVMStoppedResponse(), nil
 	})
 	record := lifecycleRecord()
 	record.Kind = ports.WorkloadKindVM
@@ -695,8 +705,10 @@ func TestKubernetesLifecycleExecutorRestartWaitsForVMToStopBeforeStart(t *testin
 					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
 				}, nil
 			}
+			// Shutdown landed: report the terminal Stopped status.
+			return lifecycleVMStoppedResponse(), nil
 		}
-		return lifecycleResponse(), nil
+		return lifecycleVMStoppedResponse(), nil
 	})
 	record := lifecycleRecord()
 	record.Kind = ports.WorkloadKindVM
@@ -952,6 +964,242 @@ func TestKubernetesLifecycleExecutorRollbackVMFailsOnFailedSnapshot(t *testing.T
 	}
 	if !sawRestore {
 		t.Fatalf("restore was never applied: requests = %#v", requests)
+	}
+}
+
+// Rebuild recreates the VirtualMachine CR: stop (when running) → capture spec
+// → delete → wait gone → re-apply → start. The containerDisk root is
+// image-derived, so the recreated VMI boots a fresh system disk.
+func TestKubernetesLifecycleExecutorRebuildRunningVMStopsDeletesReappliesStarts(t *testing.T) {
+	var requests []string
+	var vmGets int
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			vmGets++
+			switch vmGets {
+			case 1: // running check
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+				}, nil
+			case 2: // wait-stopped poll
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Stopped"}}`)),
+				}, nil
+			case 3: // spec capture
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body: io.NopCloser(strings.NewReader(`{"metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a",` +
+						`"labels":{"ani.dev/instance":"vm-01"},"annotations":{"ani.kubercloud.io/owner":"tenant-a"}},` +
+						`"spec":{"running":false,"template":{"spec":{"domain":{}}}}}`)),
+				}, nil
+			default: // gone poll
+				return nil, &resilience.StatusError{
+					StatusCode: http.StatusNotFound,
+					Body:       `{"reason":"NotFound","message":"virtualmachines not found"}`,
+				}
+			}
+		default:
+			return lifecycleResponse(), nil
+		}
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRebuild)
+	req.IdempotencyKey = "rebuild-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Rebuild Apply() error = %v", err)
+	}
+	want := []string{
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"DELETE /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PATCH /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want stop-capture-delete-reapply-start sequence %#v", requests, want)
+	}
+	// Server-side apply derives the object name from the body: a manifest
+	// without metadata.name fails with HTTP 400 on the real API (VM-10).
+	if !strings.Contains(patchBody, `"name":"vm-01"`) || !strings.Contains(patchBody, `"namespace":"ani-tenant-tenant-a"`) {
+		t.Fatalf("re-apply manifest missing name/namespace: body = %s", patchBody)
+	}
+}
+
+// Filesystem attach rewrites the VM spec with a virtiofs device plus its
+// backing PVC volume; a running VM is stopped first and started again.
+func TestKubernetesLifecycleExecutorAttachFilesystemRunningVMStopsAppliesStarts(t *testing.T) {
+	var requests []string
+	var vmGets int
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			vmGets++
+			switch vmGets {
+			case 1: // running check
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+				}, nil
+			case 2: // wait-stopped poll
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Stopped"}}`)),
+				}, nil
+			case 3: // spec capture
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body: io.NopCloser(strings.NewReader(`{"metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a"},` +
+						`"spec":{"running":false,"template":{"spec":{"domain":{"devices":{"disks":[{"name":"containerdisk","disk":{"bus":"virtio"}}]}},` +
+						`"volumes":[{"name":"containerdisk","containerDisk":{"image":"rocky:10"}}]}}}}`)),
+				}, nil
+			default:
+				return lifecycleResponse(), nil
+			}
+		default:
+			return lifecycleResponse(), nil
+		}
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleAttachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.MountPath = "/mnt/nfs"
+	req.IdempotencyKey = "fs-attach-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("AttachFilesystem Apply() error = %v", err)
+	}
+	want := []string{
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PATCH /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want stop-apply-start sequence %#v", requests, want)
+	}
+	if !strings.Contains(patchBody, `"virtiofs":{}`) {
+		t.Fatalf("re-apply manifest missing virtiofs device: body = %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"claimName":"fs-fs-dfe99bff-b68c-4528-88ce-ac8fe62ac734"`) {
+		t.Fatalf("re-apply manifest missing filesystem claim: body = %s", patchBody)
+	}
+	// QEMU rejects virtiofs tags longer than 36 bytes; the volume name doubles
+	// as the tag, so it must be the dash-free truncated form.
+	if !strings.Contains(patchBody, `"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73"`) {
+		t.Fatalf("re-apply manifest missing tag-safe filesystem name: body = %s", patchBody)
+	}
+	if strings.Contains(patchBody, `"name":"fs-dfe99bff-b68c-4528-88ce-ac8fe62ac734"`) {
+		t.Fatalf("re-apply manifest uses over-limit virtiofs tag name: body = %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"containerDisk":{"image":"rocky:10"}`) {
+		t.Fatalf("re-apply manifest dropped existing volumes: body = %s", patchBody)
+	}
+}
+
+func TestKubernetesLifecycleExecutorDetachFilesystemRemovesVirtiofsDevice(t *testing.T) {
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/virtualmachines/vm-01") {
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{"metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a"},` +
+				`"spec":{"running":false,"template":{"spec":{"domain":{"devices":{"filesystems":[{"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73","virtiofs":{}}]}},` +
+				`"volumes":[{"name":"containerdisk","containerDisk":{"image":"rocky:10"}},{"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73","persistentVolumeClaim":{"claimName":"fs-fs-dfe99bff-b68c-4528-88ce-ac8fe62ac734"}}]}}}}`)),
+		}, nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleDetachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.IdempotencyKey = "fs-detach-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("DetachFilesystem Apply() error = %v", err)
+	}
+	if strings.Contains(patchBody, "virtiofs") || strings.Contains(patchBody, "fs-fs-dfe99bff") {
+		t.Fatalf("re-apply manifest still contains filesystem entries: body = %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"containerDisk":{"image":"rocky:10"}`) {
+		t.Fatalf("re-apply manifest dropped existing volumes: body = %s", patchBody)
+	}
+}
+
+func TestKubeVirtFilesystemVolumeNameTagSafe(t *testing.T) {
+	got := kubeVirtFilesystemVolumeName("fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734")
+	if got != "fs-fsdfe99bffb68c452888ceac8fe62ac73" {
+		t.Fatalf("kubeVirtFilesystemVolumeName() = %q", got)
+	}
+	if len(got) > 36 {
+		t.Fatalf("volume name %q exceeds QEMU 36-byte virtiofs tag limit", got)
+	}
+	if again := kubeVirtFilesystemVolumeName("fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"); again != got {
+		t.Fatalf("volume name derivation is not deterministic: %q vs %q", got, again)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRebuildRejectsMissingVM(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		return nil, &resilience.StatusError{
+			StatusCode: http.StatusNotFound,
+			Body:       `{"reason":"NotFound","message":"virtualmachines not found"}`,
+		}
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRebuild)
+	req.IdempotencyKey = "rebuild-key-02"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 }
 
