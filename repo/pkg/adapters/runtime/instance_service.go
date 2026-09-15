@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 )
 
 type instanceStorageBinder interface {
+	CreateVolume(ctx context.Context, request ports.StorageVolumeCreateRequest) (ports.StorageVolumeRecord, error)
 	MountVolume(ctx context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error)
 	MountFilesystem(ctx context.Context, request ports.StorageFilesystemMountRequest) (ports.StorageFilesystemRecord, error)
 }
@@ -180,6 +182,11 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		resolvedResourceRefs = append([]string(nil), resolved.ResourceRefs...)
 	}
 	if err := validateCreateIntent(request.Spec); err != nil {
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
+	// Provision after validateCreateIntent: a provisioned disk carries both
+	// volume_id and name/size, which only the post-validation state allows.
+	if err := s.provisionVMDataDisks(ctx, &request); err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
 	requestFingerprint, err := createIntentFingerprint(request.Spec)
@@ -1614,6 +1621,40 @@ func hasStorageResource(items []ports.WorkloadStorageAttachment, resourceType, r
 		}
 	}
 	return false
+}
+
+// provisionVMDataDisks creates Storage volumes for VM data disks declared in
+// "new disk" mode (name+size, no volume_id) so the rendered VM references a
+// real provider PVC instead of a nonexistent claim (ErrorPvcNotFound). Existing
+// volume refs and size-less specs pass through unchanged.
+func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request *ports.WorkloadInstanceCreateRequest) error {
+	if s.storage == nil || request.Spec.VM == nil {
+		return nil
+	}
+	for i := range request.Spec.VM.DataDiskSpecs {
+		disk := &request.Spec.VM.DataDiskSpecs[i]
+		if strings.TrimSpace(disk.VolumeID) != "" || disk.SizeGiB <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(disk.Name)
+		if name == "" {
+			name = request.Spec.Name + "-data-" + strconv.Itoa(i+1)
+		}
+		record, err := s.storage.CreateVolume(ctx, ports.StorageVolumeCreateRequest{
+			TenantID:       request.Spec.TenantID,
+			IdempotencyKey: request.IdempotencyKey + ":vm-data-disk:" + name,
+			Name:           name,
+			SizeGiB:        disk.SizeGiB,
+			StorageClass:   disk.StorageClass,
+			VolumeType:     disk.VolumeType,
+			Encrypted:      disk.Encrypted,
+		})
+		if err != nil {
+			return fmt.Errorf("provision vm data disk %q: %w", name, err)
+		}
+		disk.VolumeID = record.VolumeID
+	}
+	return nil
 }
 
 func (s *LocalInstanceService) bindCreateStorage(ctx context.Context, request ports.WorkloadInstanceCreateRequest, result ports.WorkloadInstanceCreateResult) error {

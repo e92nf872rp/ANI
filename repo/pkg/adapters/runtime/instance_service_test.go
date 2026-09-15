@@ -37,6 +37,57 @@ func TestLocalInstanceServiceCreatesContainerThroughOrchestrator(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceCreateProvisionsVMDataDisks(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	storage := &fakeInstanceStorageBinder{}
+	service := NewLocalInstanceServiceWithOptions(
+		orchestrator,
+		&fakeInstanceStore{},
+		NewLocalInstanceOpsGuard(),
+		WithInstanceStorageService(storage),
+	)
+	_, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey: "vm-create-datadisk-01",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "vm-data",
+			Kind:     ports.WorkloadKindVM,
+			Image:    "harbor/app:1",
+			VM: &ports.VMInstanceSpec{
+				BootImage: "ubuntu.qcow2",
+				DataDiskSpecs: []ports.InstanceDiskSpec{
+					{Name: "data-1", SizeGiB: 100},
+					{VolumeID: "vol-existing"},
+				},
+			},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(storage.createdVolumes) != 1 {
+		t.Fatalf("createdVolumes = %d, want 1", len(storage.createdVolumes))
+	}
+	created := storage.createdVolumes[0]
+	if created.Name != "data-1" || created.SizeGiB != 100 || created.TenantID != "tenant-a" {
+		t.Fatalf("created volume = %#v, want data-1/100GiB/tenant-a", created)
+	}
+	if created.IdempotencyKey != "vm-create-datadisk-01:vm-data-disk:data-1" {
+		t.Fatalf("idempotency key = %q, want derived from instance create key", created.IdempotencyKey)
+	}
+	if len(orchestrator.last.Spec.VM.DataDiskSpecs) != 2 {
+		t.Fatalf("data disk specs = %#v, want 2", orchestrator.last.Spec.VM.DataDiskSpecs)
+	}
+	if got := orchestrator.last.Spec.VM.DataDiskSpecs[0].VolumeID; got != "vol-provisioned-1" {
+		t.Fatalf("provisioned data disk volume id = %q, want vol-provisioned-1", got)
+	}
+	if got := orchestrator.last.Spec.VM.DataDiskSpecs[1].VolumeID; got != "vol-existing" {
+		t.Fatalf("existing data disk volume id = %q, want vol-existing", got)
+	}
+}
+
 func TestLocalInstanceServiceCreateOrchestratesNetworkAndStorage(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	operations := NewLocalOperationStore()
@@ -2321,6 +2372,15 @@ type fakeInstanceStorageBinder struct {
 	lastFilesystemID string
 	lastInstanceID   string
 	err              error
+	createdVolumes   []ports.StorageVolumeCreateRequest
+}
+
+func (f *fakeInstanceStorageBinder) CreateVolume(_ context.Context, request ports.StorageVolumeCreateRequest) (ports.StorageVolumeRecord, error) {
+	if f.err != nil {
+		return ports.StorageVolumeRecord{}, f.err
+	}
+	f.createdVolumes = append(f.createdVolumes, request)
+	return ports.StorageVolumeRecord{TenantID: request.TenantID, VolumeID: "vol-provisioned-1", Name: request.Name, SizeGiB: request.SizeGiB}, nil
 }
 
 func (f *fakeInstanceStorageBinder) MountVolume(_ context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error) {
