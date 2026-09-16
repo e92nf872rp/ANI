@@ -5,6 +5,7 @@ package kb.v1;
 import "common/v1/common.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
 option go_package = "github.com/kubercloud/ani/pkg/generated/pb/kb/v1;kbv1";
 
@@ -56,6 +57,16 @@ service KBService {
   // GetKBPermissions returns the access permissions of a KB (P1).
   // No kb_permissions row → returns defaults (public_read=false, empty list).
   rpc GetKBPermissions(GetKBPermissionsRequest) returns (KBPermissions);
+  // GetKBConfig returns the ingest/query configuration of a KB (P1 #22).
+  rpc GetKBConfig(GetKBConfigRequest) returns (KBConfig);
+
+  // UpdateKBConfig updates the ingest/query config of a KB (P1 #23).
+  // embedding_model / chunk_size changes invalidate existing vectors and
+  // trigger a full rebuild in the same transaction (active→rebuilding +
+  // rebuild task + outbox event); the other four fields are query-time or
+  // next-parse settings and never trigger a rebuild. Sync 200 semantics;
+  // the implied rebuild task is attached as rebuild_task in the response.
+  rpc UpdateKBConfig(UpdateKBConfigRequest) returns (UpdateKBConfigResponse);
 
   // ListDocumentChunks returns the chunk details of a document (P1).
   rpc ListDocumentChunks(ListDocumentChunksRequest) returns (ListDocumentChunksResponse);
@@ -69,6 +80,13 @@ service KBService {
   // a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
   // the NotifyDocumentUploaded event pipeline).
   rpc ReparseDocument(ReparseDocumentRequest) returns (common.v1.AsyncTaskRef);
+
+  // RebuildKB re-parses every ready/failed document in a KB (P1 #24).
+  // Returns 202-style async task semantics: sets KB status='rebuilding'
+  // (write ops on the KB fail with FAILED_PRECONDITION while rebuilding;
+  // queries stay served from the existing index) and enqueues a rebuild
+  // task via Outbox pattern onto NATS ani.tasks.kb.rebuild.v1.
+  rpc RebuildKB(RebuildKBRequest) returns (common.v1.AsyncTaskRef);
 
   // ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
   // Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
@@ -332,6 +350,39 @@ message GetKBPermissionsRequest {
   string kb_id     = 2;
 }
 
+message GetKBConfigRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+}
+
+message UpdateKBConfigRequest {
+  string tenant_id        = 1;
+  string kb_id            = 2;
+  string idempotency_key  = 3;    // client-generated uuid; replay-safe, required
+  optional string embedding_model = 4;  // unset = keep current
+  optional int32  chunk_size      = 5;  // unset = keep current
+  google.protobuf.BoolValue ocr_enabled = 6;  // tri-state: unset=keep / true / false
+  optional int32  top_k           = 7;
+  optional float  score_threshold = 8;
+  optional string retrieval_mode  = 9;   // vector | hybrid | keyword
+}
+
+message UpdateKBConfigResponse {
+  KBConfig config = 1;
+  common.v1.AsyncTaskRef rebuild_task = 2;  // set when the update triggered a full rebuild
+}
+
+message KBConfig {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string embedding_model = 3;
+  int32  chunk_size      = 4;
+  bool   ocr_enabled     = 5;
+  int32  top_k           = 6;
+  float  score_threshold = 7;
+  string retrieval_mode  = 8;   // vector | hybrid | keyword
+}
+
 message KBPermissions {
   string kb_id                     = 1;
   bool   public_read               = 2;
@@ -426,4 +477,10 @@ message ReparseDocumentRequest {
   string kb_id           = 2;
   string doc_id          = 3;
   string idempotency_key = 4;   // client-generated uuid; replay-safe, required
+}
+
+message RebuildKBRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string idempotency_key = 3;   // client-generated uuid; replay-safe, required
 }

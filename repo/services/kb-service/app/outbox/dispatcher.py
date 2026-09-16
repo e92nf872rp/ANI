@@ -67,6 +67,7 @@ class OutboxDispatcher:
         batch_size: int = DEFAULT_BATCH_SIZE,
         poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
         publish_timeout: float = DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+        subject_overrides: dict[str, str] | None = None,
     ) -> None:
         self._pool = pool
         self._nats = nats_client
@@ -74,6 +75,12 @@ class OutboxDispatcher:
         self._batch_size = batch_size
         self._poll_interval = poll_interval
         self._publish_timeout = publish_timeout
+        # P1 #24: per-event_type subject routing. Keys are outbox
+        # event_type values (e.g. 'kb.rebuild'); a match publishes to the
+        # override subject instead of the default — the default subject
+        # stays the parse path, so existing behavior is unchanged for
+        # events without an override.
+        self._subject_overrides = subject_overrides or {}
         self._task: asyncio.Task | None = None
         self._stopped = False
         # Backoff state for persistent-error log dedup.
@@ -167,12 +174,18 @@ class OutboxDispatcher:
             if "tenant_id" not in payload_dict and row.get("tenant_id"):
                 payload_dict["tenant_id"] = str(row["tenant_id"])
             payload_str = json.dumps(payload_dict, default=str)
+            # P1 #24: route by event_type. 'kb.rebuild' goes to the
+            # dedicated rebuild subject; everything else keeps the
+            # default parse subject (unchanged legacy behavior).
+            subject = self._subject_overrides.get(
+                str(row.get("event_type") or ""), self._subject
+            )
             # Bounded publish: a dead NATS TCP connection must not hang the
             # loop forever. On timeout the event stays un-dispatched and is
             # retried on the next poll (at-least-once semantics preserved).
             await asyncio.wait_for(
                 self._nats.publish(
-                    self._subject, payload_str.encode("utf-8")
+                    subject, payload_str.encode("utf-8")
                 ),
                 timeout=self._publish_timeout,
             )

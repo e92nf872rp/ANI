@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     # to ``nats_parse_subject_v2`` (kb-service consumer path).
     kb_parse_consumer_enabled: bool = False
 
+    # P1 #24 full-KB rebuild: dedicated subject for kb.rebuild outbox
+    # events (OutboxDispatcher routes event_type 'kb.rebuild' here via
+    # subject_overrides), consumed by app/consumers/rebuild_consumer.py.
+    # Distinct from the parse subjects: rebuild is a long serial job and
+    # must not interleave with per-document parse traffic.
+    nats_rebuild_subject: str = "ani.tasks.kb.rebuild.v1"
+
+    # P1 #24: kb-service rebuild consumer flag (default OFF, mirrors
+    # kb_parse_consumer_enabled rollout). When False the consumer does
+    # not start; rebuild outbox events stay queued until the flag is
+    # enabled (at-least-once via the outbox, no loss).
+    kb_rebuild_consumer_enabled: bool = False
+
     # Redis (session cache) — maps to env REDIS_URL
     redis_url: str = "redis://localhost:6379/0"
 

@@ -5,6 +5,18 @@ pipeline. Consumes messages from ``ani.tasks.kb.parse.v2`` (a distinct
 subject from the legacy ``ani.tasks.kb.parse``, Plan §0.3) and dispatches
 each to ``ParseOrchestrator.process_document``.
 
+Transport is a JetStream durable push consumer (ManualAck) on the
+ANI_TASKS WorkQueue stream — at-least-once delivery, per the deploy
+contract (component-contracts/nats.yaml) and the Go message_bus
+Subscribe path. Ack semantics (see app/consumers/jetstream.py):
+success → Ack, invalid JSON → Ack (poison pill swallowed; the durable
+outbox row keeps the audit trail), unhandled crash → neither Ack nor
+Nak (silent for ack_wait redelivery — a redelivery simply re-runs the
+pipeline from the top, which self-heals: the orchestrator's re-entrant
+chunk cleanup and the ready-skip make the second pass idempotent).
+While a parse runs, an InProgress heartbeat (ack_wait/3) renews the
+delivery lease so a long parse is never redelivered mid-run.
+
 Default OFF — started only when ``settings.kb_parse_consumer_enabled`` is
 True (main.py gates startup on this flag). The Outbox Dispatcher publishes
 to the v2 subject only when the flag is on, so the consumer and the
@@ -45,6 +57,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import asyncpg
 
+from app.consumers import jetstream
 from app.repositories import async_task as async_task_repo
 from app.repositories import document as doc_repo
 from app.repositories import knowledge_base as kb_repo
@@ -55,6 +68,17 @@ logger = logging.getLogger(__name__)
 # the process under burst load (mirrors rag-engine parse_worker
 # DEFAULT_MAX_CONCURRENCY).
 DEFAULT_MAX_CONCURRENCY = 4
+
+# JetStream durable identity (Go model-import-worker style constants:
+# AckWait 30m — a single document parse can take that long for large
+# files, and it matches the rebuild consumer / Go worker precedent so
+# the fleet has one convention; MaxDeliver 3 — enough redeliveries for
+# one crash-restart cycle, without an endless retry loop; MaxAckPending
+# == DEFAULT_MAX_CONCURRENCY — the durable's delivery backpressure
+# matches the handler semaphore).
+PARSE_DURABLE = "kb-parse-consumer"
+PARSE_ACK_WAIT = 30 * 60          # seconds
+PARSE_MAX_DELIVER = 3
 
 
 @runtime_checkable
@@ -119,10 +143,21 @@ class ParseConsumer:
         """Subscribe to the v2 subject and begin consuming."""
         self._stopped = False
         self._semaphore = asyncio.Semaphore(self._max_concurrency)
-        self._subscription = await self._nats.subscribe(
-            self._subject, cb=self._on_msg
+        js = self._nats.jetstream()
+        await jetstream.ensure_ani_tasks_stream(js)
+        self._subscription = await jetstream.subscribe_durable(
+            js,
+            subject=self._subject,
+            durable=PARSE_DURABLE,
+            cb=self._on_msg,
+            ack_wait=PARSE_ACK_WAIT,
+            max_deliver=PARSE_MAX_DELIVER,
+            max_ack_pending=self._max_concurrency,
         )
-        logger.info("parse_consumer: subscribed to %s", self._subject)
+        logger.info(
+            "parse_consumer: subscribed to %s (durable=%s)",
+            self._subject, PARSE_DURABLE,
+        )
 
     async def stop(self, timeout: float = 5.0) -> None:
         """Unsubscribe and drain in-flight tasks.
@@ -152,8 +187,13 @@ class ParseConsumer:
                     "parse_consumer: drain timed out, cancelling %d "
                     "lingering tasks", len(self._pending),
                 )
+                # cancel-then-await: cancelling only requests interruption;
+                # each task is awaited so cleanup (ack/nak) actually runs
+                # before stop() returns. A bare cancel without await
+                # leaves the tasks orphaned on a closing event loop.
                 for task in self._pending:
                     task.cancel()
+                await asyncio.gather(*self._pending, return_exceptions=True)
             self._pending.clear()
 
     async def _on_msg(self, msg: Any) -> None:
@@ -173,14 +213,63 @@ class ParseConsumer:
         task.add_done_callback(self._pending.discard)
 
     async def _handle(self, msg: Any) -> None:
-        """Process one NATS message with bounded concurrency."""
+        """Process one NATS message with bounded concurrency.
+
+        JetStream ack policy (ManualAck; see jetstream.py):
+          - invalid payload → Ack: it can never succeed on redelivery
+            (poison pill); the durable outbox row keeps the audit trail;
+          - any normal return of ``process_message`` (including the
+            orchestrator's own swallowed failures — it writes
+            parse_status='failed' and the consumer closes the task row
+            accordingly) → Ack: the doc/task rows are the source of
+            truth and a redelivery would just re-check and skip;
+          - unhandled crash → neither Ack nor Nak. The message goes
+            silent and JetStream redelivers after ack_wait (30 min); the
+            redelivery re-runs the pipeline from the top, which
+            self-heals: the orchestrator's pending→parsing UPDATE matches
+            the row (no status gate), its re-entrant chunk cleanup
+            removes the old chunks, and the ready-skip covers any doc
+            the first pass had already finished. A Nak instead would
+            hammer the backend with immediate retries of a parse that
+            may be failing for a load-related reason.
+        """
         async with self._semaphore:  # type: ignore[union-attr]
             try:
                 payload = json.loads(msg.data.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError(
+                        f"payload is {type(payload).__name__}, expected object"
+                    )
             except Exception as exc:  # noqa: BLE001
                 logger.error("parse_consumer: invalid message payload: %s", exc)
+                await jetstream.ack(msg)
                 return
-            await self.process_message(payload)
+            # Renew the JetStream delivery lease while the handler runs
+            # (in_progress every ack_wait/3, mirroring the Go heartbeat
+            # goroutine) so a long parse is never redelivered mid-run.
+            heartbeat = asyncio.create_task(
+                jetstream.heartbeat_loop(msg, PARSE_ACK_WAIT / 3)
+            )
+            try:
+                await self.process_message(payload)
+                await jetstream.ack(msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "parse_consumer: unhandled crash; leaving message "
+                    "unacked for ack_wait redelivery (pipeline re-runs "
+                    "from the top and self-heals)"
+                )
+            finally:
+                # Stop renewing the delivery lease before the outcome is
+                # final; on crash paths this is what lets JetStream
+                # schedule the redelivery at all.
+                heartbeat.cancel()
+                try:
+                    await heartbeat
+                except asyncio.CancelledError:
+                    pass
 
     async def process_message(self, payload: dict[str, Any]) -> None:
         """Run the parse pipeline for one task payload.

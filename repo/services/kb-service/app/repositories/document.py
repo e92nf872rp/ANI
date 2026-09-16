@@ -328,6 +328,35 @@ async def reset_for_reparse_in_tx(
     return result == "UPDATE 1"
 
 
+async def list_documents_for_rebuild(
+    conn: asyncpg.Connection, *, tenant_id: str, kb_id: str
+) -> list[str]:
+    """Return doc ids eligible for a full-KB rebuild (P1 #24).
+
+    Scope: parse_status IN ('ready', 'failed') excluding soft-deleted rows
+    (the failed+error_message='deleted' marker). 'pending'/'parsing'/'indexing'
+    rows are already mid-pipeline and re-entering them would race the parse
+    consumer; the rebuild consumer treats them as out of scope.
+
+    Order: created_at ASC — deterministic, oldest first, matching the
+    original ingestion order for reproducible rebuilds.
+    """
+    async with conn.transaction():
+        await set_tenant_context(conn, tenant_id)
+        rows = await conn.fetch(
+            """
+            SELECT id
+              FROM kb_documents
+             WHERE kb_id = $1
+               AND parse_status IN ('ready', 'failed')
+               AND NOT (parse_status = 'failed' AND error_message = 'deleted')
+             ORDER BY created_at ASC, id ASC
+            """,
+            uuid.UUID(kb_id),
+        )
+    return [str(r["id"]) for r in rows]
+
+
 async def soft_delete_document(
     conn: asyncpg.Connection, *, tenant_id: str, kb_id: str, doc_id: str
 ) -> bool:

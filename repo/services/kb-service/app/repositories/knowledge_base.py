@@ -110,7 +110,7 @@ async def get_kb(
         row = await conn.fetchrow(
             """
             SELECT id, tenant_id, name, description, embedding_model,
-                   chunk_size, top_k, score_threshold, retrieval_mode,
+                   chunk_size, ocr_enabled, top_k, score_threshold, retrieval_mode,
                    default_inference_service, status,
                    (SELECT count(*) FROM kb_documents d
                      WHERE d.kb_id = knowledge_bases.id
@@ -257,3 +257,103 @@ async def get_kb_status(
             "SELECT status FROM knowledge_bases WHERE id = $1",
             uuid.UUID(kb_id),
         )
+
+
+async def set_status_in_tx(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: str,
+    kb_id: str,
+    from_status: str,
+    to_status: str,
+) -> bool:
+    """Atomically transition a KB status inside the caller's transaction.
+
+    Conditional UPDATE ``WHERE status = $from``: when two rebuilds race,
+    the first wins (active → rebuilding) and the loser's UPDATE matches
+    0 rows — the servicer maps that to FAILED_PRECONDITION instead of a
+    double rebuild. Also gates the rebuild consumer's exit transition
+    (rebuilding → active) against a concurrent DeleteKB.
+
+    Does NOT open its own transaction; commits atomically with the
+    caller's other writes (RebuildKB: async_tasks + outbox + audit).
+    """
+    await set_tenant_context(conn, tenant_id)
+    res = await conn.execute(
+        """
+        UPDATE knowledge_bases
+           SET status = $2, updated_at = now()
+         WHERE id = $1 AND status = $3
+        """,
+        uuid.UUID(kb_id),
+        to_status,
+        from_status,
+    )
+    return res == "UPDATE 1"
+
+
+# Columns that UpdateKBConfig (P1 #23) may write. The dynamic SET below is
+# column-name based, so this whitelist is the SQL-injection guard.
+_CONFIG_COLUMNS = frozenset(
+    {
+        "embedding_model",
+        "chunk_size",
+        "ocr_enabled",
+        "top_k",
+        "score_threshold",
+        "retrieval_mode",
+    }
+)
+
+
+async def update_config_in_tx(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: str,
+    kb_id: str,
+    patch: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Explicit-partial UPDATE of the six config columns (B7 #23).
+
+    ``patch`` maps column names to new values. Unlike `update_kb`
+    (COALESCE+NULLIF "empty keeps current"), absence from the patch IS
+    the "keep current" signal — the caller derives it from tri-state
+    proto fields. Only whitelisted config columns are accepted; anything
+    else raises ValueError. embedding_model / chunk_size invalidate
+    existing vectors; the servicer pairs those with a same-transaction
+    rebuild (status flip + task + outbox) — this repo owns only the data
+    write.
+
+    Does NOT open its own transaction (mirrors `set_status_in_tx`) so the
+    config write commits atomically with the caller's rebuild writes.
+    Returns the updated row, or None when the kb_id is not visible to
+    this tenant or soft-deleted — the caller maps that to NOT_FOUND.
+    """
+    if not patch:
+        raise ValueError("patch must not be empty")
+    unknown = set(patch) - _CONFIG_COLUMNS
+    if unknown:
+        raise ValueError(f"non-config columns in patch: {sorted(unknown)}")
+    # dict preserves insertion order, so keys() and values() stay aligned.
+    assignments = ", ".join(
+        f"{col} = ${i}" for i, col in enumerate(patch.keys(), start=2)
+    )
+    await set_tenant_context(conn, tenant_id)
+    row = await conn.fetchrow(
+        f"""
+        UPDATE knowledge_bases
+           SET {assignments}, updated_at = now()
+         WHERE id = $1 AND status <> 'deleted'
+        RETURNING id, tenant_id, name, description, embedding_model,
+                  chunk_size, ocr_enabled, top_k, score_threshold, retrieval_mode,
+                  default_inference_service, status,
+                  (SELECT count(*) FROM kb_documents d
+                    WHERE d.kb_id = knowledge_bases.id
+                      AND NOT (d.parse_status = 'failed'
+                               AND d.error_message = 'deleted')) AS doc_count,
+                  created_at, updated_at, vector_store_id
+        """,
+        uuid.UUID(kb_id),
+        *patch.values(),
+    )
+    return dict(row) if row else None

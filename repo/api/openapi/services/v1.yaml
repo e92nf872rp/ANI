@@ -995,19 +995,32 @@ components:
         items:       { type: array, items: { $ref: '#/components/schemas/KBAuditLog' } }
         next_cursor: { type: string, nullable: true }
 
+    AsyncTaskRef:
+      type: object
+      description: |
+        异步任务引用（202 语义响应 / PUT config 响应中的 rebuild_task）。
+        对齐 proto common.v1.AsyncTaskRef 与 Gateway asyncTaskRefJSON。
+      properties:
+        task_id:      { type: string, format: uuid }
+        task_type:    { type: string, description: "如 kb.rebuild / kb.parse" }
+        status:       { type: string, enum: [pending, running, completed, failed, cancelled], description: "任务状态" }
+
     KBConfig:
       type: object
+      required: [embedding_model, chunk_size, ocr_enabled, top_k, score_threshold, retrieval_mode]
       description: |
         知识库配置（入库 + 问答）。对齐 UX §4.3 概览配置：入库配置区
         （embedding_model / chunk_size / ocr_enabled）与问答配置区
-        （top_k / score_threshold / retrieval_strategy）。
+        （top_k / score_threshold / retrieval_mode）。
+        B5 契约修正：原 retrieval_strategy 改名 retrieval_mode（对齐 KnowledgeBase
+        schema / kb_service.proto / DB 列名），枚举补 keyword，默认值改 hybrid。
       properties:
         embedding_model:    { type: string, description: "嵌入模型名，修改触发全库重建（UX §4.3）" }
         chunk_size:         { type: integer, minimum: 1, maximum: 8192, description: "分块大小（tokens）" }
         ocr_enabled:        { type: boolean, default: false, description: "是否启用 OCR（入库配置）" }
         top_k:              { type: integer, minimum: 1, maximum: 20, description: "问答 TopK" }
         score_threshold:    { type: number, format: float, minimum: 0.0, maximum: 1.0, description: "相似度阈值" }
-        retrieval_strategy: { type: string, enum: [vector, hybrid], default: vector, description: "检索策略：向量 / 混合" }
+        retrieval_mode:     { type: string, enum: [vector, hybrid, keyword], default: hybrid, description: "检索策略：向量 / 混合 / 关键词" }
 
     UpdateKBConfigRequest:
       type: object
@@ -1022,7 +1035,7 @@ components:
         ocr_enabled:        { type: boolean }
         top_k:              { type: integer, minimum: 1, maximum: 20 }
         score_threshold:    { type: number, format: float, minimum: 0.0, maximum: 1.0 }
-        retrieval_strategy: { type: string, enum: [vector, hybrid] }
+        retrieval_mode:     { type: string, enum: [vector, hybrid, keyword], description: "检索策略；空表示不修改" }
 
     ModelList:
       type: object
@@ -2924,6 +2937,13 @@ paths:
       description: |
         返回 KB 入库配置与问答配置。对齐 UX §4.3 概览配置区与 SPEC §5 US-002。
       tags: [KnowledgeBases]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: knowledge_base
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -2940,8 +2960,10 @@ paths:
       summary: 更新知识库配置
       description: |
         更新 KB 配置。修改 embedding_model 或 chunk_size 将触发全库重建
-        （UX §4.3 保存配置 → Popconfirm「修改配置将触发全库重建」）。
-        返回更新后的 KnowledgeBase（含新 status）。对齐 SPEC §5 US-002。
+        （UX §4.3 保存配置 → Popconfirm「修改配置将触发全库重建」），
+        返回更新后的配置 + rebuild_task（触发重建时非空）。
+        对齐 SPEC §5 US-002。B7 契约裁定：响应由 KnowledgeBase 改为
+        KBConfig + rebuild_task（kb-p1-plan §5.2/§5.5）。
       tags: [KnowledgeBases]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2952,10 +2974,16 @@ paths:
             schema: { $ref: '#/components/schemas/UpdateKBConfigRequest' }
       responses:
         "200":
-          description: 更新后的知识库
+          description: 更新后的配置（rebuild_task 在触发重建时非空，否则为 null）
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/KnowledgeBase' }
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/KBConfig'
+                  - type: object
+                    properties:
+                      rebuild_task:
+                        { $ref: '#/components/schemas/AsyncTaskRef', nullable: true }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }

@@ -153,7 +153,16 @@ func (f *fakeKBRetrieveClient) UpdateKBPermissions(context.Context, string, stri
 func (f *fakeKBRetrieveClient) GetKBPermissions(context.Context, string, string) (*kbv1.KBPermissions, error) {
 	return nil, nil
 }
+func (f *fakeKBRetrieveClient) GetKBConfig(context.Context, string, string) (*kbv1.KBConfig, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) UpdateKBConfig(context.Context, string, string, string, *kbv1.UpdateKBConfigRequest) (*kbv1.UpdateKBConfigResponse, error) {
+	return nil, nil
+}
 func (f *fakeKBRetrieveClient) ReparseDocument(context.Context, string, string, string, string) (*commonv1.AsyncTaskRef, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) RebuildKB(context.Context, string, string, string) (*commonv1.AsyncTaskRef, error) {
 	return nil, nil
 }
 func (f *fakeKBRetrieveClient) ListKBAuditLogs(context.Context, string, string, int32, string) (*kbv1.ListKBAuditLogsResponse, error) {

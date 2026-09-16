@@ -11,8 +11,10 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/google/uuid"
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	kbv1 "github.com/kubercloud/ani/pkg/generated/pb/kb/v1"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // kbInjectedClient / kbInjectedSSEConfig are the KB gRPC client and SSE wiring
@@ -25,7 +27,7 @@ var (
 	kbInjectedSSEConfig KbSSEConfig
 )
 
-// registerKnowledgeBases wires the 19 KB endpoints (SPEC §4.1/§4.3 端点表):
+// registerKnowledgeBases wires the 20 KB endpoints (SPEC §4.1/§4.3 端点表):
 //   - 11 P0 gRPC passthrough endpoints routed to kb-service
 //   - 1 SSE streaming query endpoint held by the gateway
 //   - 3 P1 endpoints (citations/sessions/permissions) routed to kb-service;
@@ -38,7 +40,7 @@ func registerKnowledgeBases(svc *route.RouterGroup) {
 	registerKnowledgeBasesWithClient(svc, kbInjectedClient, kbInjectedSSEConfig)
 }
 
-// registerKnowledgeBasesWithClient wires the 19 KB endpoints using an explicit
+// registerKnowledgeBasesWithClient wires the 20 KB endpoints using an explicit
 // gRPC client and SSE config, so tests can inject fakes directly.
 //
 // When client is nil the gRPC handlers return 503 UNAVAILABLE so the gateway
@@ -79,6 +81,16 @@ func registerKnowledgeBasesWithClient(svc *route.RouterGroup, client KBGRPCClien
 	// B8 endpoint (SPEC §4.1 #21, kb-p1-plan §6.4): KB management-plane
 	// audit trail; cursor-paginated, ordered created_at DESC, id DESC.
 	svc.GET("/knowledge-bases/:kb_id/audit-logs", api.listKnowledgeBaseAuditLogs)
+	// B5 endpoint (SPEC §4.3 #22, kb-p1-plan §3.5): read the KB ingest/query
+	// configuration; route baseline cleanup (issue-049 #22).
+	svc.GET("/knowledge-bases/:kb_id/config", api.getKnowledgeBaseConfig)
+	// B7 endpoint (SPEC §4.3 #23, kb-p1-plan §5): explicit-partial config
+	// update; 200 KBConfig + nullable rebuild_task (paired same-tx rebuild
+	// when embedding_model/chunk_size changed; route baseline cleanup #23).
+	svc.PUT("/knowledge-bases/:kb_id/config", api.updateKnowledgeBaseConfig)
+	// B6 endpoint (SPEC §4.3 #24, kb-p1-plan §2.7): full-KB rebuild; 202
+	// AsyncTask (rebuild consumer replays every eligible document).
+	svc.POST("/knowledge-bases/:kb_id/rebuild", api.rebuildKnowledgeBase)
 }
 
 // kbAPI holds the injected gRPC client. Handlers read the tenant id from the
@@ -155,6 +167,28 @@ type updateKBPermissionsRequest struct {
 	IdempotencyKey string   `json:"idempotency_key"`
 	PublicRead     bool     `json:"public_read"`
 	AllowedUserIDs []string `json:"allowed_user_ids"`
+}
+
+// rebuildKnowledgeBaseRequest mirrors RebuildKBRequest in
+// services/v1.yaml (SPEC §4.3 #24): idempotency_key is a required client
+// generated uuid for replay safety, identical to the reparse contract.
+type rebuildKnowledgeBaseRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// updateKnowledgeBaseConfigRequest mirrors UpdateKBConfigRequest in
+// services/v1.yaml (SPEC §4.3 #23, kb-p1-plan §5.2): six tri-state config
+// fields — a field absent from the JSON stays nil (keep current), a carried
+// field is an explicit change candidate. json.Unmarshal's pointer handling
+// distinguishes "not present" (nil) from explicit zero values.
+type updateKnowledgeBaseConfigRequest struct {
+	IdempotencyKey  string   `json:"idempotency_key"`
+	EmbeddingModel  *string  `json:"embedding_model"`
+	ChunkSize       *int32   `json:"chunk_size"`
+	OcrEnabled      *bool    `json:"ocr_enabled"`
+	TopK            *int32   `json:"top_k"`
+	ScoreThreshold  *float32 `json:"score_threshold"`
+	RetrievalMode   *string  `json:"retrieval_mode"`
 }
 
 // ── 11 P0 handlers (gRPC passthrough) ───────────────────────────────────────
@@ -564,6 +598,82 @@ func (a *kbAPI) getKnowledgeBasePermissions(ctx context.Context, c *app.RequestC
 	c.JSON(http.StatusOK, kbPermissionsToJSON(perm))
 }
 
+// getKnowledgeBaseConfig handles GET /knowledge-bases/{kb_id}/config
+// (SPEC §4.3 #22, kb-p1-plan §3.5): reads the KB ingest/query configuration.
+// A missing or soft-deleted KB yields 404 (NOT_FOUND via writeKBError).
+func (a *kbAPI) getKnowledgeBaseConfig(ctx context.Context, c *app.RequestContext) {
+	if a.client == nil {
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		return
+	}
+	cfg, err := a.client.GetKBConfig(ctx, instanceTenantID(c), c.Param("kb_id"))
+	if err != nil {
+		writeKBError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, kbConfigToJSON(cfg))
+}
+
+// updateKnowledgeBaseConfig handles PUT /knowledge-bases/{kb_id}/config
+// (SPEC §4.3 #23, kb-p1-plan §5): explicit-partial config update. Only the
+// fields carried in the JSON body are change candidates (tri-state: absent =
+// keep current); a patch that changes nothing is rejected by kb-service as
+// 400. An embedding_model or chunk_size change pairs the UPDATE with a
+// full-KB rebuild in the same kb-service transaction, so the 200 carries
+// the new config plus a nullable rebuild_task (absent when the change did
+// not touch the embedding settings — the allOf contract shape). The
+// idempotency_key is required so retries replay the first result, and a KB
+// already rebuilding surfaces 409 (FAILED_PRECONDITION via writeKBError).
+func (a *kbAPI) updateKnowledgeBaseConfig(ctx context.Context, c *app.RequestContext) {
+	if a.client == nil {
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		return
+	}
+	var req updateKnowledgeBaseConfigRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid knowledge base config update request")
+		return
+	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		return
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(req.IdempotencyKey)); err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key must be a uuid")
+		return
+	}
+	// Tri-state passthrough: nil pointers keep the proto fields unset
+	// ("keep current"); carried values become oneof fields. ocr_enabled
+	// rides the BoolValue wrapper so an explicit false stays distinguishable.
+	var ocrEnabled *wrapperspb.BoolValue
+	if req.OcrEnabled != nil {
+		ocrEnabled = wrapperspb.Bool(*req.OcrEnabled)
+	}
+	resp, err := a.client.UpdateKBConfig(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.UpdateKBConfigRequest{
+		EmbeddingModel: req.EmbeddingModel,
+		ChunkSize:      req.ChunkSize,
+		OcrEnabled:     ocrEnabled,
+		TopK:           req.TopK,
+		ScoreThreshold: req.ScoreThreshold,
+		RetrievalMode:  req.RetrievalMode,
+	})
+	if err != nil {
+		writeKBError(c, err)
+		return
+	}
+	// Flatten the allOf shape: KBConfig fields inline + nullable rebuild_task.
+	cfgJSON := kbConfigToJSON(resp.GetConfig())
+	c.JSON(http.StatusOK, updateKBConfigJSON{
+		EmbeddingModel: cfgJSON.EmbeddingModel,
+		ChunkSize:      cfgJSON.ChunkSize,
+		OcrEnabled:     cfgJSON.OcrEnabled,
+		TopK:           cfgJSON.TopK,
+		ScoreThreshold: cfgJSON.ScoreThreshold,
+		RetrievalMode:  cfgJSON.RetrievalMode,
+		RebuildTask:    asyncTaskRefPtrToJSON(resp.GetRebuildTask()),
+	})
+}
+
 // ── B2 handlers (SPEC §4.3 #11/#17/#18) ─────────────────────────────────────
 
 // listKnowledgeBaseDocumentChunks handles GET
@@ -698,6 +808,43 @@ func (a *kbAPI) reparseKnowledgeBaseDocument(ctx context.Context, c *app.Request
 	})
 }
 
+// rebuildKnowledgeBase handles POST /knowledge-bases/{kb_id}/rebuild
+// (SPEC §4.3 #24, kb-p1-plan §2.7): full-KB rebuild that re-queues every
+// eligible document (parse_status ready/failed, excluding soft-deleted) for
+// a fresh parse run. The 202 AsyncTask JSON mirrors reparse. Guard errors
+// surface from kb-service via writeKBError: KB missing → 404 NOT_FOUND, KB
+// status ≠ active (e.g. a rebuild already in flight) → 409 CONFLICT
+// (FAILED_PRECONDITION, SPEC §6.1).
+func (a *kbAPI) rebuildKnowledgeBase(ctx context.Context, c *app.RequestContext) {
+	if a.client == nil {
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		return
+	}
+	var req rebuildKnowledgeBaseRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid rebuild request")
+		return
+	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		return
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(req.IdempotencyKey)); err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key must be a uuid")
+		return
+	}
+	taskRef, err := a.client.RebuildKB(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey)
+	if err != nil {
+		writeKBError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, asyncTaskRefJSON{
+		TaskID:   taskRef.GetTaskId(),
+		TaskType: taskRef.GetTaskType(),
+		Status:   taskRef.GetStatus(),
+	})
+}
+
 // listKnowledgeBaseAuditLogs handles GET
 // /knowledge-bases/{kb_id}/audit-logs (SPEC §4.1 #21, kb-p1-plan §6.4):
 // cursor-paginated KB management-plane audit trail (created_at DESC, id DESC).
@@ -820,6 +967,35 @@ type kbPermissionsJSON struct {
 	PublicRead     bool     `json:"public_read"`
 	AllowedUserIDs []string `json:"allowed_user_ids"`
 	UpdatedAt      string   `json:"updated_at,omitempty"`
+}
+
+// kbConfigJSON mirrors the KBConfig schema in services/v1.yaml (SPEC §4.3
+// #22, kb-p1-plan §3.6): ingest config (embedding_model / chunk_size /
+// ocr_enabled) and query config (top_k / score_threshold / retrieval_mode).
+// Fields are always present (not omitempty): the config read is a full
+// row echo, matching the KBConfig contract.
+type kbConfigJSON struct {
+	EmbeddingModel string  `json:"embedding_model"`
+	ChunkSize      int32   `json:"chunk_size"`
+	OcrEnabled     bool    `json:"ocr_enabled"`
+	TopK           int32   `json:"top_k"`
+	ScoreThreshold float32 `json:"score_threshold"`
+	RetrievalMode  string  `json:"retrieval_mode"`
+}
+
+// updateKBConfigJSON mirrors the PUT /config 200 schema in services/v1.yaml
+// (SPEC §4.3 #23, kb-p1-plan §5.5): allOf[KBConfig + rebuild_task]. The
+// rebuild_task is nullable in the contract (an update that does not touch
+// embedding_model/chunk_size pairs no rebuild), so it is a pointer with
+// omitempty — a nil ref omits the field rather than echoing a zero task.
+type updateKBConfigJSON struct {
+	EmbeddingModel string  `json:"embedding_model"`
+	ChunkSize      int32   `json:"chunk_size"`
+	OcrEnabled     bool    `json:"ocr_enabled"`
+	TopK           int32   `json:"top_k"`
+	ScoreThreshold float32 `json:"score_threshold"`
+	RetrievalMode  string  `json:"retrieval_mode"`
+	RebuildTask    *asyncTaskRefJSON `json:"rebuild_task,omitempty"`
 }
 
 // kbChunkJSON mirrors the KBChunk schema in services/v1.yaml (SPEC §3.2):
@@ -958,6 +1134,35 @@ func kbPermissionsToJSON(p *kbv1.KBPermissions) kbPermissionsJSON {
 		PublicRead:     p.GetPublicRead(),
 		AllowedUserIDs: allowed,
 		UpdatedAt:      protoTimestampToRFC3339(p.GetUpdatedAt()),
+	}
+}
+
+func kbConfigToJSON(cfg *kbv1.KBConfig) kbConfigJSON {
+	if cfg == nil {
+		return kbConfigJSON{}
+	}
+	return kbConfigJSON{
+		EmbeddingModel: cfg.GetEmbeddingModel(),
+		ChunkSize:      cfg.GetChunkSize(),
+		OcrEnabled:     cfg.GetOcrEnabled(),
+		TopK:           cfg.GetTopK(),
+		ScoreThreshold: cfg.GetScoreThreshold(),
+		RetrievalMode:  cfg.GetRetrievalMode(),
+	}
+}
+
+// asyncTaskRefPtrToJSON converts a nullable proto AsyncTaskRef to the REST
+// task shape. A nil ref stays nil — the caller's omitempty/contract decides
+// whether the field surfaces (PUT /config) or the zero echo is used (202s
+// always carry a task, so they dereference unconditionally).
+func asyncTaskRefPtrToJSON(ref *commonv1.AsyncTaskRef) *asyncTaskRefJSON {
+	if ref == nil {
+		return nil
+	}
+	return &asyncTaskRefJSON{
+		TaskID:   ref.GetTaskId(),
+		TaskType: ref.GetTaskType(),
+		Status:   ref.GetStatus(),
 	}
 }
 

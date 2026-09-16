@@ -67,6 +67,11 @@ type fakeKBClient struct {
 	permissionsErr  error
 	getPermsResp    *kbv1.KBPermissions
 	getPermsErr     error
+	getConfigResp   *kbv1.KBConfig
+	getConfigErr    error
+	updateConfigResp    *kbv1.UpdateKBConfigResponse
+	updateConfigErr     error
+	lastUpdateConfigReq *kbv1.UpdateKBConfigRequest
 
 	lastSessionID string
 	lastChunkType string
@@ -81,6 +86,9 @@ type fakeKBClient struct {
 
 	reparseResp *commonv1.AsyncTaskRef
 	reparseErr  error
+
+	rebuildResp *commonv1.AsyncTaskRef
+	rebuildErr  error
 
 	listAuditLogsResp *kbv1.ListKBAuditLogsResponse
 	listAuditLogsErr  error
@@ -168,6 +176,18 @@ func (f *fakeKBClient) GetKBPermissions(_ context.Context, tenantID, kbID string
 	f.lastKbID = kbID
 	return f.getPermsResp, f.getPermsErr
 }
+func (f *fakeKBClient) GetKBConfig(_ context.Context, tenantID, kbID string) (*kbv1.KBConfig, error) {
+	f.lastTenantID = tenantID
+	f.lastKbID = kbID
+	return f.getConfigResp, f.getConfigErr
+}
+func (f *fakeKBClient) UpdateKBConfig(_ context.Context, tenantID, kbID, idem string, req *kbv1.UpdateKBConfigRequest) (*kbv1.UpdateKBConfigResponse, error) {
+	f.lastTenantID = tenantID
+	f.lastKbID = kbID
+	f.lastIDemKey = idem
+	f.lastUpdateConfigReq = req
+	return f.updateConfigResp, f.updateConfigErr
+}
 func (f *fakeKBClient) ListDocumentChunks(_ context.Context, tenantID, kbID, docID, chunkType string, limit int32, cursor string) (*kbv1.ListDocumentChunksResponse, error) {
 	f.lastTenantID = tenantID
 	f.lastKbID = kbID
@@ -203,6 +223,12 @@ func (f *fakeKBClient) ReparseDocument(_ context.Context, tenantID, kbID, docID,
 	f.lastDocID = docID
 	f.lastIDemKey = idemKey
 	return f.reparseResp, f.reparseErr
+}
+func (f *fakeKBClient) RebuildKB(_ context.Context, tenantID, kbID, idemKey string) (*commonv1.AsyncTaskRef, error) {
+	f.lastTenantID = tenantID
+	f.lastKbID = kbID
+	f.lastIDemKey = idemKey
+	return f.rebuildResp, f.rebuildErr
 }
 func (f *fakeKBClient) ListKBAuditLogs(_ context.Context, tenantID, kbID string, limit int32, cursor string) (*kbv1.ListKBAuditLogsResponse, error) {
 	f.lastTenantID = tenantID
@@ -278,6 +304,12 @@ func TestKBRoutes_AllEndpointsRegistered(t *testing.T) {
 		{http.MethodPost, "/api/v1/svc/knowledge-bases/kb-1/documents/doc-1/reparse", `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440006"}`},
 		// B8 route (SPEC §4.1 #21, kb-p1-plan §6.4): audit trail listing.
 		{http.MethodGet, "/api/v1/svc/knowledge-bases/kb-1/audit-logs", ""},
+		// B5 route (SPEC §4.3 #22, kb-p1-plan §3.5): config read.
+		{http.MethodGet, "/api/v1/svc/knowledge-bases/kb-1/config", ""},
+		// B7 route (SPEC §4.3 #23, kb-p1-plan §5): config update.
+		{http.MethodPut, "/api/v1/svc/knowledge-bases/kb-1/config", `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440007","top_k":12}`},
+		// B6 route (SPEC §4.3 #24, kb-p1-plan §2.7): rebuild.
+		{http.MethodPost, "/api/v1/svc/knowledge-bases/kb-1/rebuild", `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440008"}`},
 	}
 
 	for _, r := range routes {
@@ -483,6 +515,92 @@ func TestKBRoutes_UpdatePermissions_NilClientReturns503(t *testing.T) {
 	_ = json.Unmarshal(resp.Body(), &b)
 	if b["code"] != "UNAVAILABLE" {
 		t.Fatalf("code = %v, want UNAVAILABLE", b["code"])
+	}
+}
+
+// TestKBRoutes_GetConfig_Passthrough verifies the B5 GET config handler
+// (SPEC §4.3 #22, kb-p1-plan §3.6): the gRPC KBConfig response maps to the
+// REST KBConfig shape (ingest: embedding_model/chunk_size/ocr_enabled; query:
+// top_k/score_threshold/retrieval_mode) and the Auth-middleware tenant id is
+// injected into the gRPC call.
+func TestKBRoutes_GetConfig_Passthrough(t *testing.T) {
+	client := &fakeKBClient{
+		getConfigResp: &kbv1.KBConfig{
+			TenantId:        "tenant-test",
+			KbId:            "kb-1",
+			EmbeddingModel:  "bge-m3",
+			ChunkSize:       512,
+			OcrEnabled:      true,
+			TopK:            8,
+			ScoreThreshold:  0.35,
+			RetrievalMode:   "hybrid",
+		},
+	}
+	h := setupKBTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases/kb-1/config", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if client.lastTenantID != "tenant-test" {
+		t.Fatalf("gRPC tenant id = %q, want tenant-test", client.lastTenantID)
+	}
+	if client.lastKbID != "kb-1" {
+		t.Fatalf("gRPC kb id = %q, want kb-1", client.lastKbID)
+	}
+	var body struct {
+		EmbeddingModel string  `json:"embedding_model"`
+		ChunkSize      int32   `json:"chunk_size"`
+		OcrEnabled     bool    `json:"ocr_enabled"`
+		TopK           int32   `json:"top_k"`
+		ScoreThreshold float32 `json:"score_threshold"`
+		RetrievalMode  string  `json:"retrieval_mode"`
+	}
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.EmbeddingModel != "bge-m3" || body.ChunkSize != 512 || !body.OcrEnabled {
+		t.Fatalf("ingest config = %+v, want bge-m3/512/ocr=true", body)
+	}
+	if body.TopK != 8 || body.ScoreThreshold != 0.35 || body.RetrievalMode != "hybrid" {
+		t.Fatalf("query config = %+v, want 8/0.35/hybrid", body)
+	}
+}
+
+// TestKBRoutes_GetConfig_NotFoundMappedTo404 asserts a kb-service NOT_FOUND
+// surfaces as HTTP 404 (a missing or soft-deleted KB is the only 404 case).
+func TestKBRoutes_GetConfig_NotFoundMappedTo404(t *testing.T) {
+	client := &fakeKBClient{
+		getConfigErr: status.Error(codes.NotFound, "knowledge base not found"),
+	}
+	h := setupKBTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases/kb-404/config", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode())
+	}
+	var body map[string]any
+	_ = json.Unmarshal(resp.Body(), &body)
+	if body["code"] != "NOT_FOUND" {
+		t.Fatalf("code = %v, want NOT_FOUND", body["code"])
+	}
+}
+
+// TestKBRoutes_GetConfig_NilClientReturns503 asserts the GET config handler
+// returns 503 UNAVAILABLE when kb-service is not configured (the RPC is
+// implemented server-side, so NOT_IMPLEMENTED would misreport the state).
+func TestKBRoutes_GetConfig_NilClientReturns503(t *testing.T) {
+	h := setupKBTestServer(nil)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases/kb-1/config", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode())
 	}
 }
 
@@ -1629,6 +1747,7 @@ func TestKBRoutes_IdempotencyKey_MustBeUUID(t *testing.T) {
 		{http.MethodPost, "/api/v1/svc/knowledge-bases/kb-1/query", `{"idempotency_key":"not-a-uuid","question":"hi"}`},
 		{http.MethodPut, "/api/v1/svc/knowledge-bases/kb-1/permissions", `{"idempotency_key":"not-a-uuid"}`},
 		{http.MethodPost, "/api/v1/svc/knowledge-bases/kb-1/documents/doc-1/reparse", `{"idempotency_key":"not-a-uuid"}`},
+		{http.MethodPost, "/api/v1/svc/knowledge-bases/kb-1/rebuild", `{"idempotency_key":"not-a-uuid"}`},
 	}
 	for _, r := range requests {
 		client := &fakeKBClient{}
@@ -1672,5 +1791,369 @@ func TestKBRoutes_ReparseDocument_NilClientReturns503(t *testing.T) {
 	_ = json.Unmarshal(resp.Body(), &respBody)
 	if respBody["code"] != "UNAVAILABLE" {
 		t.Fatalf("code = %v, want UNAVAILABLE", respBody["code"])
+	}
+}
+
+// TestKBRoutes_RebuildKB_Success asserts the rebuild endpoint forwards the
+// tenant/kb/idempotency key to kb-service and maps the AsyncTaskRef to a
+// 202 body (SPEC §4.3 #24, kb-p1-plan §2.7 — rebuild is asynchronous).
+func TestKBRoutes_RebuildKB_Success(t *testing.T) {
+	client := &fakeKBClient{
+		rebuildResp: &commonv1.AsyncTaskRef{
+			TaskId: "task-24", TaskType: "kb.rebuild", Status: "pending",
+		},
+	}
+	h := setupKBTestServer(client)
+	body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440006"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/svc/knowledge-bases/kb-1/rebuild",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode())
+	}
+	if client.lastTenantID != "tenant-test" || client.lastKbID != "kb-1" ||
+		client.lastIDemKey != "550e8400-e29b-41d4-a716-446655440006" {
+		t.Fatalf("gRPC tenant/kb/idem = %q/%q/%q, want tenant-test/kb-1/550e8400-e29b-41d4-a716-446655440006",
+			client.lastTenantID, client.lastKbID, client.lastIDemKey)
+	}
+	var respBody map[string]any
+	if err := json.Unmarshal(resp.Body(), &respBody); err != nil {
+		t.Fatalf("decode body = %v", err)
+	}
+	if respBody["task_id"] != "task-24" || respBody["task_type"] != "kb.rebuild" || respBody["status"] != "pending" {
+		t.Fatalf("body = %+v, want task_id=task-24 task_type=kb.rebuild status=pending", respBody)
+	}
+}
+
+// TestKBRoutes_RebuildKB_GuardErrors asserts kb-service guard errors map per
+// SPEC §4.3 #24: KB missing → 404 NOT_FOUND, KB already rebuilding → 409
+// CONFLICT (FAILED_PRECONDITION).
+func TestKBRoutes_RebuildKB_GuardErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		grpcErr    error
+		wantStatus int
+		wantCode   string
+	}{
+		{"kb_not_found", status.Error(codes.NotFound, "kb missing"), http.StatusNotFound, "NOT_FOUND"},
+		{"kb_rebuilding", status.Error(codes.FailedPrecondition, "kb rebuilding"), http.StatusConflict, "CONFLICT"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeKBClient{rebuildErr: tc.grpcErr}
+			h := setupKBTestServer(client)
+			body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440006"}`
+			resp := ut.PerformRequest(h.Engine, http.MethodPost,
+				"/api/v1/svc/knowledge-bases/kb-1/rebuild",
+				&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+				ut.Header{Key: "Content-Type", Value: "application/json"},
+				ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+			).Result()
+			if resp.StatusCode() != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode(), tc.wantStatus)
+			}
+			var respBody map[string]any
+			_ = json.Unmarshal(resp.Body(), &respBody)
+			if respBody["code"] != tc.wantCode {
+				t.Fatalf("code = %v, want %s", respBody["code"], tc.wantCode)
+			}
+		})
+	}
+}
+
+// TestKBRoutes_RebuildKB_MissingIdempotencyKey asserts a missing
+// idempotency_key returns 400 without calling kb-service (SPEC §4.3 #24
+// required uuid — replay safety for a heavy long-running job).
+func TestKBRoutes_RebuildKB_MissingIdempotencyKey(t *testing.T) {
+	client := &fakeKBClient{}
+	h := setupKBTestServer(client)
+	body := `{"idempotency_key":""}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/svc/knowledge-bases/kb-1/rebuild",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode())
+	}
+	var respBody map[string]any
+	_ = json.Unmarshal(resp.Body(), &respBody)
+	if respBody["code"] != "BAD_REQUEST" {
+		t.Fatalf("code = %v, want BAD_REQUEST", respBody["code"])
+	}
+	if client.lastTenantID != "" {
+		t.Fatalf("kb-service was called (tenant = %q) despite 400 validation failure", client.lastTenantID)
+	}
+}
+
+// TestKBRoutes_RebuildKB_InvalidJSON asserts a non-JSON request body is
+// rejected with 400 before any validation or kb-service call.
+func TestKBRoutes_RebuildKB_InvalidJSON(t *testing.T) {
+	client := &fakeKBClient{}
+	h := setupKBTestServer(client)
+	body := `not json`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/svc/knowledge-bases/kb-1/rebuild",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode())
+	}
+	var respBody map[string]any
+	_ = json.Unmarshal(resp.Body(), &respBody)
+	if respBody["code"] != "BAD_REQUEST" {
+		t.Fatalf("code = %v, want BAD_REQUEST", respBody["code"])
+	}
+	if client.lastTenantID != "" {
+		t.Fatalf("kb-service was called (tenant = %q) despite 400 validation failure", client.lastTenantID)
+	}
+}
+
+// TestKBRoutes_RebuildKB_NilClientReturns503 asserts the rebuild handler
+// returns 503 UNAVAILABLE when kb-service is not configured.
+func TestKBRoutes_RebuildKB_NilClientReturns503(t *testing.T) {
+	h := setupKBTestServer(nil)
+	body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440006"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/svc/knowledge-bases/kb-1/rebuild",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode())
+	}
+	var respBody map[string]any
+	_ = json.Unmarshal(resp.Body(), &respBody)
+	if respBody["code"] != "UNAVAILABLE" {
+		t.Fatalf("code = %v, want UNAVAILABLE", respBody["code"])
+	}
+}
+
+// TestKBRoutes_UpdateConfig_TriStatePassthrough asserts the PUT /config
+// handler forwards only the carried JSON fields to kb-service: present
+// fields become oneof/BoolValue fields, absent fields stay unset (tri-state
+// "keep current"), and an explicit ocr_enabled=false survives the
+// BoolValue wrapper (B7, SPEC §4.3 #23, kb-p1-plan §5.2).
+func TestKBRoutes_UpdateConfig_TriStatePassthrough(t *testing.T) {
+	client := &fakeKBClient{
+		updateConfigResp: &kbv1.UpdateKBConfigResponse{
+			Config: &kbv1.KBConfig{
+				TenantId:       "tenant-test",
+				KbId:           "kb-1",
+				EmbeddingModel: "bge-m3",
+				ChunkSize:      1024,
+				OcrEnabled:     false,
+				TopK:           12,
+				ScoreThreshold: 0.5,
+				RetrievalMode:  "keyword",
+			},
+		},
+	}
+	h := setupKBTestServer(client)
+	body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440010","chunk_size":1024,"ocr_enabled":false,"top_k":12,"retrieval_mode":"keyword"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPut,
+		"/api/v1/svc/knowledge-bases/kb-1/config",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if client.lastTenantID != "tenant-test" || client.lastKbID != "kb-1" {
+		t.Fatalf("gRPC ids = %q/%q, want tenant-test/kb-1", client.lastTenantID, client.lastKbID)
+	}
+	if client.lastIDemKey != "550e8400-e29b-41d4-a716-446655440010" {
+		t.Fatalf("gRPC idem key = %q", client.lastIDemKey)
+	}
+	req := client.lastUpdateConfigReq
+	if req == nil {
+		t.Fatalf("kb-service was not called")
+	}
+	// Absent fields stay unset (nil): embedding_model / score_threshold.
+	if req.EmbeddingModel != nil || req.ScoreThreshold != nil {
+		t.Fatalf("absent fields forwarded: embedding=%v score=%v", req.EmbeddingModel, req.ScoreThreshold)
+	}
+	if req.ChunkSize == nil || *req.ChunkSize != 1024 {
+		t.Fatalf("chunk_size = %v, want 1024", req.ChunkSize)
+	}
+	if req.OcrEnabled == nil || req.OcrEnabled.Value {
+		t.Fatalf("ocr_enabled = %v, want wrapped false", req.OcrEnabled)
+	}
+	if req.OcrEnabled != nil && req.OcrEnabled.Value != false {
+		t.Fatalf("ocr_enabled explicit false lost in wrapper: %v", req.OcrEnabled)
+	}
+	if req.TopK == nil || *req.TopK != 12 {
+		t.Fatalf("top_k = %v, want 12", req.TopK)
+	}
+	if req.RetrievalMode == nil || *req.RetrievalMode != "keyword" {
+		t.Fatalf("retrieval_mode = %v, want keyword", req.RetrievalMode)
+	}
+	// 200 body: KBConfig flattened inline + rebuild_task omitted (nil ref).
+	var bodyOut struct {
+		EmbeddingModel string `json:"embedding_model"`
+		ChunkSize      int32  `json:"chunk_size"`
+		OcrEnabled     bool   `json:"ocr_enabled"`
+		TopK           int32  `json:"top_k"`
+		ScoreThreshold float32 `json:"score_threshold"`
+		RetrievalMode  string `json:"retrieval_mode"`
+		RebuildTask    *struct {
+			TaskID string `json:"task_id"`
+		} `json:"rebuild_task"`
+	}
+	if err := json.Unmarshal(resp.Body(), &bodyOut); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if bodyOut.RebuildTask != nil {
+		t.Fatalf("rebuild_task = %+v, want omitted (nullable, no rebuild paired)", bodyOut.RebuildTask)
+	}
+	if bodyOut.ChunkSize != 1024 || bodyOut.TopK != 12 || bodyOut.OcrEnabled {
+		t.Fatalf("config echo = %+v, want 1024/12/ocr=false", bodyOut)
+	}
+}
+
+// TestKBRoutes_UpdateConfig_RebuildTaskRefIn200 asserts the 200 carries the
+// paired rebuild ref (allOf[KBConfig + rebuild_task]) when kb-service set it.
+func TestKBRoutes_UpdateConfig_RebuildTaskRefIn200(t *testing.T) {
+	client := &fakeKBClient{
+		updateConfigResp: &kbv1.UpdateKBConfigResponse{
+			Config: &kbv1.KBConfig{
+				TenantId:       "tenant-test",
+				KbId:           "kb-1",
+				EmbeddingModel: "bge-m3-v2",
+				ChunkSize:      512,
+				OcrEnabled:     true,
+				TopK:           8,
+				ScoreThreshold: 0.35,
+				RetrievalMode:  "hybrid",
+			},
+			RebuildTask: &commonv1.AsyncTaskRef{
+				TaskId:   "task-77",
+				TaskType: "kb.rebuild",
+				Status:   "pending",
+			},
+		},
+	}
+	h := setupKBTestServer(client)
+	body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440011","embedding_model":"bge-m3-v2"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPut,
+		"/api/v1/svc/knowledge-bases/kb-1/config",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	var bodyOut struct {
+		EmbeddingModel string `json:"embedding_model"`
+		RebuildTask    *struct {
+			TaskID   string `json:"task_id"`
+			TaskType string `json:"task_type"`
+			Status   string `json:"status"`
+		} `json:"rebuild_task"`
+	}
+	if err := json.Unmarshal(resp.Body(), &bodyOut); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if bodyOut.RebuildTask == nil || bodyOut.RebuildTask.TaskID != "task-77" {
+		t.Fatalf("rebuild_task = %+v, want task-77", bodyOut.RebuildTask)
+	}
+	if bodyOut.RebuildTask.TaskType != "kb.rebuild" || bodyOut.RebuildTask.Status != "pending" {
+		t.Fatalf("rebuild_task = %+v, want kb.rebuild/pending", bodyOut.RebuildTask)
+	}
+	if bodyOut.EmbeddingModel != "bge-m3-v2" {
+		t.Fatalf("embedding_model = %q, want bge-m3-v2", bodyOut.EmbeddingModel)
+	}
+}
+
+// TestKBRoutes_UpdateConfig_GuardErrors asserts kb-service guard failures
+// map through writeKBError: 404 (missing KB) and 409 (KB rebuilding).
+func TestKBRoutes_UpdateConfig_GuardErrors(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		status  int
+		wanCode string
+	}{
+		{"not found maps 404", status.Error(codes.NotFound, "knowledge base not found"), http.StatusNotFound, "NOT_FOUND"},
+		{"rebuilding maps 409", status.Error(codes.FailedPrecondition, "kb.rebuilding"), http.StatusConflict, "CONFLICT"},
+		{"no change maps 400", status.Error(codes.InvalidArgument, "no effective change"), http.StatusBadRequest, "BAD_REQUEST"},
+	}
+	for _, tc := range cases {
+		client := &fakeKBClient{updateConfigErr: tc.err}
+		h := setupKBTestServer(client)
+		body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440012","top_k":12}`
+		resp := ut.PerformRequest(h.Engine, http.MethodPut,
+			"/api/v1/svc/knowledge-bases/kb-1/config",
+			&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+			ut.Header{Key: "Content-Type", Value: "application/json"},
+			ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+		).Result()
+		if resp.StatusCode() != tc.status {
+			t.Fatalf("%s: status = %d, want %d", tc.name, resp.StatusCode(), tc.status)
+		}
+		var respBody map[string]any
+		_ = json.Unmarshal(resp.Body(), &respBody)
+		if respBody["code"] != tc.wanCode {
+			t.Fatalf("%s: code = %v, want %s", tc.name, respBody["code"], tc.wanCode)
+		}
+	}
+}
+
+// TestKBRoutes_UpdateConfig_ValidationAndNilClient asserts the gateway-side
+// guards: idempotency_key required (uuid), and 503 when kb-service is not
+// configured — mirroring the rebuild/updateKB handler patterns.
+func TestKBRoutes_UpdateConfig_ValidationAndNilClient(t *testing.T) {
+	// Missing idempotency_key → 400 before any kb-service call.
+	client := &fakeKBClient{}
+	h := setupKBTestServer(client)
+	body := `{"top_k":12}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPut,
+		"/api/v1/svc/knowledge-bases/kb-1/config",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("missing idem key: status = %d, want 400", resp.StatusCode())
+	}
+	if client.lastTenantID != "" {
+		t.Fatalf("kb-service was called despite 400 validation failure")
+	}
+	// Non-uuid idempotency_key → 400.
+	body = `{"idempotency_key":"not-a-uuid","top_k":12}`
+	resp = ut.PerformRequest(h.Engine, http.MethodPut,
+		"/api/v1/svc/knowledge-bases/kb-1/config",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("non-uuid idem key: status = %d, want 400", resp.StatusCode())
+	}
+	// Nil client → 503 UNAVAILABLE.
+	h = setupKBTestServer(nil)
+	body = `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440013","top_k":12}`
+	resp = ut.PerformRequest(h.Engine, http.MethodPut,
+		"/api/v1/svc/knowledge-bases/kb-1/config",
+		&ut.Body{Body: strings.NewReader(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("nil client: status = %d, want 503", resp.StatusCode())
+	}
+	var respBody map[string]any
+	_ = json.Unmarshal(resp.Body(), &respBody)
+	if respBody["code"] != "UNAVAILABLE" {
+		t.Fatalf("nil client: code = %v, want UNAVAILABLE", respBody["code"])
 	}
 }

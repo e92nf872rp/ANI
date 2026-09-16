@@ -301,6 +301,7 @@ SCHEMAS = [
     "AdminWithTenant",
     "AssignableTenantRoleListResponse",
     "AsyncTask",
+    "AsyncTaskRef",
     "AvailableGpu",
     "AvailableTenantListResponse",
     "AvailableTenantPlan",

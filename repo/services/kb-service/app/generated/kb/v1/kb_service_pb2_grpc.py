@@ -117,6 +117,16 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.GetKBPermissionsRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.KBPermissions.FromString,
                 _registered_method=True)
+        self.GetKBConfig = channel.unary_unary(
+                '/kb.v1.KBService/GetKBConfig',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetKBConfigRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.KBConfig.FromString,
+                _registered_method=True)
+        self.UpdateKBConfig = channel.unary_unary(
+                '/kb.v1.KBService/UpdateKBConfig',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigResponse.FromString,
+                _registered_method=True)
         self.ListDocumentChunks = channel.unary_unary(
                 '/kb.v1.KBService/ListDocumentChunks',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.SerializeToString,
@@ -135,6 +145,11 @@ class KBServiceStub:
         self.ReparseDocument = channel.unary_unary(
                 '/kb.v1.KBService/ReparseDocument',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.SerializeToString,
+                response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+                _registered_method=True)
+        self.RebuildKB = channel.unary_unary(
+                '/kb.v1.KBService/RebuildKB',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.RebuildKBRequest.SerializeToString,
                 response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
                 _registered_method=True)
         self.ListKBAuditLogs = channel.unary_unary(
@@ -266,6 +281,25 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetKBConfig(self, request, context):
+        """GetKBConfig returns the ingest/query configuration of a KB (P1 #22).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateKBConfig(self, request, context):
+        """UpdateKBConfig updates the ingest/query config of a KB (P1 #23).
+        embedding_model / chunk_size changes invalidate existing vectors and
+        trigger a full rebuild in the same transaction (active→rebuilding +
+        rebuild task + outbox event); the other four fields are query-time or
+        next-parse settings and never trigger a rebuild. Sync 200 semantics;
+        the implied rebuild task is attached as rebuild_task in the response.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListDocumentChunks(self, request, context):
         """ListDocumentChunks returns the chunk details of a document (P1).
         """
@@ -292,6 +326,17 @@ class KBServiceServicer:
         Returns 202-style async task semantics: resets the doc row and enqueues
         a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
         the NotifyDocumentUploaded event pipeline).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RebuildKB(self, request, context):
+        """RebuildKB re-parses every ready/failed document in a KB (P1 #24).
+        Returns 202-style async task semantics: sets KB status='rebuilding'
+        (write ops on the KB fail with FAILED_PRECONDITION while rebuilding;
+        queries stay served from the existing index) and enqueues a rebuild
+        task via Outbox pattern onto NATS ani.tasks.kb.rebuild.v1.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -388,6 +433,16 @@ def add_KBServiceServicer_to_server(servicer, server):
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetKBPermissionsRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.KBPermissions.SerializeToString,
             ),
+            'GetKBConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetKBConfig,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetKBConfigRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.KBConfig.SerializeToString,
+            ),
+            'UpdateKBConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateKBConfig,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigResponse.SerializeToString,
+            ),
             'ListDocumentChunks': grpc.unary_unary_rpc_method_handler(
                     servicer.ListDocumentChunks,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.FromString,
@@ -406,6 +461,11 @@ def add_KBServiceServicer_to_server(servicer, server):
             'ReparseDocument': grpc.unary_unary_rpc_method_handler(
                     servicer.ReparseDocument,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.FromString,
+                    response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
+            ),
+            'RebuildKB': grpc.unary_unary_rpc_method_handler(
+                    servicer.RebuildKB,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.RebuildKBRequest.FromString,
                     response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
             ),
             'ListKBAuditLogs': grpc.unary_unary_rpc_method_handler(
@@ -858,6 +918,60 @@ class KBService:
             _registered_method=True)
 
     @staticmethod
+    def GetKBConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetKBConfig',
+            kb_dot_v1_dot_kb__service__pb2.GetKBConfigRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.KBConfig.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateKBConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/UpdateKBConfig',
+            kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.UpdateKBConfigResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def ListDocumentChunks(request,
             target,
             options=(),
@@ -954,6 +1068,33 @@ class KBService:
             target,
             '/kb.v1.KBService/ReparseDocument',
             kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.SerializeToString,
+            common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RebuildKB(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/RebuildKB',
+            kb_dot_v1_dot_kb__service__pb2.RebuildKBRequest.SerializeToString,
             common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
             options,
             channel_credentials,
