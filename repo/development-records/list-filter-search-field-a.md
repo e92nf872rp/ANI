@@ -2,7 +2,7 @@
 
 > 分支：fix/instance-searchfield-and-ops-pagination
 > 状态：已实施并实测通过（2026-09-16，ani-system）
-> 依据：`kjs-study/修复bug/已修复的bug.md` 第 4 节「统一改造建议」用户已确认，前端所有列表统一传 `search_field=name|id&keyword=…`。
+> 依据：`kjs-study/修复bug/测试问题分析与修复记录.md` 第 4 节「统一改造建议」用户已确认，前端所有列表统一传 `search_field=name|id&keyword=…`。
 
 ## 背景与目标
 
@@ -55,12 +55,12 @@
 
 ## 备注
 
-- 推理服务/知识库（Service 层）过滤不在本次范围，沿用 `已修复的bug.md` 既有搁置决策。
+- 推理服务/知识库（Service 层）过滤不在本次范围，沿用 `测试问题分析与修复记录.md` 既有搁置决策。
 - 无数据库 schema / Proto / SDK 破坏性变更；仅 Gateway router + pkg 层 OpenAPI 契约与外发参数（additive）。
 
 ## 补充：状态过滤参数统一（status → state，2026-09-16）
 
-依据 `kjs-study/修复bug/已修复的bug.md`「数据库状态列名与接口参数命名核查（state vs status）」的结论：DB 统一 `state`，但接口层面实例/网络类用 `state`、四类存储接口用 `status`。为统一，将四类存储 GET 列表的状态过滤参数从 `status` 更名为 `state`：
+依据 `kjs-study/修复bug/测试问题分析与修复记录.md`「数据库状态列名与接口参数命名核查（state vs status）」的结论：DB 统一 `state`，但接口层面实例/网络类用 `state`、四类存储接口用 `status`。为统一，将四类存储 GET 列表的状态过滤参数从 `status` 更名为 `state`：
 
 | 列表接口 | 原参数 | 现参数 |
 |---|---|---|
