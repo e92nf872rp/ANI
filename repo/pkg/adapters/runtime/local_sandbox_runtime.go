@@ -137,6 +137,8 @@ func (r *LocalSandboxRuntime) Create(_ context.Context, request ports.SandboxCre
 		state = ports.SandboxStateRunning
 	}
 	now := firstNonZeroTime(request.CreatedAt, r.now().UTC())
+	config.ExpiresAt = now.Add(config.SessionTimeout)
+	config.LastActivityAt = now
 	instance := ports.SandboxInstanceStatus{
 		TenantID:     request.TenantID,
 		InstanceID:   "sandbox_" + strconv.FormatUint(r.sequence.Add(1), 10),
@@ -900,9 +902,16 @@ func (r *LocalSandboxRuntime) ApplyLifecycle(_ context.Context, request ports.Sa
 		if request.Duration <= 0 {
 			return ports.SandboxInstanceStatus{}, fmt.Errorf("%w: duration must be positive", ports.ErrInvalid)
 		}
-		instance.Config.SessionTimeout += request.Duration
+		// Advance the absolute deadline instead of mutating SessionTimeout so the
+		// persisted baseline stays stable for the expiration controller (Bug-7).
+		if instance.Config.ExpiresAt.IsZero() {
+			instance.Config.ExpiresAt = instance.CreatedAt.Add(instance.Config.SessionTimeout)
+		}
+		instance.Config.ExpiresAt = instance.Config.ExpiresAt.Add(request.Duration)
+		instance.Config.LastActivityAt = firstNonZeroTime(request.RequestedAt, r.now().UTC())
 	case ports.WorkloadLifecycleTouchIdle:
-		// UpdatedAt is the local profile's last-activity marker.
+		// Refresh the last-activity marker consumed by idle expiration.
+		instance.Config.LastActivityAt = firstNonZeroTime(request.RequestedAt, r.now().UTC())
 	case ports.WorkloadLifecycleDelete:
 		instance.State = ports.SandboxStateStopped
 		instance.SessionState = string(instance.State)

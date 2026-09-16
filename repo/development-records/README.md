@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 沙箱到期自动过期 + egress 白名单回显（2026-09，分支 fix/instance-searchfield-and-ops-pagination）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| IN-INSTANCE-SANDBOX-EXPIRATION-EGRESS-A | 修复 kjs-study Bug-7/Bug-8（LOCAL_VERIFIED，未部署）：① Bug-7 沙箱到点未过期——`SandboxConfig`（JSONB）新增绝对到期 `ExpiresAt`/`LastActivityAt`，创建时=createdAt+SessionTimeout、`extend` 推进绝对到期、`touch_idle` 刷新活跃；新增网关后台 `SandboxExpirationController`（默认 30s 周期、跨租户 `ListRunningSandboxes` 枚举非终态沙箱，`WorkloadInstanceStore.WithPlatformTx`），按 session/idle 到期→映射 `OnTimeout`（kill→delete、pause→pause）→执 `ApplyLifecycle`→置 `SandboxStateExpired`→`UpsertStatus` 幂等持久化；装配经 bootstrap deps→InstanceRuntime→gateway main 启动 goroutine；② Bug-8-A 沙箱详情 egress 白名单回显——`instanceSandboxResponse` 增 `EgressAllowlist`、`sandboxResponseFromRecord` 填入（OpenAPI 已有 schema，无契约/SDK 变更；B 网络策略下发按平台租户 VPC 无 centralized gateway 前提搁置）。新增 sandbox_expiration_controller(_test).go、到期字段/控制器/lifecycle 断言测试；go build + runtime/bootstrap/gateway/router 测试 + validate_architecture + gofmt + git diff --check 全绿 | sandbox-expiration-egress-a.md |
+
 ### BOSS 平台审计日志读取（2026-09，分支 feat/platform-audit-log）
 
 | 批次 | 内容摘要 | 文件 |

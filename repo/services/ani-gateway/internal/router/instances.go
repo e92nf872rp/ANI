@@ -90,6 +90,7 @@ type instanceAPI struct {
 	tasks                         ports.AsyncTaskStore
 	realProvider                  bool
 	providerName                  string
+	templates                     ports.SandboxTemplateCatalog
 }
 
 type InstanceRuntime struct {
@@ -526,6 +527,7 @@ type instanceSandboxResponse struct {
 	RuntimeClass        string                        `json:"runtime_class"`
 	SessionTimeout      string                        `json:"session_timeout"`
 	NetworkEgressPolicy string                        `json:"network_egress_policy"`
+	EgressAllowlist     []string                      `json:"egress_allowlist,omitempty"`
 	SessionState        string                        `json:"session_state"`
 	Ports               []instanceSandboxPortResponse `json:"ports,omitempty"`
 	DevProfile          coreDevProfileResponse        `json:"dev_profile"`
@@ -783,6 +785,7 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 		store:                         store,
 		sandboxRuntime:                sandboxRuntime,
 		tasks:                         defaultTaskStore,
+		templates:                     runtimeadapter.NewLocalSandboxTemplateCatalog(),
 	}
 }
 
@@ -862,6 +865,28 @@ func (api *instanceAPI) create(ctx context.Context, c *app.RequestContext) {
 	if err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
+	}
+	// If creating a sandbox with template_id and no explicit image ref, take image from the template catalog
+	if spec.Kind == ports.WorkloadKindSandbox &&
+		strings.TrimSpace(req.SandboxConfig.TemplateID) != "" &&
+		strings.TrimSpace(spec.Image) == "docker.io/nvidia/cuda:12.4.1-base-ubuntu22.04" {
+		// List templates to find the matching template id
+		listReq := ports.SandboxTemplateListRequest{
+			TenantID: spec.TenantID,
+			Limit:    100,
+		}
+		listResp, err := api.templates.ListSandboxTemplates(ctx, listReq)
+		if err == nil {
+			for _, tmpl := range listResp.Items {
+				if tmpl.ID == req.SandboxConfig.TemplateID {
+					if strings.TrimSpace(tmpl.Image) != "" {
+						// Replace the default cuda image with the template's image
+						spec.Image = tmpl.Image
+						break
+					}
+				}
+			}
+		}
 	}
 	result, err := api.service.Create(ctx, ports.WorkloadInstanceCreateRequest{
 		IdempotencyKey:  req.IdempotencyKey,
@@ -3755,6 +3780,7 @@ func sandboxResponseFromRecord(record ports.WorkloadInstanceRecord) *instanceSan
 		RuntimeClass:        record.Sandbox.Config.RuntimeClass,
 		SessionTimeout:      record.Sandbox.Config.SessionTimeout.String(),
 		NetworkEgressPolicy: string(record.Sandbox.Config.NetworkEgressPolicy),
+		EgressAllowlist:     append([]string(nil), record.Sandbox.Config.EgressAllowlist...),
 		SessionState:        string(record.Sandbox.State),
 		DevProfile: coreDevProfileResponse{
 			Mode:         record.Sandbox.DevProfile.Mode,

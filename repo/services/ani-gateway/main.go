@@ -107,6 +107,14 @@ func main() {
 			}
 		}()
 	}
+	if instanceRuntime.SandboxExpiration != nil {
+		go func() {
+			logger.Info("sandbox expiration controller starting")
+			if err := instanceRuntime.SandboxExpiration.Start(runtimeCtx); err != nil {
+				logger.Error("sandbox expiration controller stopped with error", "err", err)
+			}
+		}()
+	}
 	instanceSessionIssuer, closeInstanceSession, err := newGatewayInstanceSessionIssuer(gatewayInstanceSessionRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Warn("session gateway gRPC client unavailable; real-provider session routes will fail closed", "err", err)

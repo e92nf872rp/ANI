@@ -40,6 +40,14 @@ type SandboxConfig struct {
 	EgressAllowlist     []string
 	Env                 []InstanceEnvVar
 	InitialPorts        []InstancePortSpec
+	// ExpiresAt is the session deadline (= createdAt + SessionTimeout). The
+	// expiration controller compares now against it to decide when to run the
+	// OnTimeout action (Bug-7). extend pushes it forward by the requested
+	// duration instead of mutating SessionTimeout in place.
+	ExpiresAt time.Time
+	// LastActivityAt is the last activity timestamp refreshed by touch_idle.
+	// When IdleTimeout > 0, idle expiration fires at LastActivityAt+IdleTimeout.
+	LastActivityAt time.Time
 }
 
 type SandboxCreateRequest struct {
@@ -293,4 +301,30 @@ type SandboxRuntime interface {
 	RestoreCheckpoint(ctx context.Context, request SandboxCheckpointRestoreRequest) (SandboxCheckpointResult, error)
 	CloneCheckpoint(ctx context.Context, request SandboxCheckpointCloneRequest) (SandboxCheckpointResult, error)
 	CreateCodeRun(ctx context.Context, request SandboxCodeRunRequest) (SandboxCodeRunResult, error)
+}
+
+// ExpirableSandboxLister cross-tenant enumerates currently non-terminal sandbox
+// records for the expiration background controller. Implementations must read
+// across all tenants (platform read), not be tenant-scoped.
+type ExpirableSandboxLister interface {
+	ListRunningSandboxes(ctx context.Context, limit int) ([]WorkloadInstanceRecord, error)
+}
+
+// SandboxExpirationController is the background control-plane loop that fires
+// the configured OnTimeout action for expired sandboxes and persists the
+// terminal "expired" state (Bug-7). It is hosted by the gateway, alongside the
+// workload reconcile controller.
+type SandboxExpirationController interface {
+	Start(ctx context.Context) error
+}
+
+// SandboxExpirationStatusWriter persists terminal sandbox states fired by the
+// cross-tenant background expiration controller (Bug-7). It must write through
+// the platform bypass because the controller holds no per-tenant context: a
+// plain tenant-scoped UpsertStatus would require a tenant id in the context
+// (Auth middleware), which the background goroutine does not have. Keeping this
+// as a separate lane avoids widening the tenant-scoped WorkloadInstanceStore
+// contract.
+type SandboxExpirationStatusWriter interface {
+	UpsertStatusAsPlatform(ctx context.Context, record WorkloadInstanceRecord) error
 }

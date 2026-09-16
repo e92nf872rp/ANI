@@ -1922,8 +1922,15 @@ func TestLocalInstanceServiceUpdatesSandboxRuntimeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyLifecycle(extend) error = %v", err)
 	}
-	if extended.Sandbox == nil || extended.Sandbox.Config.SessionTimeout != 35*time.Minute {
-		t.Fatalf("sandbox = %+v, want session timeout 35m", extended.Sandbox)
+	if extended.Sandbox == nil {
+		t.Fatalf("extended sandbox = nil")
+	}
+	if extended.Sandbox.Config.SessionTimeout != 30*time.Minute {
+		t.Fatalf("session timeout = %s, want 30m (extend advances deadline, not baseline)", extended.Sandbox.Config.SessionTimeout)
+	}
+	wantExpiresAt := time.Unix(100, 0).Add(30 * time.Minute).Add(5 * time.Minute)
+	if !extended.Sandbox.Config.ExpiresAt.Equal(wantExpiresAt) {
+		t.Fatalf("expires_at = %v, want %v", extended.Sandbox.Config.ExpiresAt, wantExpiresAt)
 	}
 
 	deleted, err := service.Delete(context.Background(), ports.WorkloadInstanceLifecycleRequest{

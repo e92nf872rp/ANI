@@ -1,4 +1,4 @@
-﻿# KuberCloud ANI · 开发计划
+# KuberCloud ANI · 开发计划
 
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
 > 最后更新：2026-09-08
@@ -345,6 +345,7 @@ ANI Services 当前受控解冻并进入并行 PR：本仓库仍以 ANI Core（�
 - M2.2-AUTH-A ~ K + M2.2-AUTH-FINAL — Auth 服务完整实现与生产收尾（JWT/RBAC/OIDC/JWKS/API Key/Dex smoke）
 - V8 架构设计 — Core/Services 分层、API 工程约定（幂等性/控制平面分离等）
 - AWS 工程加固 — /healthz /readyz schema、WorkloadReconcileController port、operations DB 表、permissions schema
+- IN-INSTANCE-SANDBOX-EXPIRATION-EGRESS-A（2026-09-15，LOCAL_VERIFIED）— 修复 kjs-study Bug-7/Bug-8：沙箱到点自动过期后台引擎（`SandboxConfig` JSONB 新增 `ExpiresAt/LastActivityAt` + 网关 `SandboxExpirationController` 周期扫描 + 跨租户 `ListRunningSandboxes`，按 OnTimeout pause/kill 映射并落 `expired` 幂等态）+ 沙箱详情 egress 白名单回显（`instanceSandboxResponse.EgressAllowlist`）。详见 `repo/development-records/sandbox-expiration-egress-a.md`
 
 ### v1.0.0 后续延期项（不是当前下一阶段）
 
