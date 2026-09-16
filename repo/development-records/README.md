@@ -31,6 +31,12 @@
 |---|---|---|
 | INSTANCE-CONTAINER-ENV-ECHO-A | 容器与 GPU 容器实例环境变量"写入但不回读"修复（PR #168，GPU-5）：创建链路本就完整（env 经 `containerEnv` 渲染进 Deployment 集群侧真实生效），缺口在回读三层——record `ContainerInstanceStatus` 不持久化 Env、gateway 响应无 env 字段、契约 `InstanceRecord.container` 无 env 定义。按 API-first 修复：v1.yaml 契约新增 `container.env`（复用创建请求 `InstanceEnvVar` schema）；`ContainerInstanceStatus.Env` 随 `container_status` JSON 列持久化（无 DB 迁移），`containerStatusInfo` 创建时克隆写入；gateway `instanceContainerResponse.env` 回显（secret_ref 型不带 value，secret 内容永不返回）；逐路径核验 reconciler/scale/update_image/rollback 原地更新不丢 env。一处修复覆盖 container 与 gpu_container。单测 2 用例。**live 验证 PASS（2026-09-16，ani-test2 隔离环境，镜像 `test2-20260916-gpu5env`）**：GPU 容器带 2 个环境变量创建 → 创建响应即时回显 → 详情 t+15s（reconciler 已跑）回显一致。遗留：修复前历史实例 record 无 env 不回显，需从 Deployment 反读回填 | instance-container-env-echo-a.md |
 
+### 容器/GPU 容器 NFS 文件系统挂载修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-CONTAINER-FS-MOUNT-A | 容器与 GPU 容器实例挂载 NFS"不支持"修复（PR #168，容器-5/GPU-4）：`KubernetesLifecycleExecutor.Apply` 此前把 attach/detach_filesystem 无条件路由进 `applyKubeVirtFilesystem`（VM 专属 virtiofs 通道，按 `record.Kind != VM` 硬拒绝），Deployment 通道从未实现。修复：新增 `applyFilesystem` 按 kind 分流（VM 走既有 virtiofs 路径；container/gpu_container 走新增 `applyKubernetesFilesystem` 定向 strategic-merge patch——fs PVC 卷（claim=`storageProviderName("fs", filesystemID)`，卷名沿用 `kubeVirtFilesystemVolumeName` 确定性推导）+ workload 容器 volumeMount（mount_path/read_only），滚动更新生效；detach 用 `$patch: delete` 按卷名删 volumes、按挂载路径删 volumeMounts（其 merge key 是 mountPath，mount path 优先从 record 附件读取、缺失回退 live Deployment 反查）；NFS PVC RWX 多副本可并发挂载；服务层/契约/生成物零改动。单测 3 用例。**live 验证 PASS（2026-09-16，ani-test2 隔离环境，镜像 `test2-20260916-fsmount`）**：container（nginx）与 gpu_container（rtx4090-12g-4）attach/detach 各一轮——Deployment 卷+volumeMount 出现/移除、ready=1、record storage_attachments 增删一致、实例回 running | instance-container-fs-mount-a.md |
+
 ### Console 首页概览统计聚合接口（2026-09，分支 feat/console-overview）
 
 | 批次 | 内容摘要 | 文件 |
