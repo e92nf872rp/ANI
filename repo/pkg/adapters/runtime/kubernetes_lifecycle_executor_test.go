@@ -1236,6 +1236,135 @@ func TestKubeVirtFilesystemVolumeNameTagSafe(t *testing.T) {
 	}
 }
 
+// Container/gpu_container filesystem attach patches the Deployment pod template
+// in place: the fs PVC joins volumes and the workload container gets a
+// matching volumeMount, triggering a rollout like update_image.
+func TestKubernetesLifecycleExecutorAttachFilesystemGPUPatchesDeployment(t *testing.T) {
+	var requests []string
+	var patchBody string
+	var patchContentType string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/gpu-app-01") {
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			patchContentType = r.Header.Get("Content-Type")
+			return lifecycleResponse(), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindGPUContainer
+	record.Name = "gpu-app-01"
+	record.ResourceRefs = []string{"kubernetes/Deployment/gpu-app-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleAttachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.MountPath = "/mnt/nfs"
+	req.IdempotencyKey = "gpu-fs-attach-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("AttachFilesystem Apply() error = %v", err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("requests = %#v, want a single targeted Deployment patch", requests)
+	}
+	if !strings.HasSuffix(requests[0], "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/gpu-app-01") {
+		t.Fatalf("request = %q, want Deployment patch", requests[0])
+	}
+	if patchContentType != "application/strategic-merge-patch+json" {
+		t.Fatalf("patch content type = %q", patchContentType)
+	}
+	if !strings.Contains(patchBody, `"claimName":"fs-fs-dfe99bff-b68c-4528-88ce-ac8fe62ac734"`) {
+		t.Fatalf("patch missing filesystem claim: body = %s", patchBody)
+	}
+	// The volume name is deterministic so detach can find the entries again.
+	if !strings.Contains(patchBody, `"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73"`) {
+		t.Fatalf("patch missing filesystem volume: body = %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"mountPath":"/mnt/nfs"`) || !strings.Contains(patchBody, `"name":"gpu-app-01"`) {
+		t.Fatalf("patch missing container volumeMount: body = %s", patchBody)
+	}
+}
+
+// Container detach removes both the PVC volume (merge key name) and the
+// container volumeMount (merge key mountPath) via $patch: delete directives.
+func TestKubernetesLifecycleExecutorDetachFilesystemContainerDeletesVolumeAndMount(t *testing.T) {
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.StorageAttachments = []ports.WorkloadStorageAttachment{{
+		Name:         "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734",
+		Kind:         ports.StorageAttachmentSharedPVC,
+		ResourceType: "filesystem",
+		ResourceID:   "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734",
+		MountPath:    "/mnt/nfs",
+		Status:       "mounted",
+	}}
+	req := lifecycleRequest(ports.WorkloadLifecycleDetachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.IdempotencyKey = "fs-detach-key-11"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("DetachFilesystem Apply() error = %v", err)
+	}
+	if !strings.Contains(patchBody, `"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73"`) || !strings.Contains(patchBody, `"$patch":"delete"`) {
+		t.Fatalf("patch missing volume delete directive: body = %s", patchBody)
+	}
+	// volumeMounts merge by mountPath, so the delete directive must carry it
+	// (map key order is sorted in the marshalled patch).
+	if !strings.Contains(patchBody, `"mountPath":"/mnt/nfs"`) || !strings.Contains(patchBody, `"$patch":"delete"`) {
+		t.Fatalf("patch missing volumeMount delete directive: body = %s", patchBody)
+	}
+	if strings.Contains(patchBody, "claimName") {
+		t.Fatalf("detach patch must not add the PVC volume: body = %s", patchBody)
+	}
+}
+
+// When the record does not carry the mount path, detach reads the live
+// Deployment and locates the volumeMount backing the filesystem volume.
+func TestKubernetesLifecycleExecutorDetachFilesystemContainerFallsBackToLiveMountPath(t *testing.T) {
+	var patchBody string
+	var sawGet bool
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			sawGet = true
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"spec":{"template":{"spec":{"containers":[{"name":"app-01",` +
+					`"volumeMounts":[{"name":"app-data","mountPath":"/data"},{"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73","mountPath":"/data/nfs"}]}]}}}}`)),
+			}, nil
+		}
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleDetachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.IdempotencyKey = "fs-detach-key-12"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("DetachFilesystem Apply() error = %v", err)
+	}
+	if !sawGet {
+		t.Fatalf("detach should read the live Deployment to resolve the mount path")
+	}
+	if !strings.Contains(patchBody, `"mountPath":"/data/nfs"`) || !strings.Contains(patchBody, `"$patch":"delete"`) {
+		t.Fatalf("patch delete uses mount path from live Deployment: body = %s", patchBody)
+	}
+}
+
 func TestKubernetesLifecycleExecutorRebuildRejectsMissingVM(t *testing.T) {
 	var requests []string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {

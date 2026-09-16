@@ -143,13 +143,13 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 	}
 
 	if request.Action == ports.WorkloadLifecycleAttachFilesystem || request.Action == ports.WorkloadLifecycleDetachFilesystem {
-		if err := e.applyKubeVirtFilesystem(ctx, request, record); err != nil {
+		if err := e.applyFilesystem(ctx, request, record); err != nil {
 			return ports.WorkloadInstanceLifecycleResult{}, err
 		}
 		return ports.WorkloadInstanceLifecycleResult{
 			Action:    request.Action,
 			Accepted:  true,
-			Reason:    "filesystem change accepted by KubeVirt lifecycle executor",
+			Reason:    "filesystem change accepted by lifecycle executor",
 			CheckedAt: e.now().UTC(),
 		}, nil
 	}
@@ -223,6 +223,149 @@ func (e *KubernetesLifecycleExecutor) applyKubeVirtVolume(ctx context.Context, r
 	}
 	_, err = e.client.do(ctx, http.MethodPut, e.client.host+kubeVirtVMSubresourcePath(resource.Namespace, resource.Name, subresource), "application/json", body)
 	return err
+}
+
+// applyFilesystem routes filesystem attach/detach by workload kind: VMs take
+// the KubeVirt virtiofs path (stop → spec rewrite → start), container and
+// gpu_container Deployments take an in-place targeted patch.
+func (e *KubernetesLifecycleExecutor) applyFilesystem(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	switch record.Kind {
+	case ports.WorkloadKindVM:
+		return e.applyKubeVirtFilesystem(ctx, request, record)
+	case ports.WorkloadKindContainer, ports.WorkloadKindGPUContainer:
+		return e.applyKubernetesFilesystem(ctx, request, record)
+	default:
+		return fmt.Errorf("%w: filesystem lifecycle execution is only supported for vm, container, and gpu_container instances", ports.ErrUnsupported)
+	}
+}
+
+// applyKubernetesFilesystem attaches/detaches a shared filesystem PVC (NFS/
+// CephFS) to a container or gpu_container Deployment via a targeted
+// strategic-merge patch on the pod template: the fs PVC joins spec.volumes and
+// the workload container gets a matching volumeMount, so the rollout converges
+// like scale/update_image. The volume name derivation is deterministic so
+// detach can locate (and delete) the entries attach wrote. Shared-filesystem
+// PVCs are RWX, so extra replicas and surge pods can mount them concurrently.
+func (e *KubernetesLifecycleExecutor) applyKubernetesFilesystem(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	resource, err := resourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	if resource.Kind != "Deployment" {
+		return fmt.Errorf("%w: filesystem lifecycle execution is only supported for Deployment workloads, got %q", ports.ErrUnsupported, resource.Kind)
+	}
+	filesystemID := strings.TrimSpace(request.FilesystemID)
+	if filesystemID == "" {
+		return fmt.Errorf("%w: filesystem_id is required for Kubernetes filesystem lifecycle execution", ports.ErrInvalid)
+	}
+	attach := request.Action == ports.WorkloadLifecycleAttachFilesystem
+	if attach && strings.TrimSpace(request.MountPath) == "" {
+		return fmt.Errorf("%w: mount_path is required to attach a filesystem", ports.ErrInvalid)
+	}
+	volumeName := kubeVirtFilesystemVolumeName(filesystemID)
+	claimName := storageProviderName("fs", filesystemID)
+
+	// volumeMounts merge by mountPath (not name), so detach needs the mount
+	// path attach recorded; fall back to reading the live Deployment when the
+	// record does not carry it.
+	mountPath := strings.TrimSpace(request.MountPath)
+	if !attach && mountPath == "" {
+		mountPath = filesystemMountPathFromRecord(record, filesystemID)
+		if mountPath == "" {
+			mountPath, err = e.kubernetesFilesystemMountPath(ctx, resource, volumeName)
+			if err != nil {
+				return err
+			}
+		}
+		if mountPath == "" {
+			return fmt.Errorf("%w: filesystem %q mount path is not recorded and Deployment %q has no matching volumeMount", ports.ErrInvalid, filesystemID, resource.Name)
+		}
+	}
+
+	volume := map[string]any{"name": volumeName}
+	mount := map[string]any{"name": volumeName}
+	if attach {
+		readOnly := request.ReadOnly != nil && *request.ReadOnly
+		volume["persistentVolumeClaim"] = map[string]any{"claimName": claimName, "readOnly": readOnly}
+		mount["mountPath"] = mountPath
+		if readOnly {
+			mount["readOnly"] = true
+		}
+	} else {
+		// Strategic-merge delete directives remove the entries keyed by
+		// volume name (volumes) and mountPath (volumeMounts).
+		volume["$patch"] = "delete"
+		mount = map[string]any{"mountPath": mountPath, "$patch": "delete"}
+	}
+	// The rendered pod template names its single container after the workload
+	// (podTemplate in dryrun_renderer.go), which equals the Deployment name.
+	patch, err := json.Marshal(map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"volumes": []any{volume},
+					"containers": []any{
+						map[string]any{"name": resource.Name, "volumeMounts": []any{mount}},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("%w: marshal filesystem patch: %v", ports.ErrInvalid, err)
+	}
+	_, err = e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/strategic-merge-patch+json", patch)
+	return err
+}
+
+// filesystemMountPathFromRecord reads the mount path attach persisted on the
+// instance record for the given filesystem id.
+func filesystemMountPathFromRecord(record ports.WorkloadInstanceRecord, filesystemID string) string {
+	for _, attachments := range [][]ports.WorkloadStorageAttachment{record.StorageAttachments, record.Status.Storage} {
+		for _, attachment := range attachments {
+			if attachment.Kind != ports.StorageAttachmentSharedPVC || attachment.ResourceID != filesystemID {
+				continue
+			}
+			if mountPath := strings.TrimSpace(attachment.MountPath); mountPath != "" {
+				return mountPath
+			}
+		}
+	}
+	return ""
+}
+
+// kubernetesFilesystemMountPath reads the live Deployment and returns the
+// mount path of the volumeMount backing the named filesystem volume, if any.
+func (e *KubernetesLifecycleExecutor) kubernetesFilesystemMountPath(ctx context.Context, resource kubernetesResource, volumeName string) (string, error) {
+	body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
+	if err != nil {
+		return "", fmt.Errorf("read Deployment %q for filesystem detach: %w", resource.Name, err)
+	}
+	var doc struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						VolumeMounts []struct {
+							Name      string `json:"name"`
+							MountPath string `json:"mountPath"`
+						} `json:"volumeMounts"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	if json.Unmarshal(body, &doc) != nil {
+		return "", fmt.Errorf("%w: Deployment %q spec is not valid JSON", ports.ErrInvalid, resource.Name)
+	}
+	for _, container := range doc.Spec.Template.Spec.Containers {
+		for _, volumeMount := range container.VolumeMounts {
+			if volumeMount.Name == volumeName && strings.TrimSpace(volumeMount.MountPath) != "" {
+				return strings.TrimSpace(volumeMount.MountPath), nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // applyKubeVirtFilesystem attaches/detaches a shared filesystem PVC
