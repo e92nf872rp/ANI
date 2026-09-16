@@ -57,3 +57,20 @@
 
 - 推理服务/知识库（Service 层）过滤不在本次范围，沿用 `已修复的bug.md` 既有搁置决策。
 - 无数据库 schema / Proto / SDK 破坏性变更；仅 Gateway router + pkg 层 OpenAPI 契约与外发参数（additive）。
+
+## 补充：状态过滤参数统一（status → state，2026-09-16）
+
+依据 `kjs-study/修复bug/已修复的bug.md`「数据库状态列名与接口参数命名核查（state vs status）」的结论：DB 统一 `state`，但接口层面实例/网络类用 `state`、四类存储接口用 `status`。为统一，将四类存储 GET 列表的状态过滤参数从 `status` 更名为 `state`：
+
+| 列表接口 | 原参数 | 现参数 |
+|---|---|---|
+| 块存储 `/volumes` | `status` | `state` |
+| 文件存储 `/filesystems` | `status` | `state` |
+| 对象存储 `/objects` | `status` | `state` |
+| 向量存储 `/vector-stores` | `status` | `state` |
+| 对象存储桶 `/buckets` | —（原本无状态过滤参数） | 不变 |
+
+- **OpenAPI**：`api/openapi/v1.yaml` 对应 4 个 list 的 `name: status` → `name: state`；`/buckets` 无状态参数，不改。
+- **handler**：`storage_resources.go:storageListFilters(c)` 统一读取 `state`（`c.Query("state")`）；该函数同时被 volumes/filesystems/objects/buckets/vector-stores 复用，一处改动即覆盖。
+- **单测**：`TestStorageHTTPVolumeListFiltersByKeywordAndStatus` 与 `TestVectorStoreListFiltersByState(AndKeyword)` 改用 `?state=` 断言，全部通过。
+- 该更名属查询参数外发名变更，未触碰 DB 列、DB schema 或 Proto。

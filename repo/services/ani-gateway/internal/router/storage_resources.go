@@ -553,7 +553,7 @@ type stringListFilterSpec struct {
 // storageMatchesFilters can compare against the same folded value.
 func storageListFilters(c *app.RequestContext) stringListFilterSpec {
 	spec := stringListFilterSpec{
-		status:  c.Query("status"),
+		status:  c.Query("state"),
 		keyword: strings.ToLower(strings.TrimSpace(c.Query("keyword"))),
 	}
 	switch strings.TrimSpace(c.Query("search_field")) {

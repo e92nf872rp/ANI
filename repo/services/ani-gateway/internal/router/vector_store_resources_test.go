@@ -855,10 +855,10 @@ func vectorStoreListItems(t *testing.T, query string) []map[string]any {
 	return items
 }
 
-func TestVectorStoreListFiltersByStatus(t *testing.T) {
-	items := vectorStoreListItems(t, "?status=ready")
+func TestVectorStoreListFiltersByState(t *testing.T) {
+	items := vectorStoreListItems(t, "?state=ready")
 	if len(items) != 2 {
-		t.Fatalf("status=ready items = %d, want 2", len(items))
+		t.Fatalf("state=ready items = %d, want 2", len(items))
 	}
 	for _, it := range items {
 		if it["state"] != "ready" {
@@ -880,10 +880,10 @@ func TestVectorStoreListFiltersByKeyword(t *testing.T) {
 	}
 }
 
-func TestVectorStoreListFiltersByStatusAndKeyword(t *testing.T) {
-	items := vectorStoreListItems(t, "?status=ready&keyword=test-ly-vec")
+func TestVectorStoreListFiltersByStateAndKeyword(t *testing.T) {
+	items := vectorStoreListItems(t, "?state=ready&keyword=test-ly-vec")
 	if len(items) != 1 {
-		t.Fatalf("status=ready&keyword=test-ly-vec items = %d, want 1", len(items))
+		t.Fatalf("state=ready&keyword=test-ly-vec items = %d, want 1", len(items))
 	}
 	if items[0]["id"] != "vs-a" || items[0]["state"] != "ready" {
 		t.Fatalf("item = %v, want vs-a ready", items[0])

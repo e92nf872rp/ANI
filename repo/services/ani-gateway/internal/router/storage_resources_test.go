@@ -699,11 +699,11 @@ func TestStorageHTTPVolumeListFiltersByKeywordAndStatus(t *testing.T) {
 	if got := countItems("?keyword=data-"); got != 2 {
 		t.Fatalf("keyword=data- count = %d, want 2", got)
 	}
-	if got := countItems("?status=available"); got != 2 {
-		t.Fatalf("status=available count = %d, want 2", got)
+	if got := countItems("?state=available"); got != 2 {
+		t.Fatalf("state=available count = %d, want 2", got)
 	}
-	if got := countItems("?status=failed"); got != 0 {
-		t.Fatalf("status=failed count = %d, want 0", got)
+	if got := countItems("?state=failed"); got != 0 {
+		t.Fatalf("state=failed count = %d, want 0", got)
 	}
 	if got := countItems("?keyword=no_such"); got != 0 {
 		t.Fatalf("keyword=no_such count = %d, want 0", got)
