@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 实例列表搜索/分页/隐藏已销毁 + Core 层列表过滤（2026-09，分支 fix/instance-searchfield-and-ops-pagination）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| IN-INSTANCE-SEARCHFIELD-AND-CORE-LIST-FILTER | 修复 kjs-study 定位的 Core 层两类后端过滤缺陷（已修复并实测通过，合并记录两次提交）：① 实例列表搜索/分页/隐藏已销毁（提交 85a090e，Bug-2/3/6）——`list` handler 解析 `search_field` 限定 `keyword` 匹配 id/name 字段，孤儿实例一并遵守 keyword/search_field 过滤（不再无条件合并泄漏不相关孤儿）；`ListOperations` 产出全量 total + 非空 next_cursor 正确翻页；默认列表排除 `deleted` 终态（显式 state=deleted 仍可查），孤儿遵守 state 过滤；② Core 层四类列表过滤失效（提交 ce814cb，镜像仓库-1 / 存储 / 网络类-子网）——`/registry/images` 增 `keyword`（`RegistryImageListRequest.Keyword`，Harbor/本地按仓库名+tag 模糊匹配），修复 Harbor 仓库层关键词预过滤致"仅命中 tag"镜像被提前跳过；`StorageResourceListRequest` 增 `Status/Keyword`，块/文件/对象/向量四类 handler 经通用 `storageMatchesFilters`/`vectorStoreMatchesFilters` 应用 status+keyword 过滤（向量存储同属 Core 层一并补齐）；子网 `ListSubnets` 按名称前缀过滤；OpenAPI v1.yaml 为相关 list 补 status/keyword/name 参数。实测（ani-system：dev-20260915-filter2/filter3）：子网 10→1、卷 5→1/2、文件 13→2、对象 41→38、镜像 4→1、向量 23→19/2。**推理服务/知识库（Service 层）过滤按用户要求搁置**。ANI-06/CURRENT-SPRINT/README + 本批次文件更新 | instance-searchfield-and-core-list-filter.md |
+
 ### 沙箱到期自动过期 + egress 白名单回显（2026-09，分支 fix/instance-searchfield-and-ops-pagination）
 
 | 批次 | 内容摘要 | 文件 |
