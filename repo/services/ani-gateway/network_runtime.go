@@ -62,6 +62,8 @@ func newGatewayNetworkService(ctx context.Context, cfg gatewayNetworkRuntimeConf
 		store := runtimeadapter.NewMetadataNetworkStore(metadata)
 		return runtimeadapter.NewLocalNetworkService(
 			runtimeadapter.WithNetworkResourceStore(store),
+			// 安全组绑定派生视图需要实例记录（安全组-5）。
+			runtimeadapter.WithNetworkInstanceStore(runtimeadapter.NewMetadataInstanceStore(metadata)),
 		), closeStore, nil
 	case "kubeovn_rest":
 		if strings.TrimSpace(cfg.ProviderUserID) == "" || strings.TrimSpace(cfg.ProviderProof) == "" {
@@ -104,7 +106,11 @@ func newGatewayNetworkService(ctx context.Context, cfg gatewayNetworkRuntimeConf
 				return nil, func() {}, fmt.Errorf("connect network metadata store: %w", err)
 			}
 			store := runtimeadapter.NewMetadataNetworkStore(metadata)
-			opts = append(opts, runtimeadapter.WithNetworkResourceStore(store))
+			opts = append(opts,
+				runtimeadapter.WithNetworkResourceStore(store),
+				// 安全组绑定派生视图需要实例记录（安全组-5）。
+				runtimeadapter.WithNetworkInstanceStore(runtimeadapter.NewMetadataInstanceStore(metadata)),
+			)
 			closeStore = closeFn
 		}
 		return runtimeadapter.NewLocalNetworkService(opts...), closeStore, nil

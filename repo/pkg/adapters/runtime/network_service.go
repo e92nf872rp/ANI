@@ -16,6 +16,7 @@ type LocalNetworkService struct {
 	mu                 sync.RWMutex
 	now                func() time.Time
 	store              ports.NetworkResourceStore
+	instances          ports.WorkloadInstanceStore
 	providerRenderer   ports.NetworkProviderRenderer
 	providerDryRun     ports.NetworkProviderDryRun
 	providerApply      ports.NetworkProviderApply
@@ -55,6 +56,15 @@ func WithNetworkServiceClock(now func() time.Time) NetworkServiceOption {
 func WithNetworkResourceStore(store ports.NetworkResourceStore) NetworkServiceOption {
 	return func(service *LocalNetworkService) {
 		service.store = store
+	}
+}
+
+// WithNetworkInstanceStore 注入实例记录存储，用于安全组绑定派生视图：
+// 实例侧"更换安全组"只更新实例自身记录，不写独立绑定表，安全组详情的
+// 绑定查询必须按实例记录反查才能与真实绑定一致（测试缺陷 安全组-5）。
+func WithNetworkInstanceStore(instances ports.WorkloadInstanceStore) NetworkServiceOption {
+	return func(service *LocalNetworkService) {
+		service.instances = instances
 	}
 }
 
@@ -606,14 +616,17 @@ func (s *LocalNetworkService) ListSecurityGroups(ctx context.Context, request po
 			}
 			items = filtered
 		}
+		// 绑定计数以实例记录派生视图为准（安全组-5），一次查询服务整个列表。
+		derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)
 		s.mu.RLock()
 		for i := range items {
-			items[i].BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(items[i].SecurityGroupID)
+			items[i].BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(items[i].SecurityGroupID, derived[items[i].SecurityGroupID])
 		}
 		s.mu.RUnlock()
 		sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 		return items, nil
 	}
+	derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]ports.NetworkSecurityGroupRecord, 0, len(s.securityGroup))
@@ -633,23 +646,71 @@ func (s *LocalNetworkService) ListSecurityGroups(ctx context.Context, request po
 		if request.State != "" && record.State != request.State {
 			continue
 		}
-		record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID)
+		record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID, derived[record.SecurityGroupID])
 		items = append(items, record)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 	return items, nil
 }
 
-// securityGroupBoundInstanceCountLocked 统计指定安全组当前绑定的实例数（只读聚合字段
-// bound_instance_count 的数据源）。调用方必须已持有 s.mu 读锁或写锁。
-func (s *LocalNetworkService) securityGroupBoundInstanceCountLocked(securityGroupID string) int {
-	count := 0
-	for _, bind := range s.securityGroupBinds {
-		if bind.SecurityGroupID == securityGroupID && bind.TargetType == "instance" {
-			count++
+// derivedSecurityGroupBindings 从实例记录派生安全组绑定视图：
+// map[securityGroupID] -> 该安全组当前真实绑定的实例 binding 记录。
+// 实例侧"更换安全组"只写实例自身 record.Network.SecurityGroups（持久化于
+// workload_instances.network_summary），不写 securityGroupBinds 内存 map，
+// 因此绑定查询必须以实例记录为真实来源反查（测试缺陷 安全组-5）。
+// 终态（deleting/deleted）实例不计入绑定。未注入实例 store 时返回 nil。
+func (s *LocalNetworkService) derivedSecurityGroupBindings(ctx context.Context, tenantID string) map[string][]ports.NetworkSecurityGroupBindingRecord {
+	if s.instances == nil || strings.TrimSpace(tenantID) == "" {
+		return nil
+	}
+	records, err := s.instances.List(ctx, tenantID, "")
+	if err != nil {
+		return nil
+	}
+	derived := map[string][]ports.NetworkSecurityGroupBindingRecord{}
+	for _, record := range records {
+		if record.Status.State == ports.WorkloadStateDeleting || record.Status.State == ports.WorkloadStateDeleted {
+			continue
+		}
+		for _, sg := range record.Network.SecurityGroups {
+			sgID := strings.TrimSpace(sg.ID)
+			if sgID == "" {
+				continue
+			}
+			derived[sgID] = append(derived[sgID], ports.NetworkSecurityGroupBindingRecord{
+				TenantID:        record.TenantID,
+				BindingID:       "sgb-inst-" + record.InstanceID + "-" + sgID,
+				SecurityGroupID: sgID,
+				TargetType:      "instance",
+				TargetID:        record.InstanceID,
+				CreatedAt:       record.CreatedAt,
+			})
 		}
 	}
-	return count
+	return derived
+}
+
+// securityGroupBoundInstanceCountLocked 统计指定安全组当前绑定的实例数（聚合字段
+// bound_instance_count 的数据源）：实例绑定以派生视图 derived（来自实例记录）为准，
+// 显式 bindings API 写入的记录补充派生未覆盖的目标，按 target_id 去重。
+// derived 为 nil 时（未注入实例 store）退化为纯显式绑定计数。
+// 调用方必须已持有 s.mu 读锁或写锁。
+func (s *LocalNetworkService) securityGroupBoundInstanceCountLocked(securityGroupID string, derived []ports.NetworkSecurityGroupBindingRecord) int {
+	derivedTargets := map[string]struct{}{}
+	for _, bind := range derived {
+		derivedTargets[bind.TargetID] = struct{}{}
+	}
+	count := 0
+	for _, bind := range s.securityGroupBinds {
+		if bind.SecurityGroupID != securityGroupID || bind.TargetType != "instance" {
+			continue
+		}
+		if _, covered := derivedTargets[bind.TargetID]; covered {
+			continue
+		}
+		count++
+	}
+	return count + len(derivedTargets)
 }
 
 // resolveVPCForValidation 解析用于创建校验（安全组/子网等绑定 VPC）的 VPC 记录：
@@ -674,18 +735,20 @@ func (s *LocalNetworkService) GetSecurityGroup(ctx context.Context, request port
 		if err != nil {
 			return ports.NetworkSecurityGroupRecord{}, err
 		}
+		derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)
 		s.mu.RLock()
-		record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID)
+		record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID, derived[record.SecurityGroupID])
 		s.mu.RUnlock()
 		return record, nil
 	}
+	derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record, ok := s.securityGroup[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkSecurityGroupRecord{}, ports.ErrNotFound
 	}
-	record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID)
+	record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID, derived[record.SecurityGroupID])
 	return record, nil
 }
 
@@ -860,17 +923,66 @@ func (s *LocalNetworkService) DeleteSecurityGroupRule(ctx context.Context, reque
 	return record, nil
 }
 
-func (s *LocalNetworkService) ListSecurityGroupBindings(_ context.Context, request ports.NetworkSecurityGroupBindingListRequest) ([]ports.NetworkSecurityGroupBindingRecord, error) {
+// resolveSecurityGroupExists 解析安全组是否存在且属于该租户：
+// store 模式优先查持久层（进程重启后内存 map 不含历史安全组），否则回退内存 map。
+// 返回 (record, true) 表示安全组存在且属于该租户。
+func (s *LocalNetworkService) resolveSecurityGroupExists(ctx context.Context, tenantID string, securityGroupID string) (ports.NetworkSecurityGroupRecord, bool) {
+	if s.store != nil {
+		record, err := s.store.GetSecurityGroup(ctx, tenantID, securityGroupID)
+		return record, err == nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+	record, ok := s.securityGroup[strings.TrimSpace(securityGroupID)]
+	if !ok || record.TenantID != tenantID || record.State == ports.NetworkResourceDeleted {
+		return ports.NetworkSecurityGroupRecord{}, false
+	}
+	return record, true
+}
+
+// storeBackedSecurityGroupExists 仅查持久层确认安全组存在且属于该租户。
+// 供已持有 s.mu 锁的调用方使用（不得在此再加锁）；store 未配置时恒为 false。
+func (s *LocalNetworkService) storeBackedSecurityGroupExists(ctx context.Context, tenantID string, securityGroupID string) bool {
+	if s.store == nil {
+		return false
+	}
+	_, err := s.store.GetSecurityGroup(ctx, tenantID, securityGroupID)
+	return err == nil
+}
+
+func (s *LocalNetworkService) ListSecurityGroupBindings(ctx context.Context, request ports.NetworkSecurityGroupBindingListRequest) ([]ports.NetworkSecurityGroupBindingRecord, error) {
+	if _, ok := s.resolveSecurityGroupExists(ctx, request.TenantID, request.SecurityGroupID); !ok {
 		return nil, ports.ErrNotFound
 	}
-	items := make([]ports.NetworkSecurityGroupBindingRecord, 0, len(s.securityGroupBinds))
+	// 实例绑定以实例记录派生视图为准（安全组-5）：实例侧"更换安全组"只更新
+	// 实例自身记录，不写 securityGroupBinds，显式绑定无法反映真实绑定关系。
+	derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)[strings.TrimSpace(request.SecurityGroupID)]
+	derivedTargets := make(map[string]struct{}, len(derived))
+	for _, bind := range derived {
+		derivedTargets[bind.TargetID] = struct{}{}
+	}
+	s.mu.RLock()
+	items := make([]ports.NetworkSecurityGroupBindingRecord, 0, len(s.securityGroupBinds)+len(derived))
 	for _, record := range s.securityGroupBinds {
+		// 同一实例已被派生视图覆盖时跳过显式记录，避免重复展示。
+		if record.TargetType == "instance" {
+			if _, covered := derivedTargets[record.TargetID]; covered {
+				continue
+			}
+		}
 		if record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
 			continue
 		}
+		if strings.TrimSpace(request.TargetType) != "" && record.TargetType != strings.TrimSpace(request.TargetType) {
+			continue
+		}
+		if strings.TrimSpace(request.TargetID) != "" && record.TargetID != strings.TrimSpace(request.TargetID) {
+			continue
+		}
+		items = append(items, record)
+	}
+	s.mu.RUnlock()
+	for _, record := range derived {
 		if strings.TrimSpace(request.TargetType) != "" && record.TargetType != strings.TrimSpace(request.TargetType) {
 			continue
 		}
@@ -883,7 +995,7 @@ func (s *LocalNetworkService) ListSecurityGroupBindings(_ context.Context, reque
 	return items, nil
 }
 
-func (s *LocalNetworkService) CreateSecurityGroupBinding(_ context.Context, request ports.NetworkSecurityGroupBindingCreateRequest) (ports.NetworkSecurityGroupBindingRecord, error) {
+func (s *LocalNetworkService) CreateSecurityGroupBinding(ctx context.Context, request ports.NetworkSecurityGroupBindingCreateRequest) (ports.NetworkSecurityGroupBindingRecord, error) {
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
 	if err != nil {
 		return ports.NetworkSecurityGroupBindingRecord{}, err
@@ -902,7 +1014,7 @@ func (s *LocalNetworkService) CreateSecurityGroupBinding(_ context.Context, requ
 			return record, nil
 		}
 	}
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) && !s.storeBackedSecurityGroupExists(ctx, request.TenantID, request.SecurityGroupID) {
 		return ports.NetworkSecurityGroupBindingRecord{}, ports.ErrNotFound
 	}
 	record := ports.NetworkSecurityGroupBindingRecord{
@@ -918,14 +1030,14 @@ func (s *LocalNetworkService) CreateSecurityGroupBinding(_ context.Context, requ
 	return record, nil
 }
 
-func (s *LocalNetworkService) DeleteSecurityGroupBinding(_ context.Context, request ports.NetworkSecurityGroupBindingDeleteRequest) (ports.NetworkSecurityGroupBindingRecord, error) {
+func (s *LocalNetworkService) DeleteSecurityGroupBinding(ctx context.Context, request ports.NetworkSecurityGroupBindingDeleteRequest) (ports.NetworkSecurityGroupBindingRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.securityGroupBinds[strings.TrimSpace(request.BindingID)]
 	if !ok || record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
 		return ports.NetworkSecurityGroupBindingRecord{}, ports.ErrNotFound
 	}
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) && !s.storeBackedSecurityGroupExists(ctx, request.TenantID, request.SecurityGroupID) {
 		return ports.NetworkSecurityGroupBindingRecord{}, ports.ErrNotFound
 	}
 	delete(s.securityGroupBinds, record.BindingID)

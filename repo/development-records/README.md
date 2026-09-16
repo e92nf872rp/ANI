@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 安全组绑定派生视图（2026-09，分支 fix/network-sg-vpc-and-instance-filter）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| IN-NETWORK-SG-BINDING-DERIVED-A | 修复 kjs-study 测试异常 安全组-5（已修复并实测通过）：根因是实例侧绑定与安全组侧查询用两套割裂数据——实例「更换安全组」只更新实例自身 `record.Network.SecurityGroups`（持久化于 workload_instances.network_summary JSONB），从不写 `securityGroupBinds` 内存 map（后者只有显式 bindings API 才写且无持久化）；部署实测暴露第三层缺陷——bindings 三接口存在性检查 memory-only，重启后对 DB 历史安全组 404。方案选定分析文档方向②「查询统一」落地为派生视图：`LocalNetworkService` 注入 `ports.WorkloadInstanceStore`（`WithNetworkInstanceStore`），新增 `derivedSecurityGroupBindings` 按实例记录反查派生绑定（跳过 deleting/deleted 终态，确定性 binding_id `sgb-inst-<instanceID>-<sgID>`）；`ListSecurityGroupBindings` 显式与派生合并去重（派生优先）；`bound_instance_count` 聚合同口径（派生目标数 + 未被派生覆盖的显式目标数），Get/List/Bindings 三处一致；bindings 存在性检查改 `resolveSecurityGroupExists`/`storeBackedSecurityGroupExists`（store 优先）。gateway `network_runtime.go` 两分支注入实例 store。无 DB schema 变更、无契约变更。单测 2 个新增（派生视图合并去重+计数同口径、重启后 store 模式不 404）。实测（ani-system 镜像 dev-20260916-sg5）：sg_39c87355 bindings 返回 2 条派生绑定与实例记录完全一致（修复前为空）、bound_instance_count=2、不存在 SG 404。**已知边界**：`change_security_groups` lifecycle 被 Kubernetes adapter 拒绝（存量能力缺口，真实环境实例安全组唯一写路径是创建时网络配置，派生视图恰好覆盖）；派生仅覆盖 instance 目标；LB/NIC 绑定与规则 API memory-only 待后续批次 | network-sg-binding-derived-view.md |
+
 ### 安全组 vpc_id 建模与实例列表 VPC/子网过滤（2026-09，分支 fix/network-sg-vpc-and-instance-filter）
 
 | 批次 | 内容摘要 | 文件 |

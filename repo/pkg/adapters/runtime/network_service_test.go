@@ -772,3 +772,122 @@ func TestLocalNetworkServiceListsSecurityGroupsFromStoreByVPC(t *testing.T) {
 		t.Fatalf("BoundInstanceCount = %d, want 0 without binds", items[0].BoundInstanceCount)
 	}
 }
+
+// 安全组-5 核心回归：实例侧"更换安全组"只更新实例自身记录，不写独立绑定表，
+// 安全组绑定查询必须按实例记录派生，显式 bindings API 未写入的绑定也要可见。
+func TestLocalNetworkServiceSecurityGroupBindingsDerivedFromInstanceRecords(t *testing.T) {
+	instances := &fakeInstanceStore{}
+	service := NewLocalNetworkService(WithNetworkInstanceStore(instances))
+	sg, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{TenantID: "tenant-a", IdempotencyKey: "sg-derived", Name: "sg"})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup error = %v", err)
+	}
+	instances.records = []ports.WorkloadInstanceRecord{
+		{
+			TenantID: "tenant-a", InstanceID: "inst-1", Name: "inst-1", Kind: ports.WorkloadKindVM,
+			Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+			Network:   ports.InstanceNetworkSummary{SecurityGroups: []ports.InstanceSecurityGroupSummary{{ID: sg.SecurityGroupID}}},
+			CreatedAt: time.Unix(100, 0),
+		},
+		{
+			TenantID: "tenant-a", InstanceID: "inst-2", Name: "inst-2", Kind: ports.WorkloadKindVM,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+			// inst-2 未绑定该安全组，不应出现在派生绑定里。
+			Network:   ports.InstanceNetworkSummary{SecurityGroups: []ports.InstanceSecurityGroupSummary{{ID: "sg-other"}}},
+			CreatedAt: time.Unix(101, 0),
+		},
+		{
+			TenantID: "tenant-a", InstanceID: "inst-3", Name: "inst-3", Kind: ports.WorkloadKindVM,
+			Status:    ports.WorkloadStatus{State: ports.WorkloadStateDeleted},
+			Network:   ports.InstanceNetworkSummary{SecurityGroups: []ports.InstanceSecurityGroupSummary{{ID: sg.SecurityGroupID}}},
+			CreatedAt: time.Unix(102, 0),
+		},
+	}
+	listReq := ports.NetworkSecurityGroupBindingListRequest{TenantID: "tenant-a", SecurityGroupID: sg.SecurityGroupID, TargetType: "instance"}
+	items, err := service.ListSecurityGroupBindings(context.Background(), listReq)
+	if err != nil {
+		t.Fatalf("ListSecurityGroupBindings error = %v", err)
+	}
+	if len(items) != 1 || items[0].TargetID != "inst-1" || items[0].TargetType != "instance" {
+		t.Fatalf("derived bindings = %#v, want only inst-1", items)
+	}
+	if items[0].BindingID != "sgb-inst-inst-1-"+sg.SecurityGroupID {
+		t.Fatalf("derived binding id = %q, want deterministic sgb-inst-inst-1-<sg>", items[0].BindingID)
+	}
+
+	// 显式 bindings API 与派生视图合并：未覆盖目标补充，已覆盖目标去重。
+	if _, err := service.CreateSecurityGroupBinding(context.Background(), ports.NetworkSecurityGroupBindingCreateRequest{
+		TenantID: "tenant-a", SecurityGroupID: sg.SecurityGroupID, IdempotencyKey: "bind-2", TargetType: "instance", TargetID: "inst-2",
+	}); err != nil {
+		t.Fatalf("CreateSecurityGroupBinding(inst-2) error = %v", err)
+	}
+	if _, err := service.CreateSecurityGroupBinding(context.Background(), ports.NetworkSecurityGroupBindingCreateRequest{
+		TenantID: "tenant-a", SecurityGroupID: sg.SecurityGroupID, IdempotencyKey: "bind-1", TargetType: "instance", TargetID: "inst-1",
+	}); err != nil {
+		t.Fatalf("CreateSecurityGroupBinding(inst-1 dup) error = %v", err)
+	}
+	items, err = service.ListSecurityGroupBindings(context.Background(), listReq)
+	if err != nil {
+		t.Fatalf("ListSecurityGroupBindings after explicit binds error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("bindings = %#v, want derived inst-1 + explicit inst-2", items)
+	}
+	// TargetID 过滤同样作用于派生视图。
+	items, err = service.ListSecurityGroupBindings(context.Background(), ports.NetworkSecurityGroupBindingListRequest{
+		TenantID: "tenant-a", SecurityGroupID: sg.SecurityGroupID, TargetType: "instance", TargetID: "inst-2",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroupBindings(target_id) error = %v", err)
+	}
+	if len(items) != 1 || items[0].TargetID != "inst-2" {
+		t.Fatalf("filtered bindings = %#v, want only inst-2", items)
+	}
+
+	// bound_instance_count 聚合同样以派生视图为准（派生 1 + 显式 1，去重后 2）。
+	record, err := service.GetSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: sg.SecurityGroupID})
+	if err != nil {
+		t.Fatalf("GetSecurityGroup error = %v", err)
+	}
+	if record.BoundInstanceCount != 2 {
+		t.Fatalf("GetSecurityGroup BoundInstanceCount = %d, want 2", record.BoundInstanceCount)
+	}
+	listed, err := service.ListSecurityGroups(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListSecurityGroups error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].BoundInstanceCount != 2 {
+		t.Fatalf("ListSecurityGroups BoundInstanceCount = %#v, want 2", listed)
+	}
+}
+
+// 安全组-5 重启回归：store 模式下内存 map 为空时，绑定查询不得因
+// memory-only 存在性检查 404，且派生绑定来自实例记录。
+func TestLocalNetworkServiceSecurityGroupBindingsFromStoreAfterRestart(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+		networkStoreTenantID, "sg-persisted", "vpc-a", "web-sg", "",
+		[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(95, 0),
+	}}}
+	instances := &fakeInstanceStore{records: []ports.WorkloadInstanceRecord{
+		{
+			TenantID: networkStoreTenantID, InstanceID: "inst-persisted", Name: "inst-persisted", Kind: ports.WorkloadKindVM,
+			Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+			Network:   ports.InstanceNetworkSummary{SecurityGroups: []ports.InstanceSecurityGroupSummary{{ID: "sg-persisted"}}},
+			CreatedAt: time.Unix(100, 0),
+		},
+	}}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+		WithNetworkInstanceStore(instances),
+	)
+
+	items, err := service.ListSecurityGroupBindings(context.Background(), ports.NetworkSecurityGroupBindingListRequest{
+		TenantID: networkStoreTenantID, SecurityGroupID: "sg-persisted", TargetType: "instance",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroupBindings error = %v", err)
+	}
+	if len(items) != 1 || items[0].TargetID != "inst-persisted" {
+		t.Fatalf("bindings = %#v, want derived inst-persisted", items)
+	}
+}
