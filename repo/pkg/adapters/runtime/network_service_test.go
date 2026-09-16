@@ -612,3 +612,50 @@ func (p *fakeNetworkRouteProvider) Observe(_ context.Context, request ports.Netw
 var _ ports.NetworkProviderDryRun = (*fakeNetworkRouteProvider)(nil)
 var _ ports.NetworkProviderApply = (*fakeNetworkRouteProvider)(nil)
 var _ ports.NetworkProviderStatusReader = (*fakeNetworkRouteProvider)(nil)
+
+func TestLocalNetworkServiceListSubnetsFiltersByName(t *testing.T) {
+	service := NewLocalNetworkService()
+	vpc, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{TenantID: "tenant-a", IdempotencyKey: "net-vpc-name-filter", Name: "vpc-a"})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	names := []string{"app-net", "app-mgmt", "db-net"}
+	for i, name := range names {
+		if _, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+			TenantID:       "tenant-a",
+			IdempotencyKey: "net-subnet-name-" + names[i],
+			VPCID:          vpc.VPCID,
+			Name:           name,
+			CIDR:           "10.20." + string(rune('1'+i)) + ".0/24",
+		}); err != nil {
+			t.Fatalf("CreateSubnet(%s) error = %v", name, err)
+		}
+	}
+
+	// 无条件返回全部 3 条。
+	all, err := service.ListSubnets(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListSubnets() error = %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("subnets = %d, want 3", len(all))
+	}
+
+	// 按名称前缀过滤。
+	filtered, err := service.ListSubnets(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a", Name: "app-"})
+	if err != nil {
+		t.Fatalf("ListSubnets(name) error = %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("name=app- subnets = %d, want 2", len(filtered))
+	}
+
+	// 无命中返回空（非错误）。
+	none, err := service.ListSubnets(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a", Name: "no_such"})
+	if err != nil {
+		t.Fatalf("ListSubnets(no_such) error = %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("name=no_such subnets = %+v, want none", none)
+	}
+}

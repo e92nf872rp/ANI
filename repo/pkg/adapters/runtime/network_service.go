@@ -374,6 +374,15 @@ func (s *LocalNetworkService) ListSubnets(ctx context.Context, request ports.Net
 			}
 			items = filtered
 		}
+		if strings.TrimSpace(request.Name) != "" {
+			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
 		if request.State != "" {
 			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
 			for _, record := range items {
@@ -394,6 +403,9 @@ func (s *LocalNetworkService) ListSubnets(ctx context.Context, request ports.Net
 			continue
 		}
 		if strings.TrimSpace(request.VPCID) != "" && record.VPCID != strings.TrimSpace(request.VPCID) {
+			continue
+		}
+		if strings.TrimSpace(request.Name) != "" && !strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
 			continue
 		}
 		if request.State != "" && record.State != request.State {

@@ -268,6 +268,7 @@ type RegistryImageListRequest struct {
 	Repository string
 	Tag        string
 	Purpose    string
+	Keyword    string
 	ScanStatus RegistryScanState
 	Limit      int
 	Cursor     string

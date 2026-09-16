@@ -665,3 +665,47 @@ func jsonNestedNumberField(t *testing.T, body []byte, first string, second strin
 	value, _ := secondMap[third].(float64)
 	return value
 }
+
+func TestStorageHTTPVolumeListFiltersByKeywordAndStatus(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	// 创建两个不同名称的卷。
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"list-filter-vol-a","name":"data-prometheus","size_gib":100,"storage_class":"standard","zone":"az-a","volume_type":"ssd"}`, http.StatusCreated)
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"list-filter-vol-b","name":"data-backup","size_gib":200,"storage_class":"standard","zone":"az-a","volume_type":"ssd"}`, http.StatusCreated)
+
+	countItems := func(query string) int {
+		t.Helper()
+		body := performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes"+query, "", http.StatusOK)
+		var decoded struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		return len(decoded.Items)
+	}
+
+	if got := countItems(""); got != 2 {
+		t.Fatalf("volumes count = %d, want 2", got)
+	}
+	if got := countItems("?keyword=prometheus"); got != 1 {
+		t.Fatalf("keyword=prometheus count = %d, want 1", got)
+	}
+	if got := countItems("?keyword=data-"); got != 2 {
+		t.Fatalf("keyword=data- count = %d, want 2", got)
+	}
+	if got := countItems("?status=available"); got != 2 {
+		t.Fatalf("status=available count = %d, want 2", got)
+	}
+	if got := countItems("?status=failed"); got != 0 {
+		t.Fatalf("status=failed count = %d, want 0", got)
+	}
+	if got := countItems("?keyword=no_such"); got != 0 {
+		t.Fatalf("keyword=no_such count = %d, want 0", got)
+	}
+}

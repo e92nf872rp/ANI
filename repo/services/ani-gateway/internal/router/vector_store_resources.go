@@ -173,9 +173,23 @@ func (api *vectorStoreAPI) listVectorStores(ctx context.Context, c *app.RequestC
 	}
 	items := make([]vectorStoreResponse, 0, len(records))
 	for _, record := range records {
+		if !vectorStoreMatchesFilters(record, c.Query("status"), c.Query("keyword")) {
+			continue
+		}
 		items = append(items, vectorStoreFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+// vectorStoreMatchesFilters 按状态精确匹配 + 按名称关键词（大小写不敏感）模糊匹配过滤向量存储。
+func vectorStoreMatchesFilters(record ports.VectorStoreRecord, status, keyword string) bool {
+	if status != "" && string(record.State) != status {
+		return false
+	}
+	if keyword == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(record.Name), keyword)
 }
 
 func (api *vectorStoreAPI) getVectorStore(ctx context.Context, c *app.RequestContext) {

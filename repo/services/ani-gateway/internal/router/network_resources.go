@@ -370,6 +370,7 @@ func (api *networkAPI) listSubnets(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSubnets(ctx, ports.NetworkResourceListRequest{
 		TenantID: instanceTenantID(c),
 		VPCID:    c.Query("vpc_id"),
+		Name:     c.Query("name"),
 		State:    ports.NetworkResourceState(c.Query("state")),
 	})
 	if err != nil {

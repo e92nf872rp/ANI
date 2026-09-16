@@ -539,6 +539,31 @@ func tagFilesystemConsumers(resp *storageFilesystemResponse, consumers []runtime
 	resp.UsedBy = storageConsumersToResponse(consumers)
 }
 
+// storageListFilters parses the optional status + keyword query parameters.
+// keyword is lower-cased here so the per-record match in
+// storageMatchesFilters can compare against the same folded value.
+func storageListFilters(c *app.RequestContext) (string, string) {
+	return c.Query("status"), strings.ToLower(strings.TrimSpace(c.Query("keyword")))
+}
+
+// storageMatchesFilters reports whether a storage record survives the status
+// and keyword list filters. keyword matches any supplied name segment
+// (e.g. volume name, or an object's bucket/key) case-insensitively.
+func storageMatchesFilters(recordState ports.StorageResourceState, status, keyword string, nameParts ...string) bool {
+	if status != "" && string(recordState) != status {
+		return false
+	}
+	if keyword == "" {
+		return true
+	}
+	for _, part := range nameParts {
+		if strings.Contains(strings.ToLower(part), keyword) {
+			return true
+		}
+	}
+	return false
+}
+
 // storageInUseFilter parses the optional in_use query parameter. The first
 // return reports whether filtering was requested; an invalid value returns
 // an error so handlers can reject with 400 instead of silently ignoring it.
@@ -594,6 +619,7 @@ func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
+	statusFilter, keyword := storageListFilters(c)
 	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
 	if err != nil {
 		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
@@ -601,6 +627,9 @@ func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
 	}
 	items := make([]storageVolumeResponse, 0, len(records))
 	for _, record := range records {
+		if !storageMatchesFilters(record.State, statusFilter, keyword, record.Name) {
+			continue
+		}
 		item := storageVolumeFromRecord(record)
 		tagVolumeConsumers(&item, consumerIndex[storageVolumeConsumerKey(record.VolumeID)])
 		if filterSet && item.InUse != wantInUse {
@@ -798,6 +827,7 @@ func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContex
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
+	statusFilter, keyword := storageListFilters(c)
 	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
 	if err != nil {
 		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
@@ -805,6 +835,9 @@ func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContex
 	}
 	items := make([]storageFilesystemResponse, 0, len(records))
 	for _, record := range records {
+		if !storageMatchesFilters(record.State, statusFilter, keyword, record.Name) {
+			continue
+		}
 		item := storageFilesystemFromRecord(record)
 		tagFilesystemConsumers(&item, consumerIndex[storageFilesystemConsumerKey(record.FilesystemID)])
 		if filterSet && item.InUse != wantInUse {
@@ -1191,8 +1224,12 @@ func (api *storageAPI) listObjects(ctx context.Context, c *app.RequestContext) {
 		writeStorageError(c, err)
 		return
 	}
+	statusFilter, keyword := storageListFilters(c)
 	items := make([]storageObjectResponse, 0, len(records))
 	for _, record := range records {
+		if !storageMatchesFilters(record.State, statusFilter, keyword, record.Bucket, record.Key) {
+			continue
+		}
 		items = append(items, storageObjectFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
