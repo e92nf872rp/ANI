@@ -889,3 +889,21 @@ func TestVectorStoreListFiltersByStatusAndKeyword(t *testing.T) {
 		t.Fatalf("item = %v, want vs-a ready", items[0])
 	}
 }
+
+func TestVectorStoreListFiltersById(t *testing.T) {
+	items := vectorStoreListItems(t, "?search_field=id&keyword=vs-b")
+	if len(items) != 1 {
+		t.Fatalf("search_field=id&keyword=vs-b items = %d, want 1", len(items))
+	}
+	if items[0]["id"] != "vs-b" {
+		t.Fatalf("item = %v, want vs-b", items[0])
+	}
+}
+
+func TestVectorStoreListFiltersByNameViaSearchField(t *testing.T) {
+	// search_field=name 应与缺省 keyword 行为一致（按 name 模糊匹配）。
+	items := vectorStoreListItems(t, "?search_field=name&keyword=test-ly-vec")
+	if len(items) != 2 {
+		t.Fatalf("search_field=name&keyword=test-ly-vec items = %d, want 2", len(items))
+	}
+}

@@ -232,6 +232,15 @@ func (s *LocalNetworkService) ListVPCs(ctx context.Context, request ports.Networ
 			}
 			items = filtered
 		}
+		if strings.TrimSpace(request.Keyword) != "" {
+			filtered := make([]ports.NetworkVPCRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.VPCID, strings.TrimSpace(request.Keyword)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
 		if request.State != "" {
 			filtered := make([]ports.NetworkVPCRecord, 0, len(items))
 			for _, record := range items {
@@ -252,6 +261,9 @@ func (s *LocalNetworkService) ListVPCs(ctx context.Context, request ports.Networ
 			continue
 		}
 		if strings.TrimSpace(request.Name) != "" && !strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+			continue
+		}
+		if strings.TrimSpace(request.Keyword) != "" && !strings.HasPrefix(record.VPCID, strings.TrimSpace(request.Keyword)) {
 			continue
 		}
 		if request.State != "" && record.State != request.State {
@@ -383,6 +395,15 @@ func (s *LocalNetworkService) ListSubnets(ctx context.Context, request ports.Net
 			}
 			items = filtered
 		}
+		if strings.TrimSpace(request.Keyword) != "" {
+			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.SubnetID, strings.TrimSpace(request.Keyword)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
 		if request.State != "" {
 			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
 			for _, record := range items {
@@ -406,6 +427,9 @@ func (s *LocalNetworkService) ListSubnets(ctx context.Context, request ports.Net
 			continue
 		}
 		if strings.TrimSpace(request.Name) != "" && !strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+			continue
+		}
+		if strings.TrimSpace(request.Keyword) != "" && !strings.HasPrefix(record.SubnetID, strings.TrimSpace(request.Keyword)) {
 			continue
 		}
 		if request.State != "" && record.State != request.State {
@@ -538,6 +562,9 @@ func (s *LocalNetworkService) ListSecurityGroups(_ context.Context, request port
 			continue
 		}
 		if strings.TrimSpace(request.Name) != "" && !strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+			continue
+		}
+		if strings.TrimSpace(request.Keyword) != "" && !strings.HasPrefix(record.SecurityGroupID, strings.TrimSpace(request.Keyword)) {
 			continue
 		}
 		if request.State != "" && record.State != request.State {

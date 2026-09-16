@@ -539,25 +539,48 @@ func tagFilesystemConsumers(resp *storageFilesystemResponse, consumers []runtime
 	resp.UsedBy = storageConsumersToResponse(consumers)
 }
 
-// storageListFilters parses the optional status + keyword query parameters.
-// keyword is lower-cased here so the per-record match in
-// storageMatchesFilters can compare against the same folded value.
-func storageListFilters(c *app.RequestContext) (string, string) {
-	return c.Query("status"), strings.ToLower(strings.TrimSpace(c.Query("keyword")))
+// stringListFilterSpec is a normalized list-filter description shared by the
+// storage list handlers. searchField forces keyword to match a specific field
+// ("id" or "name"); an empty searchField keeps the legacy nameParts matching.
+type stringListFilterSpec struct {
+	status        string
+	keyword       string
+	searchFieldID bool
 }
 
-// storageMatchesFilters reports whether a storage record survives the status
-// and keyword list filters. keyword matches any supplied name segment
-// (e.g. volume name, or an object's bucket/key) case-insensitively.
-func storageMatchesFilters(recordState ports.StorageResourceState, status, keyword string, nameParts ...string) bool {
-	if status != "" && string(recordState) != status {
+// storageListFilters parses the optional status + search_field + keyword query
+// parameters. keyword is lower-cased here so the per-record match in
+// storageMatchesFilters can compare against the same folded value.
+func storageListFilters(c *app.RequestContext) stringListFilterSpec {
+	spec := stringListFilterSpec{
+		status:  c.Query("status"),
+		keyword: strings.ToLower(strings.TrimSpace(c.Query("keyword"))),
+	}
+	switch strings.TrimSpace(c.Query("search_field")) {
+	case "id":
+		spec.searchFieldID = true
+	case "name":
+		spec.searchFieldID = false
+	}
+	return spec
+}
+
+// storageMatchesFilters reports whether a storage record survives the status,
+// search_field and keyword list filters. When spec.searchFieldID is true the
+// supplied idPart must contain keyword; otherwise keyword matches any
+// supplied name segment (e.g. volume name, or an object's bucket/key).
+func storageMatchesFilters(recordState ports.StorageResourceState, spec stringListFilterSpec, idPart string, nameParts ...string) bool {
+	if spec.status != "" && string(recordState) != spec.status {
 		return false
 	}
-	if keyword == "" {
+	if spec.keyword == "" {
 		return true
 	}
+	if spec.searchFieldID {
+		return strings.Contains(strings.ToLower(idPart), spec.keyword)
+	}
 	for _, part := range nameParts {
-		if strings.Contains(strings.ToLower(part), keyword) {
+		if strings.Contains(strings.ToLower(part), spec.keyword) {
 			return true
 		}
 	}
@@ -619,7 +642,7 @@ func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
-	statusFilter, keyword := storageListFilters(c)
+	filterSpec := storageListFilters(c)
 	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
 	if err != nil {
 		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
@@ -627,7 +650,7 @@ func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
 	}
 	items := make([]storageVolumeResponse, 0, len(records))
 	for _, record := range records {
-		if !storageMatchesFilters(record.State, statusFilter, keyword, record.Name) {
+		if !storageMatchesFilters(record.State, filterSpec, record.VolumeID, record.Name) {
 			continue
 		}
 		item := storageVolumeFromRecord(record)
@@ -827,7 +850,7 @@ func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContex
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
-	statusFilter, keyword := storageListFilters(c)
+	filterSpec := storageListFilters(c)
 	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
 	if err != nil {
 		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
@@ -835,7 +858,7 @@ func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContex
 	}
 	items := make([]storageFilesystemResponse, 0, len(records))
 	for _, record := range records {
-		if !storageMatchesFilters(record.State, statusFilter, keyword, record.Name) {
+		if !storageMatchesFilters(record.State, filterSpec, record.FilesystemID, record.Name) {
 			continue
 		}
 		item := storageFilesystemFromRecord(record)
@@ -1224,10 +1247,10 @@ func (api *storageAPI) listObjects(ctx context.Context, c *app.RequestContext) {
 		writeStorageError(c, err)
 		return
 	}
-	statusFilter, keyword := storageListFilters(c)
+	filterSpec := storageListFilters(c)
 	items := make([]storageObjectResponse, 0, len(records))
 	for _, record := range records {
-		if !storageMatchesFilters(record.State, statusFilter, keyword, record.Bucket, record.Key) {
+		if !storageMatchesFilters(record.State, filterSpec, record.ObjectID, record.Bucket, record.Key) {
 			continue
 		}
 		items = append(items, storageObjectFromRecord(record))
@@ -1274,16 +1297,20 @@ func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestCo
 }
 
 func (api *storageAPI) listStorageBuckets(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{
-		TenantID: instanceTenantID(c),
-		Limit:    queryInt(c, "limit", 20),
-		Cursor:   c.Query("cursor"),
-	})
+	records, err := api.service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, storageBucketListFromRecords(records))
+	filterSpec := storageListFilters(c)
+	items := make([]storageBucketResponse, 0, len(records))
+	for _, record := range records {
+		if !storageMatchesFilters(record.State, filterSpec, record.BucketID, record.Name) {
+			continue
+		}
+		items = append(items, storageBucketFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 
 func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestContext) {

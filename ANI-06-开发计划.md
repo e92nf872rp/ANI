@@ -348,6 +348,7 @@ ANI Services 当前受控解冻并进入并行 PR：本仓库仍以 ANI Core（�
 - V8 架构设计 — Core/Services 分层、API 工程约定（幂等性/控制平面分离等）
 - AWS 工程加固 — /healthz /readyz schema、WorkloadReconcileController port、operations DB 表、permissions schema
 - IN-INSTANCE-SANDBOX-EXPIRATION-EGRESS-A（2026-09-15，LOCAL_VERIFIED）— 修复 kjs-study Bug-7/Bug-8：沙箱到点自动过期后台引擎（`SandboxConfig` JSONB 新增 `ExpiresAt/LastActivityAt` + 网关 `SandboxExpirationController` 周期扫描 + 跨租户 `ListRunningSandboxes`，按 OnTimeout pause/kill 映射并落 `expired` 幂等态）+ 沙箱详情 egress 白名单回显（`instanceSandboxResponse.EgressAllowlist`）。详见 `repo/development-records/sandbox-expiration-egress-a.md`
+- IN-LIST-FILTER-SEARCH-FIELD（2026-09-16，已实施并实测通过）— 按 `kjs-study/修复bug/已修复的bug.md` 第 4 节统一改造 8 个列表过滤到 `search_field + keyword`（前端约定）：存储/向量（/volumes /filesystems /objects /buckets /vector-stores）解析 `search_field`，id→按资源 ID 模糊、name/缺省→按 name/bucket/key 模糊；网络类（/networks/vpcs /subnets /security-groups）归一 `Name`/`Keyword` 并支持按 VPCID/SubnetID/SecurityGroupID 前缀过滤；OpenAPI 补 `search_field`(enum id/name)+`keyword`，旧参数保留向后兼容。单测 + ani-system 实测通过。详见 `repo/development-records/list-filter-search-field-a.md`
 - IN-INSTANCE-SEARCHFIELD-AND-CORE-LIST-FILTER（2026-09，已修复并实测通过）— 修复 kjs-study 定位的 Core 层两类后端过滤缺陷，合并记录两次提交（85a090e / ce814cb）：实例列表 `search_field` 限定 keyword 匹配（id/name）+ 孤儿遵守过滤 + 操作历史全量 total/游标翻页 + 默认隐藏 `deleted`（Bug-2/3/6）；Core 层四类列表过滤（镜像 `/registry/images` keyword 按仓库名+tag、Harbor 预过滤缺陷修正；块/文件/对象/向量存储 status+keyword；子网 name 前缀）。推理服务/知识库（Service 层）过滤按用户要求搁置。详见 `repo/development-records/instance-searchfield-and-core-list-filter.md`
 
 ### v1.0.0 后续延期项（不是当前下一阶段）

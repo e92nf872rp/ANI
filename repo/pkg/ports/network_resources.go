@@ -221,6 +221,7 @@ type NetworkResourceListRequest struct {
 	Name     string
 	State    NetworkResourceState
 	VPCID    string
+	Keyword  string // search_field=id 时按资源 ID 匹配的关键词
 	Scheme   string
 	Limit    int
 	Cursor   string
