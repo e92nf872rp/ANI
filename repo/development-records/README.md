@@ -25,6 +25,12 @@
 |---|---|---|
 | INSTANCE-CONTAINER-UPDATE-IMAGE-A | 容器与 GPU 容器实例「更新镜像」能力落地（PR #168，提交 d16d43e）：`KubernetesLifecycleExecutor` 新增 `update_image` 分支（此前落入 default 返回 unsupported——前端按钮实际已接通请求，缺口在后端 provider apply 层），对现有 Deployment 做 strategic-merge patch `spec.template.spec.containers[*].image`（容器名=workload 名，env/ports/volumes 不动）触发滚动更新而非重建；服务层 `resolveLifecycleImage` 复用 create 解析路径（租户 project/purpose/漏洞扫描门禁一致，解析在 `lifecycleIntentFingerprint` 之前保证重放稳定）；ports 请求新增内部 `ImageRef` 字段（API 契约不变，仍为 `image_id`+`strategy`）；apply 后完整 `InstanceImageSummary`（ID/Ref/Digest/Name/Tag）写入 record（此前仅写 image_id 清空 ref/digest），RolloutStatus 置 progressing 由 reconciler 观测收敛（与 scale 同机制）。单测 4 用例。**live 验证 PASS（2026-09-15/16，ani-test2 隔离环境，镜像 `test2-20260915-o`）**：container nginx→fedora→nginx 双向（10s 内 Deployment gen/observedGeneration/updated/ready 全收敛、record 含完整 digest）；gpu_container base→runtime（用户新上传镜像，Deployment gen 5→6 镜像变更、purpose 门禁正确放行 gpu 镜像）——RWO 块卷实例滚动 surge Pod 跨节点 Multi-Attach 卡住属容器-3 平台约束，实测缩 0 扩 1 Recreate 路径可收敛 | instance-container-update-image-a.md |
 
+### 容器/GPU 容器环境变量回显修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-CONTAINER-ENV-ECHO-A | 容器与 GPU 容器实例环境变量"写入但不回读"修复（PR #168，GPU-5）：创建链路本就完整（env 经 `containerEnv` 渲染进 Deployment 集群侧真实生效），缺口在回读三层——record `ContainerInstanceStatus` 不持久化 Env、gateway 响应无 env 字段、契约 `InstanceRecord.container` 无 env 定义。按 API-first 修复：v1.yaml 契约新增 `container.env`（复用创建请求 `InstanceEnvVar` schema）；`ContainerInstanceStatus.Env` 随 `container_status` JSON 列持久化（无 DB 迁移），`containerStatusInfo` 创建时克隆写入；gateway `instanceContainerResponse.env` 回显（secret_ref 型不带 value，secret 内容永不返回）；逐路径核验 reconciler/scale/update_image/rollback 原地更新不丢 env。一处修复覆盖 container 与 gpu_container。单测 2 用例。**live 验证 PASS（2026-09-16，ani-test2 隔离环境，镜像 `test2-20260916-gpu5env`）**：GPU 容器带 2 个环境变量创建 → 创建响应即时回显 → 详情 t+15s（reconciler 已跑）回显一致。遗留：修复前历史实例 record 无 env 不回显，需从 Deployment 反读回填 | instance-container-env-echo-a.md |
+
 ### Console 首页概览统计聚合接口（2026-09，分支 feat/console-overview）
 
 | 批次 | 内容摘要 | 文件 |
