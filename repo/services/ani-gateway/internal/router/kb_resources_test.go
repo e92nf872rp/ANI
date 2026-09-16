@@ -61,14 +61,14 @@ type fakeKBClient struct {
 	queryErr     error
 	lastQueryReq *kbv1.QueryRequest
 
-	citationsErr    error
-	sessionsErr     error
-	permissionsResp *kbv1.KnowledgeBase
-	permissionsErr  error
-	getPermsResp    *kbv1.KBPermissions
-	getPermsErr     error
-	getConfigResp   *kbv1.KBConfig
-	getConfigErr    error
+	citationsErr        error
+	sessionsErr         error
+	permissionsResp     *kbv1.KnowledgeBase
+	permissionsErr      error
+	getPermsResp        *kbv1.KBPermissions
+	getPermsErr         error
+	getConfigResp       *kbv1.KBConfig
+	getConfigErr        error
 	updateConfigResp    *kbv1.UpdateKBConfigResponse
 	updateConfigErr     error
 	lastUpdateConfigReq *kbv1.UpdateKBConfigRequest
@@ -526,14 +526,14 @@ func TestKBRoutes_UpdatePermissions_NilClientReturns503(t *testing.T) {
 func TestKBRoutes_GetConfig_Passthrough(t *testing.T) {
 	client := &fakeKBClient{
 		getConfigResp: &kbv1.KBConfig{
-			TenantId:        "tenant-test",
-			KbId:            "kb-1",
-			EmbeddingModel:  "bge-m3",
-			ChunkSize:       512,
-			OcrEnabled:      true,
-			TopK:            8,
-			ScoreThreshold:  0.35,
-			RetrievalMode:   "hybrid",
+			TenantId:       "tenant-test",
+			KbId:           "kb-1",
+			EmbeddingModel: "bge-m3",
+			ChunkSize:      512,
+			OcrEnabled:     true,
+			TopK:           8,
+			ScoreThreshold: 0.35,
+			RetrievalMode:  "hybrid",
 		},
 	}
 	h := setupKBTestServer(client)
@@ -1998,12 +1998,12 @@ func TestKBRoutes_UpdateConfig_TriStatePassthrough(t *testing.T) {
 	}
 	// 200 body: KBConfig flattened inline + rebuild_task omitted (nil ref).
 	var bodyOut struct {
-		EmbeddingModel string `json:"embedding_model"`
-		ChunkSize      int32  `json:"chunk_size"`
-		OcrEnabled     bool   `json:"ocr_enabled"`
-		TopK           int32  `json:"top_k"`
+		EmbeddingModel string  `json:"embedding_model"`
+		ChunkSize      int32   `json:"chunk_size"`
+		OcrEnabled     bool    `json:"ocr_enabled"`
+		TopK           int32   `json:"top_k"`
 		ScoreThreshold float32 `json:"score_threshold"`
-		RetrievalMode  string `json:"retrieval_mode"`
+		RetrievalMode  string  `json:"retrieval_mode"`
 		RebuildTask    *struct {
 			TaskID string `json:"task_id"`
 		} `json:"rebuild_task"`

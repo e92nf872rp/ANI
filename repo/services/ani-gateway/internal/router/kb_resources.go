@@ -182,13 +182,13 @@ type rebuildKnowledgeBaseRequest struct {
 // field is an explicit change candidate. json.Unmarshal's pointer handling
 // distinguishes "not present" (nil) from explicit zero values.
 type updateKnowledgeBaseConfigRequest struct {
-	IdempotencyKey  string   `json:"idempotency_key"`
-	EmbeddingModel  *string  `json:"embedding_model"`
-	ChunkSize       *int32   `json:"chunk_size"`
-	OcrEnabled      *bool    `json:"ocr_enabled"`
-	TopK            *int32   `json:"top_k"`
-	ScoreThreshold  *float32 `json:"score_threshold"`
-	RetrievalMode   *string  `json:"retrieval_mode"`
+	IdempotencyKey string   `json:"idempotency_key"`
+	EmbeddingModel *string  `json:"embedding_model"`
+	ChunkSize      *int32   `json:"chunk_size"`
+	OcrEnabled     *bool    `json:"ocr_enabled"`
+	TopK           *int32   `json:"top_k"`
+	ScoreThreshold *float32 `json:"score_threshold"`
+	RetrievalMode  *string  `json:"retrieval_mode"`
 }
 
 // ── 11 P0 handlers (gRPC passthrough) ───────────────────────────────────────
@@ -989,12 +989,12 @@ type kbConfigJSON struct {
 // embedding_model/chunk_size pairs no rebuild), so it is a pointer with
 // omitempty — a nil ref omits the field rather than echoing a zero task.
 type updateKBConfigJSON struct {
-	EmbeddingModel string  `json:"embedding_model"`
-	ChunkSize      int32   `json:"chunk_size"`
-	OcrEnabled     bool    `json:"ocr_enabled"`
-	TopK           int32   `json:"top_k"`
-	ScoreThreshold float32 `json:"score_threshold"`
-	RetrievalMode  string  `json:"retrieval_mode"`
+	EmbeddingModel string            `json:"embedding_model"`
+	ChunkSize      int32             `json:"chunk_size"`
+	OcrEnabled     bool              `json:"ocr_enabled"`
+	TopK           int32             `json:"top_k"`
+	ScoreThreshold float32           `json:"score_threshold"`
+	RetrievalMode  string            `json:"retrieval_mode"`
 	RebuildTask    *asyncTaskRefJSON `json:"rebuild_task,omitempty"`
 }
 
