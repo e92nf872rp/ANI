@@ -290,8 +290,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	// Sandbox expiration background scanner (Bug-7). The MetadataInstanceStore
 	// implements the cross-tenant ExpirableSandboxLister, and doubles as the
 	// persistence store for the controller.
-	var sandboxExpirationController ports.SandboxExpirationController
-	sandboxExpirationController = runtimeadapter.NewSandboxExpirationController(instanceStore, instanceStore, sandboxRuntime)
+	sandboxExpirationController := runtimeadapter.NewSandboxExpirationController(instanceStore, instanceStore, sandboxRuntime)
 	orchestratorOptions := []runtimeadapter.InstanceOrchestratorOption{
 		runtimeadapter.WithInstanceStore(instanceStore),
 		runtimeadapter.WithInstanceOrchestratorWorkloadIdentityService(workloadIdentity),
