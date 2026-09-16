@@ -26,11 +26,14 @@ func (s fakeMetadataStore) WithPlatformTx(ctx context.Context, fn func(context.C
 }
 
 type fakeMetadataTx struct {
-	sql          string
-	args         []any
-	execs        []string
-	querySQL     string
-	rows         ports.Rows
+	sql      string
+	args     []any
+	execs    []string
+	querySQL string
+	rows     ports.Rows
+	// queryRows 按 SQL 中的表名关键字路由不同的 Rows，
+	// 用于一次事务里查询多张表的场景（如 VPC 删除保护遍历关联资源）。
+	queryRows    map[string]ports.Rows
 	queryRowSQL  string
 	queryRowArgs []any
 	row          fakeMetadataRow
@@ -50,6 +53,11 @@ func (tx *fakeMetadataTx) Exec(_ context.Context, sql string, args ...any) (port
 
 func (tx *fakeMetadataTx) Query(_ context.Context, sql string, _ ...any) (ports.Rows, error) {
 	tx.querySQL = sql
+	for marker, rows := range tx.queryRows {
+		if strings.Contains(sql, marker) {
+			return rows, nil
+		}
+	}
 	if tx.rows != nil {
 		return tx.rows, nil
 	}

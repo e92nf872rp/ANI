@@ -891,3 +891,119 @@ func TestLocalNetworkServiceSecurityGroupBindingsFromStoreAfterRestart(t *testin
 		t.Fatalf("bindings = %#v, want derived inst-persisted", items)
 	}
 }
+
+// VPC-4 回归（内存模式）：VPC 下存在存活子网/安全组时禁止删除，
+// 错误消息列出各类数量；清理关联后删除恢复可用。
+func TestLocalNetworkServiceDeleteVPCBlockedByLiveAssociations(t *testing.T) {
+	service := NewLocalNetworkService()
+	vpc, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "vpc-del", Name: "vpc", CIDR: "10.5.0.0/16",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	sub, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "sub-del", Name: "sub", VPCID: vpc.VPCID,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubnet error = %v", err)
+	}
+	sg, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "sg-del", Name: "sg", VPCID: vpc.VPCID,
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup error = %v", err)
+	}
+
+	_, err = service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: vpc.VPCID})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DeleteVPC() error = %v, want ErrConflict", err)
+	}
+	for _, fragment := range []string{"1 subnet(s)", "1 security group(s)", "0 load balancer(s)", "0 route(s)"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("error message %q missing %q", err.Error(), fragment)
+		}
+	}
+	got, err := service.GetVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: vpc.VPCID})
+	if err != nil || got.State != ports.NetworkResourceAvailable {
+		t.Fatalf("VPC must stay available after blocked delete, state = %v err = %v", got.State, err)
+	}
+
+	if _, err := service.DeleteSubnet(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: sub.SubnetID}); err != nil {
+		t.Fatalf("DeleteSubnet error = %v", err)
+	}
+	if _, err := service.DeleteSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: sg.SecurityGroupID}); err != nil {
+		t.Fatalf("DeleteSecurityGroup error = %v", err)
+	}
+	deleted, err := service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: vpc.VPCID})
+	if err != nil {
+		t.Fatalf("DeleteVPC after cleanup error = %v", err)
+	}
+	if deleted.State != ports.NetworkResourceDeleted {
+		t.Fatalf("state = %v, want deleted", deleted.State)
+	}
+}
+
+// VPC-4 回归（store 模式）：网关重启后内存 map 为空，删除保护必须以持久层为准。
+// 子网/安全组/LB/路由各返回一行（其中 LB/路由属于其他 VPC，不应计数），
+// 命中冲突时不得触发任何 upsert。
+func TestLocalNetworkServiceDeleteVPCValidatesAssociationsViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{
+		row: fakeMetadataRow{values: []any{
+			networkStoreTenantID, "vpc-persisted", "vpc-a", "10.30.0.0/16",
+			string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(90, 0),
+		}},
+		queryRows: map[string]ports.Rows{
+			"FROM network_subnets": &fakeRows{values: [][]any{{
+				networkStoreTenantID, "subnet-a", "vpc-persisted", "sub", "10.30.1.0/24", "",
+				string(ports.NetworkResourceAvailable), "", time.Unix(91, 0), time.Unix(91, 0),
+			}}},
+			"FROM network_security_groups": &fakeRows{values: [][]any{{
+				networkStoreTenantID, "sg-a", "vpc-persisted", "web-sg", "",
+				[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(92, 0), time.Unix(92, 0),
+			}}},
+			"FROM network_load_balancers": &fakeRows{values: [][]any{{
+				networkStoreTenantID, "lb-a", "lb", "vpc-other", "", "internal", "",
+				[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(93, 0), time.Unix(93, 0),
+			}}},
+			"FROM network_routes": &fakeRows{values: [][]any{{
+				networkStoreTenantID, "route-a", "vpc-other", "0.0.0.0/0", "instance", "inst-a", "",
+				string(ports.NetworkResourceAvailable), "", false, time.Unix(94, 0),
+			}}},
+		},
+	}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	_, err := service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: networkStoreTenantID, ResourceID: "vpc-persisted"})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DeleteVPC() error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "1 subnet(s), 1 security group(s), 0 load balancer(s), 0 route(s)") {
+		t.Fatalf("error message = %q, want per-kind counts with cross-VPC resources excluded", err.Error())
+	}
+	if len(tx.execs) != 0 {
+		t.Fatalf("blocked delete must not persist, execs = %v", tx.execs)
+	}
+
+	// 关联清空后（各表均无存活行）删除应放行并落库 deleted 状态。
+	tx.execs = nil
+	tx.queryRows = map[string]ports.Rows{
+		"FROM network_subnets":         &fakeRows{},
+		"FROM network_security_groups": &fakeRows{},
+		"FROM network_load_balancers":  &fakeRows{},
+		"FROM network_routes":          &fakeRows{},
+	}
+	deleted, err := service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: networkStoreTenantID, ResourceID: "vpc-persisted"})
+	if err != nil {
+		t.Fatalf("DeleteVPC after cleanup error = %v", err)
+	}
+	if deleted.State != ports.NetworkResourceDeleted {
+		t.Fatalf("state = %v, want deleted", deleted.State)
+	}
+	if len(tx.execs) != 1 || !strings.Contains(tx.execs[0], "INSERT INTO network_vpcs") {
+		t.Fatalf("expected vpc persistence, execs = %v", tx.execs)
+	}
+	if got := tx.args[4]; got != string(ports.NetworkResourceDeleted) {
+		t.Fatalf("state arg = %v, want deleted", got)
+	}
+}

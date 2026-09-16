@@ -93,7 +93,20 @@ func TestMetadataNetworkStoreSerializesNestedNetworkResources(t *testing.T) {
 }
 
 func TestLocalNetworkServicePersistsCreateAndDelete(t *testing.T) {
-	tx := &fakeMetadataTx{}
+	// DeleteVPC 在 store 模式下先查持久层 VPC、再遍历关联资源（VPC-4 删除保护），
+	// fake 需提供 GetVPC 行数据与各关联表的空结果集。
+	tx := &fakeMetadataTx{
+		row: fakeMetadataRow{values: []any{
+			networkStoreTenantID, "vpc-persisted", "persisted-vpc", "",
+			string(ports.NetworkResourceAvailable), "", time.Unix(100, 0), time.Unix(100, 0),
+		}},
+		queryRows: map[string]ports.Rows{
+			"FROM network_subnets":         &fakeRows{},
+			"FROM network_security_groups": &fakeRows{},
+			"FROM network_load_balancers":  &fakeRows{},
+			"FROM network_routes":          &fakeRows{},
+		},
+	}
 	service := NewLocalNetworkService(
 		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
 	)

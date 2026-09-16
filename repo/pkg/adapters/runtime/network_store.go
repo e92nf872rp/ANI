@@ -413,6 +413,74 @@ func (s *MetadataNetworkStore) ListSecurityGroups(ctx context.Context, tenantID 
 	return records, err
 }
 
+func (s *MetadataNetworkStore) ListLoadBalancers(ctx context.Context, tenantID string) ([]ports.NetworkLoadBalancerRecord, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return nil, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	var records []ports.NetworkLoadBalancerRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, load_balancer_id, name, vpc_id, COALESCE(subnet_id, ''), scheme, COALESCE(vip, ''), listeners, state, COALESCE(reason, ''), created_at, updated_at
+			FROM network_load_balancers
+			WHERE tenant_id = $1::uuid AND state <> 'deleted'
+			ORDER BY updated_at DESC
+		`, tenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var record ports.NetworkLoadBalancerRecord
+			var listenersJSON []byte
+			if err := rows.Scan(&record.TenantID, &record.LoadBalancerID, &record.Name, &record.VPCID, &record.SubnetID, &record.Scheme, &record.VIP, &listenersJSON, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
+				return err
+			}
+			if len(listenersJSON) > 0 && string(listenersJSON) != "[]" {
+				if err := json.Unmarshal(listenersJSON, &record.Listeners); err != nil {
+					return fmt.Errorf("unmarshal load balancer listeners: %w", err)
+				}
+			}
+			records = append(records, record)
+		}
+		return rows.Err()
+	})
+	return records, err
+}
+
+func (s *MetadataNetworkStore) ListRoutes(ctx context.Context, tenantID string) ([]ports.NetworkRouteRecord, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return nil, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	var records []ports.NetworkRouteRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, route_id, vpc_id, destination_cidr, next_hop_type, next_hop_id, COALESCE(description, ''), state, COALESCE(provider, ''), real_provider, created_at
+			FROM network_routes
+			WHERE tenant_id = $1::uuid AND state <> 'deleted'
+			ORDER BY created_at DESC
+		`, tenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var record ports.NetworkRouteRecord
+			if err := rows.Scan(&record.TenantID, &record.RouteID, &record.VPCID, &record.DestinationCIDR, &record.NextHopType, &record.NextHopID, &record.Description, &record.State, &record.Provider, &record.RealProvider, &record.CreatedAt); err != nil {
+				return err
+			}
+			records = append(records, record)
+		}
+		return rows.Err()
+	})
+	return records, err
+}
+
 func requireNetworkRecord(tenantID string, resourceID string, name string, state ports.NetworkResourceState) error {
 	if strings.TrimSpace(tenantID) == "" {
 		return fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)

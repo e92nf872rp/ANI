@@ -299,11 +299,42 @@ func (s *LocalNetworkService) GetVPC(ctx context.Context, request ports.NetworkR
 }
 
 func (s *LocalNetworkService) DeleteVPC(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkVPCRecord, error) {
+	if s.store != nil {
+		// store 模式下内存 map 可能为空（网关重启后），VPC 与关联资源都以持久层为准。
+		record, err := s.store.GetVPC(ctx, request.TenantID, request.ResourceID)
+		if err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
+		counts, err := s.vpcAssociationCounts(ctx, request.TenantID, request.ResourceID)
+		if err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
+		if err := vpcAssociationConflict(request.ResourceID, counts); err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
+		now := s.now().UTC()
+		record.State = ports.NetworkResourceDeleted
+		record.Reason = "deleted by local network profile"
+		record.UpdatedAt = now
+		if err := s.upsertVPC(ctx, record); err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
+		s.mu.Lock()
+		if existing, ok := s.vpcs[record.VPCID]; ok && existing.TenantID == record.TenantID {
+			s.vpcs[record.VPCID] = record
+		}
+		s.mu.Unlock()
+		return record, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.vpcs[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkVPCRecord{}, ports.ErrNotFound
+	}
+	counts := s.vpcAssociationCountsMemory(request.TenantID, request.ResourceID)
+	if err := vpcAssociationConflict(request.ResourceID, counts); err != nil {
+		return ports.NetworkVPCRecord{}, err
 	}
 	now := s.now().UTC()
 	record.State = ports.NetworkResourceDeleted
@@ -314,6 +345,101 @@ func (s *LocalNetworkService) DeleteVPC(ctx context.Context, request ports.Netwo
 		return ports.NetworkVPCRecord{}, err
 	}
 	return record, nil
+}
+
+// networkVPCAssociationCounts 汇总 VPC 下各类存活关联资源数量（VPC-4 删除保护）。
+type networkVPCAssociationCounts struct {
+	Subnets        int
+	SecurityGroups int
+	LoadBalancers  int
+	Routes         int
+}
+
+func (c networkVPCAssociationCounts) total() int {
+	return c.Subnets + c.SecurityGroups + c.LoadBalancers + c.Routes
+}
+
+// vpcAssociationCounts 统计 VPC 下的存活关联资源；store 模式查持久层
+// （内存 map 重启后为空，不能作为判断依据），与 resolveVPCForValidation 同模式。
+func (s *LocalNetworkService) vpcAssociationCounts(ctx context.Context, tenantID string, vpcID string) (networkVPCAssociationCounts, error) {
+	if s.store == nil {
+		return s.vpcAssociationCountsMemory(tenantID, vpcID), nil
+	}
+	counts := networkVPCAssociationCounts{}
+	subnets, err := s.store.ListSubnets(ctx, tenantID)
+	if err != nil {
+		return counts, err
+	}
+	for _, record := range subnets {
+		if record.VPCID == vpcID {
+			counts.Subnets++
+		}
+	}
+	groups, err := s.store.ListSecurityGroups(ctx, tenantID)
+	if err != nil {
+		return counts, err
+	}
+	for _, record := range groups {
+		if record.VPCID == vpcID {
+			counts.SecurityGroups++
+		}
+	}
+	balancers, err := s.store.ListLoadBalancers(ctx, tenantID)
+	if err != nil {
+		return counts, err
+	}
+	for _, record := range balancers {
+		if record.VPCID == vpcID {
+			counts.LoadBalancers++
+		}
+	}
+	routes, err := s.store.ListRoutes(ctx, tenantID)
+	if err != nil {
+		return counts, err
+	}
+	for _, record := range routes {
+		if record.VPCID == vpcID {
+			counts.Routes++
+		}
+	}
+	return counts, nil
+}
+
+// vpcAssociationCountsMemory 内存模式下的关联计数（须在持锁状态下调用）。
+func (s *LocalNetworkService) vpcAssociationCountsMemory(tenantID string, vpcID string) networkVPCAssociationCounts {
+	counts := networkVPCAssociationCounts{}
+	for _, record := range s.subnets {
+		if record.TenantID == tenantID && record.VPCID == vpcID && record.State != ports.NetworkResourceDeleted {
+			counts.Subnets++
+		}
+	}
+	for _, record := range s.securityGroup {
+		if record.TenantID == tenantID && record.VPCID == vpcID && record.State != ports.NetworkResourceDeleted {
+			counts.SecurityGroups++
+		}
+	}
+	for _, record := range s.loadBalancers {
+		if record.TenantID == tenantID && record.VPCID == vpcID && record.State != ports.NetworkResourceDeleted {
+			counts.LoadBalancers++
+		}
+	}
+	for _, record := range s.routes {
+		if record.TenantID == tenantID && record.VPCID == vpcID && record.State != ports.NetworkResourceDeleted {
+			counts.Routes++
+		}
+	}
+	return counts
+}
+
+// vpcAssociationConflict 存在存活关联资源时禁止删除 VPC（方案 A：防御式保护），
+// 错误消息列出各类数量，前端据此提示先清理下级资源。
+func vpcAssociationConflict(vpcID string, counts networkVPCAssociationCounts) error {
+	if counts.total() == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: cannot delete VPC %s: %d subnet(s), %d security group(s), %d load balancer(s), %d route(s) still exist; delete them first",
+		ports.ErrConflict, vpcID, counts.Subnets, counts.SecurityGroups, counts.LoadBalancers, counts.Routes)
 }
 
 func (s *LocalNetworkService) CreateSubnet(ctx context.Context, request ports.NetworkSubnetCreateRequest) (ports.NetworkSubnetRecord, error) {

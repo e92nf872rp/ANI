@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### VPC 删除保护（2026-09，分支 fix/network-sg-vpc-and-instance-filter）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| IN-NETWORK-VPC-DELETE-PROTECTION-A | 修复 kjs-study 测试异常 VPC-4（已修复并实测通过，方案 A 防御式禁止删除）：根因是 `DeleteVPC` 只置 deleted 后 upsert，不校验子网/安全组/LB/路由等存活关联，删除成功留下孤儿下级资源。`DeleteVPC` 重写双分支：store 模式 `store.GetVPC` 查 VPC（修复重启后删除 404 隐患）+ `vpcAssociationCounts` 查持久层四类存活关联计数；内存模式回退遍历内存 map；命中拒绝 `ports.ErrConflict`，消息列四类数量（`cannot delete VPC …: N subnet(s), … still exist; delete them first`）经 `writeNetworkError` 映射 409 CONFLICT（契约 v1.yaml:6220 本就声明 409，无契约/DB 变更）。**store 接口补齐**：`NetworkResourceStore` 新增 `ListLoadBalancers`/`ListRoutes`（两表此前只有 Upsert 无 List），`MetadataNetworkStore` SQL 实现落地。单测 2 新增（内存模式冲突+清理后放行、store 模式冲突含跨 VPC 不计数断言+放行落库）+ fakeMetadataTx 增 `queryRows` 按表路由基建 + 既有 PersistsCreateAndDelete 适配。实测（ani-system 镜像 dev-20260916-vpc4）：test-vpc-ly123（1 存活子网）删除 409 带数量明细、被拒后仍 available、无关联新 VPC 删除 200、不存在 404。**已知边界**：pending/failed 等非 deleted 状态同样阻止删除（防御式）；实例引用不在计数内；provider delete/卸载与 DeleteSubnet/DeleteSecurityGroup 同类保护为后续候选 | network-vpc-delete-protection.md |
+
 ### 安全组绑定派生视图（2026-09，分支 fix/network-sg-vpc-and-instance-filter）
 
 | 批次 | 内容摘要 | 文件 |

@@ -367,6 +367,8 @@ type NetworkResourceStore interface {
 	ListSubnets(ctx context.Context, tenantID string) ([]NetworkSubnetRecord, error)
 	GetSecurityGroup(ctx context.Context, tenantID string, securityGroupID string) (NetworkSecurityGroupRecord, error)
 	ListSecurityGroups(ctx context.Context, tenantID string) ([]NetworkSecurityGroupRecord, error)
+	ListLoadBalancers(ctx context.Context, tenantID string) ([]NetworkLoadBalancerRecord, error)
+	ListRoutes(ctx context.Context, tenantID string) ([]NetworkRouteRecord, error)
 }
 
 type NetworkProviderRenderer interface {
