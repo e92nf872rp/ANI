@@ -1781,11 +1781,15 @@ func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 		}
 		// 孤儿实例同样要遵循请求里的过滤语义，否则与 store 记录不一致，live
 		// Kubernetes 实例会无条件返回（Bug-2：keyword/search_field 不生效；
-		// Bug-6：state 过滤不生效，state=running 会把 pending 孤儿也带回）。
+		// Bug-6：state 过滤不生效，state=running 会把 pending 孤儿也带回；
+		// VPC-3/子网-3：vpc_id/subnet_id 归属过滤不生效）。
 		if !runtimeadapter.MatchesInstanceKeyword(orphan, listReq) {
 			continue
 		}
 		if !runtimeadapter.MatchesInstanceState(orphan, listReq) {
+			continue
+		}
+		if !runtimeadapter.MatchesInstanceNetwork(orphan, listReq) {
 			continue
 		}
 		records = append(records, orphan)
@@ -1824,6 +1828,8 @@ func instanceListRequestFromQuery(c *app.RequestContext, tenantID string, kind p
 		SpecID:          c.Query("spec_id"),
 		ImageID:         c.Query("image_id"),
 		NodeName:        c.Query("node_name"),
+		VPCID:           c.Query("vpc_id"),
+		SubnetID:        c.Query("subnet_id"),
 		RolloutStatus:   c.Query("rollout_status"),
 		GPUModel:        c.Query("gpu_model"),
 		QueueName:       c.Query("queue_name"),

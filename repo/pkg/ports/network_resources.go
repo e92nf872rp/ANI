@@ -121,15 +121,17 @@ type NetworkSecurityGroupBindingRecord struct {
 }
 
 type NetworkSecurityGroupRecord struct {
-	TenantID        string
-	SecurityGroupID string
-	Name            string
-	Description     string
-	Rules           []NetworkSecurityGroupRule
-	State           NetworkResourceState
-	Reason          string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	TenantID           string
+	SecurityGroupID    string
+	VPCID              string
+	Name               string
+	Description        string
+	Rules              []NetworkSecurityGroupRule
+	BoundInstanceCount int
+	State              NetworkResourceState
+	Reason             string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type NetworkLoadBalancerListener struct {
@@ -186,6 +188,7 @@ type NetworkSubnetCreateRequest struct {
 type NetworkSecurityGroupCreateRequest struct {
 	TenantID       string
 	IdempotencyKey string
+	VPCID          string
 	Name           string
 	Description    string
 	Rules          []NetworkSecurityGroupRule
@@ -363,6 +366,7 @@ type NetworkResourceStore interface {
 	GetSubnet(ctx context.Context, tenantID string, subnetID string) (NetworkSubnetRecord, error)
 	ListSubnets(ctx context.Context, tenantID string) ([]NetworkSubnetRecord, error)
 	GetSecurityGroup(ctx context.Context, tenantID string, securityGroupID string) (NetworkSecurityGroupRecord, error)
+	ListSecurityGroups(ctx context.Context, tenantID string) ([]NetworkSecurityGroupRecord, error)
 }
 
 type NetworkProviderRenderer interface {

@@ -233,6 +233,8 @@ func assignScanValues(dest []any, values []any) error {
 		switch ptr := target.(type) {
 		case *string:
 			*ptr = values[i].(string)
+		case *ports.NetworkResourceState:
+			*ptr = ports.NetworkResourceState(values[i].(string))
 		case *[]byte:
 			*ptr = values[i].([]byte)
 		case *bool:

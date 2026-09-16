@@ -548,6 +548,8 @@ type WorkloadInstanceListRequest struct {
 	SpecID          string
 	ImageID         string
 	NodeName        string
+	VPCID           string // 按所属 VPC 过滤（VPC 详情「关联资源」场景）
+	SubnetID        string // 按所属子网过滤（子网详情「关联资源」场景）
 	RolloutStatus   string
 	GPUModel        string
 	QueueName       string

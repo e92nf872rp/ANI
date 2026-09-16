@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -657,5 +659,116 @@ func TestLocalNetworkServiceListSubnetsFiltersByName(t *testing.T) {
 	}
 	if len(none) != 0 {
 		t.Fatalf("name=no_such subnets = %+v, want none", none)
+	}
+}
+
+// 安全组-4 回归：网关重启后内存 map 不含历史 VPC，创建安全组绑定历史 VPC 必须
+// 通过持久层校验，而不是误判 vpc not found。
+func TestLocalNetworkServiceCreateSecurityGroupValidatesVPCViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+		networkStoreTenantID, "vpc-persisted", "vpc-a", "10.30.0.0/16",
+		string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(90, 0),
+	}}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	record, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       networkStoreTenantID,
+		IdempotencyKey: "sg-store-vpc",
+		Name:           "web-sg",
+		VPCID:          "vpc-persisted",
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup() error = %v", err)
+	}
+	if record.VPCID != "vpc-persisted" {
+		t.Fatalf("VPCID = %q, want vpc-persisted", record.VPCID)
+	}
+	if !strings.Contains(tx.queryRowSQL, "FROM network_vpcs") {
+		t.Fatalf("validation must query network_vpcs via store, sql = %q", tx.queryRowSQL)
+	}
+	if len(tx.execs) == 0 || !strings.Contains(tx.execs[len(tx.execs)-1], "INSERT INTO network_security_groups") {
+		t.Fatalf("expected security group persistence, execs = %v", tx.execs)
+	}
+	if got := tx.args[2]; got != "vpc-persisted" {
+		t.Fatalf("vpc_id arg = %v, want vpc-persisted", got)
+	}
+}
+
+// 安全组-4 反向路径：store 查不到 VPC 时必须拒绝创建且不落库。
+func TestLocalNetworkServiceCreateSecurityGroupRejectsMissingVPCViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{err: errors.New("no rows in result set")}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	_, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       networkStoreTenantID,
+		IdempotencyKey: "sg-store-badvpc",
+		Name:           "web-sg",
+		VPCID:          "vpc-missing",
+	})
+	if !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("CreateSecurityGroup() error = %v, want ErrNotFound", err)
+	}
+	if len(tx.execs) != 0 {
+		t.Fatalf("rejected create must not persist, execs = %v", tx.execs)
+	}
+}
+
+func TestMetadataNetworkStoreListsSecurityGroupsWithVPC(t *testing.T) {
+	tx := &fakeMetadataTx{rows: &fakeRows{values: [][]any{
+		{
+			networkStoreTenantID, "sg-a", "vpc-a", "web-sg", "desc",
+			[]byte(`[{"Direction":"ingress","Protocol":"tcp","PortRange":"443","CIDR":"0.0.0.0/0","Action":"allow"}]`),
+			string(ports.NetworkResourceAvailable), "created", time.Unix(90, 0), time.Unix(95, 0),
+		},
+		{
+			networkStoreTenantID, "sg-b", "", "bare-sg", "",
+			[]byte(`[]`),
+			string(ports.NetworkResourceAvailable), "created", time.Unix(91, 0), time.Unix(96, 0),
+		},
+	}}}
+	store := NewMetadataNetworkStore(fakeMetadataStore{tx: tx})
+
+	items, err := store.ListSecurityGroups(context.Background(), networkStoreTenantID)
+	if err != nil {
+		t.Fatalf("ListSecurityGroups() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2", len(items))
+	}
+	if items[0].SecurityGroupID != "sg-a" || items[0].VPCID != "vpc-a" {
+		t.Fatalf("items[0] = %+v, want sg-a in vpc-a", items[0])
+	}
+	if len(items[0].Rules) != 1 || items[0].Rules[0].Protocol != "tcp" {
+		t.Fatalf("rules = %#v, want deserialized tcp rule", items[0].Rules)
+	}
+	if items[1].VPCID != "" || items[1].Name != "bare-sg" {
+		t.Fatalf("items[1] = %+v, want empty vpc_id sg", items[1])
+	}
+}
+
+// 安全组-3 回归：store 模式下列表必须来自持久层并支持 vpc_id 过滤（网关重启后
+// 内存 map 为空，memory-only 列表会让历史安全组消失）。
+func TestLocalNetworkServiceListsSecurityGroupsFromStoreByVPC(t *testing.T) {
+	tx := &fakeMetadataTx{rows: &fakeRows{values: [][]any{
+		{
+			networkStoreTenantID, "sg-a", "vpc-a", "web-sg", "",
+			[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(95, 0),
+		},
+		{
+			networkStoreTenantID, "sg-b", "vpc-b", "db-sg", "",
+			[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(91, 0), time.Unix(96, 0),
+		},
+	}}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	items, err := service.ListSecurityGroups(context.Background(), ports.NetworkResourceListRequest{TenantID: networkStoreTenantID, VPCID: "vpc-a"})
+	if err != nil {
+		t.Fatalf("ListSecurityGroups(vpc_id) error = %v", err)
+	}
+	if len(items) != 1 || items[0].SecurityGroupID != "sg-a" {
+		t.Fatalf("items = %#v, want only sg-a", items)
+	}
+	if items[0].BoundInstanceCount != 0 {
+		t.Fatalf("BoundInstanceCount = %d, want 0 without binds", items[0].BoundInstanceCount)
 	}
 }

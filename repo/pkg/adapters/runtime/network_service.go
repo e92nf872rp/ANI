@@ -501,6 +501,7 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 	record := ports.NetworkSecurityGroupRecord{
 		TenantID:        request.TenantID,
 		SecurityGroupID: "sg_" + uuid.NewString(),
+		VPCID:           strings.TrimSpace(request.VPCID),
 		Name:            strings.TrimSpace(request.Name),
 		Description:     strings.TrimSpace(request.Description),
 		Rules:           append([]ports.NetworkSecurityGroupRule(nil), request.Rules...),
@@ -508,6 +509,16 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 		Reason:          "created by local network profile",
 		CreatedAt:       now,
 		UpdatedAt:       now,
+	}
+	// vpc_id 契约上可空（历史资源可为空），但一旦提供必须校验归属与存活状态，
+	// 语义对齐 CreateSubnet 的 VPC 校验。store 模式必须查持久层：网关重启后
+	// 内存 map 不含历史 VPC，只查内存会把已存在的 VPC 误判为 not found。
+	if record.VPCID != "" {
+		vpc, ok := s.resolveVPCForValidation(ctx, request.TenantID, record.VPCID)
+		if !ok || vpc.State == ports.NetworkResourceDeleted {
+			s.mu.Unlock()
+			return ports.NetworkSecurityGroupRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
+		}
 	}
 	if providerConfigured {
 		record.State = ports.NetworkResourcePending
@@ -553,12 +564,64 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 	return applied, nil
 }
 
-func (s *LocalNetworkService) ListSecurityGroups(_ context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkSecurityGroupRecord, error) {
+func (s *LocalNetworkService) ListSecurityGroups(ctx context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkSecurityGroupRecord, error) {
+	if s.store != nil {
+		items, err := s.store.ListSecurityGroups(ctx, request.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(request.VPCID) != "" {
+			filtered := make([]ports.NetworkSecurityGroupRecord, 0, len(items))
+			for _, record := range items {
+				if record.VPCID == strings.TrimSpace(request.VPCID) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if strings.TrimSpace(request.Name) != "" {
+			filtered := make([]ports.NetworkSecurityGroupRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if strings.TrimSpace(request.Keyword) != "" {
+			filtered := make([]ports.NetworkSecurityGroupRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.SecurityGroupID, strings.TrimSpace(request.Keyword)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if request.State != "" {
+			filtered := make([]ports.NetworkSecurityGroupRecord, 0, len(items))
+			for _, record := range items {
+				if record.State == request.State {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		s.mu.RLock()
+		for i := range items {
+			items[i].BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(items[i].SecurityGroupID)
+		}
+		s.mu.RUnlock()
+		sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+		return items, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]ports.NetworkSecurityGroupRecord, 0, len(s.securityGroup))
 	for _, record := range s.securityGroup {
 		if record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
+			continue
+		}
+		if strings.TrimSpace(request.VPCID) != "" && record.VPCID != strings.TrimSpace(request.VPCID) {
 			continue
 		}
 		if strings.TrimSpace(request.Name) != "" && !strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
@@ -570,15 +633,51 @@ func (s *LocalNetworkService) ListSecurityGroups(_ context.Context, request port
 		if request.State != "" && record.State != request.State {
 			continue
 		}
+		record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID)
 		items = append(items, record)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 	return items, nil
 }
 
+// securityGroupBoundInstanceCountLocked 统计指定安全组当前绑定的实例数（只读聚合字段
+// bound_instance_count 的数据源）。调用方必须已持有 s.mu 读锁或写锁。
+func (s *LocalNetworkService) securityGroupBoundInstanceCountLocked(securityGroupID string) int {
+	count := 0
+	for _, bind := range s.securityGroupBinds {
+		if bind.SecurityGroupID == securityGroupID && bind.TargetType == "instance" {
+			count++
+		}
+	}
+	return count
+}
+
+// resolveVPCForValidation 解析用于创建校验（安全组/子网等绑定 VPC）的 VPC 记录：
+// store 模式优先查持久层（进程重启后内存 map 不含历史 VPC），否则回退内存 map；
+// 租户归属校验两条路径各自完成（store SQL 按 tenant_id 过滤，内存分支显式比对）。
+// 返回 (record, true) 表示 VPC 存在且属于该租户；存活状态由调用方判断。
+func (s *LocalNetworkService) resolveVPCForValidation(ctx context.Context, tenantID string, vpcID string) (ports.NetworkVPCRecord, bool) {
+	if s.store != nil {
+		record, err := s.store.GetVPC(ctx, tenantID, vpcID)
+		return record, err == nil
+	}
+	record, ok := s.vpcs[vpcID]
+	if !ok || record.TenantID != tenantID {
+		return ports.NetworkVPCRecord{}, false
+	}
+	return record, true
+}
+
 func (s *LocalNetworkService) GetSecurityGroup(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSecurityGroupRecord, error) {
 	if s.store != nil {
-		return s.store.GetSecurityGroup(ctx, request.TenantID, request.ResourceID)
+		record, err := s.store.GetSecurityGroup(ctx, request.TenantID, request.ResourceID)
+		if err != nil {
+			return ports.NetworkSecurityGroupRecord{}, err
+		}
+		s.mu.RLock()
+		record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID)
+		s.mu.RUnlock()
+		return record, nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -586,6 +685,7 @@ func (s *LocalNetworkService) GetSecurityGroup(ctx context.Context, request port
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkSecurityGroupRecord{}, ports.ErrNotFound
 	}
+	record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID)
 	return record, nil
 }
 

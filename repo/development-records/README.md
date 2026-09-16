@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 安全组 vpc_id 建模与实例列表 VPC/子网过滤（2026-09，分支 fix/network-sg-vpc-and-instance-filter）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| IN-NETWORK-SG-VPC-AND-INSTANCE-FILTER-A | 修复 kjs-study 测试异常 安全组-3/4、VPC-3、子网-3（已修复并实测通过）：① 安全组-4——契约自 PR #99 已声明安全组 vpc_id 但实现五层未跟随：`NetworkSecurityGroupRecord`/`CreateRequest` 增 VPCID，迁移 `20260916120000` 为 network_security_groups 加可空 vpc_id 列，handler 透传/回显 vpc_id（+bound_instance_count）；部署实测暴露深层缺陷——`CreateSecurityGroup` VPC 校验只查内存 map，网关重启后把 DB 历史 VPC 误判 `vpc not found`，新增 `resolveVPCForValidation`（store 优先查持久层、内存回退、租户归属两条路径各自校验）；② 安全组-3——`ListSecurityGroups` 存量 memory-only（重启后 12 条历史安全组列表全丢），store 化：`NetworkResourceStore` 接口补 `ListSecurityGroups` + `MetadataNetworkStore` SQL 实现 + service 分支应用 VPCID 精确/Name 前缀/Keyword/State 过滤后 RLock 填 BoundInstanceCount 按 UpdatedAt 倒序；③ VPC-3/子网-3——`/instances` 契约新增 vpc_id/subnet_id 参数，`WorkloadInstanceListRequest` 增字段，新增导出 `MatchesInstanceNetwork` 接入 matchesInstanceList，孤儿合并同遵守；单测 6 个新增 + 2 个 fake Scan 基建补 case；atlas.sum 经构建机 atlas v1.3.4 重算并做算法一致性验证。实测（ani-system 镜像 dev-20260916-network2）：创建绑定历史 VPC 成功且回显、列表 12 条可见+vpc_id 精确过滤、实例 59→2 条全匹配、不存在资源→0。**已知边界**：CreateSubnet/CreateLoadBalancer/CreateRoute 同源内存校验缺陷与 DeleteSecurityGroup/rules API memory-only 待后续批次收口 | network-sg-vpc-bind-and-instance-filter.md |
+
 ### 列表过滤参数统一（search_field 约定）（2026-09，分支 fix/instance-searchfield-and-ops-pagination）
 
 | 批次 | 内容摘要 | 文件 |

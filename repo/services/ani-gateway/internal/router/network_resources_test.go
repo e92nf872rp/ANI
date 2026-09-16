@@ -226,6 +226,95 @@ func newFakeNetworkService() *fakeNetworkService {
 	return &fakeNetworkService{NetworkService: runtimeadapter.NewLocalNetworkService()}
 }
 
+// 安全组-4 回归：创建安全组时携带 vpc_id 必须落到记录并回显；
+// 安全组-3 回归：列表必须按 vpc_id 过滤；引用不存在的 VPC 必须拒绝。
+func TestNetworkAPISecurityGroupVPCTaggingAndFilter(t *testing.T) {
+	api := newNetworkAPI()
+	vpc, err := api.service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "sg-vpc-a",
+		Name:           "sg-vpc",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	tagged, err := api.service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "sg-vpc-tagged",
+		VPCID:          vpc.VPCID,
+		Name:           "tagged-sg",
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup(vpc_id) error = %v", err)
+	}
+	if got := networkSecurityGroupFromRecord(tagged); got.VPCID != vpc.VPCID {
+		t.Fatalf("security group response vpc_id = %q, want %q", got.VPCID, vpc.VPCID)
+	}
+	untagged, err := api.service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "sg-vpc-untagged",
+		Name:           "untagged-sg",
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup(without vpc_id) error = %v", err)
+	}
+	if networkSecurityGroupFromRecord(untagged).VPCID != "" {
+		t.Fatalf("untagged security group should have empty vpc_id")
+	}
+	if _, err := api.service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "sg-vpc-missing",
+		VPCID:          "vpc-not-exists",
+		Name:           "missing-vpc-sg",
+	}); err == nil {
+		t.Fatalf("CreateSecurityGroup with unknown vpc_id succeeded, want ErrNotFound")
+	}
+
+	filtered, err := api.service.ListSecurityGroups(context.Background(), ports.NetworkResourceListRequest{
+		TenantID: "tenant-a",
+		VPCID:    vpc.VPCID,
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroups(vpc_id) error = %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].SecurityGroupID != tagged.SecurityGroupID {
+		t.Fatalf("ListSecurityGroups(vpc_id) = %+v, want only tagged security group", filtered)
+	}
+	all, err := api.service.ListSecurityGroups(context.Background(), ports.NetworkResourceListRequest{
+		TenantID: "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroups() error = %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListSecurityGroups() = %d items, want 2 (tagged + untagged)", len(all))
+	}
+
+	// bound_instance_count 只读聚合：绑定 1 个实例后详情应返回 1
+	if _, err := api.service.CreateSecurityGroupBinding(context.Background(), ports.NetworkSecurityGroupBindingCreateRequest{
+		TenantID:        "tenant-a",
+		SecurityGroupID: tagged.SecurityGroupID,
+		IdempotencyKey:  "sg-vpc-binding",
+		TargetType:      "instance",
+		TargetID:        "inst-1",
+	}); err != nil {
+		t.Fatalf("CreateSecurityGroupBinding error = %v", err)
+	}
+	detail, err := api.service.GetSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{
+		TenantID:   "tenant-a",
+		ResourceID: tagged.SecurityGroupID,
+	})
+	if err != nil {
+		t.Fatalf("GetSecurityGroup error = %v", err)
+	}
+	if detail.BoundInstanceCount != 1 {
+		t.Fatalf("detail.BoundInstanceCount = %d, want 1", detail.BoundInstanceCount)
+	}
+	if got := networkSecurityGroupFromRecord(detail); got.BoundInstanceCount != 1 {
+		t.Fatalf("security group response bound_instance_count = %d, want 1", got.BoundInstanceCount)
+	}
+}
+
 func (s *fakeNetworkService) CreateVPC(ctx context.Context, request ports.NetworkVPCCreateRequest) (ports.NetworkVPCRecord, error) {
 	s.createVPCCalls++
 	return s.NetworkService.CreateVPC(ctx, request)

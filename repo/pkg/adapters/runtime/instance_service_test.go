@@ -2743,3 +2743,40 @@ func TestMatchesInstanceStateConsistentForOrphans(t *testing.T) {
 		})
 	}
 }
+
+// VPC-3/子网-3 回归：实例列表的 vpc_id/subnet_id 归属过滤与 store 记录一致，
+// router 层合并孤儿（live Kubernetes）实例时共用 MatchesInstanceNetwork。
+func TestMatchesInstanceNetworkConsistentForOrphans(t *testing.T) {
+	inVPC := ports.WorkloadInstanceRecord{
+		Network: ports.InstanceNetworkSummary{VPCID: "vpc-1", SubnetID: "subnet-1"},
+	}
+	otherVPC := ports.WorkloadInstanceRecord{
+		Network: ports.InstanceNetworkSummary{VPCID: "vpc-2", SubnetID: "subnet-2"},
+	}
+	noNetwork := ports.WorkloadInstanceRecord{}
+
+	cases := []struct {
+		name     string
+		record   ports.WorkloadInstanceRecord
+		vpcID    string
+		subnetID string
+		want     bool
+	}{
+		{"未传过滤参数不过滤", noNetwork, "", "", true},
+		{"vpc_id 匹配", inVPC, "vpc-1", "", true},
+		{"vpc_id 不匹配(孤儿)", otherVPC, "vpc-1", "", false},
+		{"subnet_id 匹配", inVPC, "", "subnet-1", true},
+		{"subnet_id 不匹配(孤儿)", otherVPC, "", "subnet-1", false},
+		{"同时匹配", inVPC, "vpc-1", "subnet-1", true},
+		{"vpc 匹配但 subnet 不匹配", inVPC, "vpc-1", "subnet-2", false},
+		{"无网络归属的孤儿被 vpc_id 过滤排除", noNetwork, "vpc-1", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{VPCID: tc.vpcID, SubnetID: tc.subnetID}
+			if got := MatchesInstanceNetwork(tc.record, request); got != tc.want {
+				t.Fatalf("MatchesInstanceNetwork(vpc=%q, subnet=%q) = %v, want %v", tc.vpcID, tc.subnetID, got, tc.want)
+			}
+		})
+	}
+}

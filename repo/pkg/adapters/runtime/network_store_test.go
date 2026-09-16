@@ -61,9 +61,12 @@ func TestMetadataNetworkStoreSerializesNestedNetworkResources(t *testing.T) {
 	if !strings.Contains(tx.sql, "INSERT INTO network_security_groups") {
 		t.Fatalf("sql = %q, want network_security_groups insert", tx.sql)
 	}
-	rules, ok := tx.args[4].(string)
+	if got, want := tx.args[2], ""; got != want {
+		t.Fatalf("vpc_id arg = %v, want empty (record carries no VPC)", got)
+	}
+	rules, ok := tx.args[5].(string)
 	if !ok || !strings.Contains(rules, `"Protocol":"tcp"`) {
-		t.Fatalf("rules arg = %#v, want serialized rule payload", tx.args[4])
+		t.Fatalf("rules arg = %#v, want serialized rule payload", tx.args[5])
 	}
 
 	err = store.UpsertLoadBalancer(context.Background(), ports.NetworkLoadBalancerRecord{

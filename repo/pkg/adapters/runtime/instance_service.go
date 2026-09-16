@@ -665,11 +665,27 @@ func MatchesInstanceState(record ports.WorkloadInstanceRecord, request ports.Wor
 	return record.Status.State != ports.WorkloadStateDeleted
 }
 
+// MatchesInstanceNetwork 判断单条实例记录是否命中 request 的 VPC/Subnet 归属过滤。
+// 导出使 router 层合并的 live Kubernetes 孤儿实例与 store 记录共用同一语义：
+// 显式传 vpc_id/subnet_id 时按 record.Network 归属精确匹配，未传时不过滤。
+func MatchesInstanceNetwork(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if vpcID := strings.TrimSpace(request.VPCID); vpcID != "" && record.Network.VPCID != vpcID {
+		return false
+	}
+	if subnetID := strings.TrimSpace(request.SubnetID); subnetID != "" && record.Network.SubnetID != subnetID {
+		return false
+	}
+	return true
+}
+
 func matchesInstanceList(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
 	if !MatchesInstanceState(record, request) {
 		return false
 	}
 	if !MatchesInstanceKeyword(record, request) {
+		return false
+	}
+	if !MatchesInstanceNetwork(record, request) {
 		return false
 	}
 	if !request.CreatedAfter.IsZero() && !record.CreatedAt.After(request.CreatedAfter) {

@@ -34,6 +34,7 @@ type networkCreateSubnetRequest struct {
 
 type networkCreateSecurityGroupRequest struct {
 	IdempotencyKey string                     `json:"idempotency_key"`
+	VPCID          string                     `json:"vpc_id"`
 	Name           string                     `json:"name"`
 	Description    string                     `json:"description"`
 	Rules          []networkSecurityGroupRule `json:"rules"`
@@ -125,16 +126,18 @@ type networkSubnetResponse struct {
 }
 
 type networkSecurityGroupResponse struct {
-	ID          string                     `json:"id"`
-	TenantID    string                     `json:"tenant_id"`
-	Name        string                     `json:"name"`
-	Description string                     `json:"description,omitempty"`
-	Rules       []networkSecurityGroupRule `json:"rules"`
-	State       string                     `json:"state"`
-	Reason      string                     `json:"reason,omitempty"`
-	DevProfile  coreDevProfileResponse     `json:"dev_profile"`
-	CreatedAt   string                     `json:"created_at"`
-	UpdatedAt   string                     `json:"updated_at"`
+	ID                 string                     `json:"id"`
+	TenantID           string                     `json:"tenant_id"`
+	VPCID              string                     `json:"vpc_id,omitempty"`
+	Name               string                     `json:"name"`
+	Description        string                     `json:"description,omitempty"`
+	Rules              []networkSecurityGroupRule `json:"rules"`
+	BoundInstanceCount int                        `json:"bound_instance_count,omitempty"`
+	State              string                     `json:"state"`
+	Reason             string                     `json:"reason,omitempty"`
+	DevProfile         coreDevProfileResponse     `json:"dev_profile"`
+	CreatedAt          string                     `json:"created_at"`
+	UpdatedAt          string                     `json:"updated_at"`
 }
 
 type networkLoadBalancerResponse struct {
@@ -432,6 +435,7 @@ func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestCo
 	record, err := api.service.CreateSecurityGroup(ctx, ports.NetworkSecurityGroupCreateRequest{
 		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
+		VPCID:          req.VPCID,
 		Name:           req.Name,
 		Description:    req.Description,
 		Rules:          networkRulesToPorts(req.Rules),
@@ -446,6 +450,7 @@ func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestCo
 func (api *networkAPI) listSecurityGroups(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSecurityGroups(ctx, ports.NetworkResourceListRequest{
 		TenantID: instanceTenantID(c),
+		VPCID:    c.Query("vpc_id"),
 		Name:     networkNameFilter(c),
 		Keyword:  networkIDKeyword(c),
 		State:    ports.NetworkResourceState(c.Query("state")),
@@ -794,16 +799,18 @@ func networkSubnetFromRecord(record ports.NetworkSubnetRecord) networkSubnetResp
 
 func networkSecurityGroupFromRecord(record ports.NetworkSecurityGroupRecord) networkSecurityGroupResponse {
 	return networkSecurityGroupResponse{
-		ID:          record.SecurityGroupID,
-		TenantID:    record.TenantID,
-		Name:        record.Name,
-		Description: record.Description,
-		Rules:       networkRulesFromPorts(record.Rules),
-		State:       string(record.State),
-		Reason:      record.Reason,
-		DevProfile:  localCoreDevProfile("local-network-service", "Core dev/local profile; provider execution is gated separately"),
-		CreatedAt:   networkTime(record.CreatedAt),
-		UpdatedAt:   networkTime(record.UpdatedAt),
+		ID:                 record.SecurityGroupID,
+		TenantID:           record.TenantID,
+		VPCID:              record.VPCID,
+		Name:               record.Name,
+		Description:        record.Description,
+		Rules:              networkRulesFromPorts(record.Rules),
+		BoundInstanceCount: record.BoundInstanceCount,
+		State:              string(record.State),
+		Reason:             record.Reason,
+		DevProfile:         localCoreDevProfile("local-network-service", "Core dev/local profile; provider execution is gated separately"),
+		CreatedAt:          networkTime(record.CreatedAt),
+		UpdatedAt:          networkTime(record.UpdatedAt),
 	}
 }
 

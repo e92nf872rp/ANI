@@ -109,16 +109,17 @@ func (s *MetadataNetworkStore) UpsertSecurityGroup(ctx context.Context, record p
 	createdAt, updatedAt := networkRecordTimes(s.now, record.CreatedAt, record.UpdatedAt)
 	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO network_security_groups (tenant_id, security_group_id, name, description, rules, state, reason, created_at, updated_at)
-			VALUES ($1::uuid, $2, $3, NULLIF($4, ''), $5::jsonb, $6, NULLIF($7, ''), $8, $9)
+			INSERT INTO network_security_groups (tenant_id, security_group_id, vpc_id, name, description, rules, state, reason, created_at, updated_at)
+			VALUES ($1::uuid, $2, NULLIF($3, ''), $4, NULLIF($5, ''), $6::jsonb, $7, NULLIF($8, ''), $9, $10)
 			ON CONFLICT (tenant_id, security_group_id) DO UPDATE SET
+				vpc_id = EXCLUDED.vpc_id,
 				name = EXCLUDED.name,
 				description = EXCLUDED.description,
 				rules = EXCLUDED.rules,
 				state = EXCLUDED.state,
 				reason = EXCLUDED.reason,
 				updated_at = EXCLUDED.updated_at
-		`, record.TenantID, record.SecurityGroupID, record.Name, record.Description, string(rules), string(record.State), record.Reason, createdAt, updatedAt)
+		`, record.TenantID, record.SecurityGroupID, record.VPCID, record.Name, record.Description, string(rules), string(record.State), record.Reason, createdAt, updatedAt)
 		if err != nil {
 			return fmt.Errorf("upsert network security group: %w", err)
 		}
@@ -352,11 +353,11 @@ func (s *MetadataNetworkStore) GetSecurityGroup(ctx context.Context, tenantID st
 	var rulesJSON []byte
 	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		row := tx.QueryRow(ctx, `
-			SELECT tenant_id::text, security_group_id, name, COALESCE(description, ''), rules, state, COALESCE(reason, ''), created_at, updated_at
+			SELECT tenant_id::text, security_group_id, COALESCE(vpc_id, ''), name, COALESCE(description, ''), rules, state, COALESCE(reason, ''), created_at, updated_at
 			FROM network_security_groups
 			WHERE tenant_id = $1::uuid AND security_group_id = $2
 		`, tenantID, securityGroupID)
-		if err := row.Scan(&record.TenantID, &record.SecurityGroupID, &record.Name, &record.Description, &rulesJSON, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
+		if err := row.Scan(&record.TenantID, &record.SecurityGroupID, &record.VPCID, &record.Name, &record.Description, &rulesJSON, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) || isNoRows(err) {
 				return ports.ErrNotFound
 			}
@@ -373,6 +374,43 @@ func (s *MetadataNetworkStore) GetSecurityGroup(ctx context.Context, tenantID st
 		}
 	}
 	return record, nil
+}
+
+func (s *MetadataNetworkStore) ListSecurityGroups(ctx context.Context, tenantID string) ([]ports.NetworkSecurityGroupRecord, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return nil, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	var records []ports.NetworkSecurityGroupRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, security_group_id, COALESCE(vpc_id, ''), name, COALESCE(description, ''), rules, state, COALESCE(reason, ''), created_at, updated_at
+			FROM network_security_groups
+			WHERE tenant_id = $1::uuid AND state <> 'deleted'
+			ORDER BY updated_at DESC
+		`, tenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var record ports.NetworkSecurityGroupRecord
+			var rulesJSON []byte
+			if err := rows.Scan(&record.TenantID, &record.SecurityGroupID, &record.VPCID, &record.Name, &record.Description, &rulesJSON, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
+				return err
+			}
+			if len(rulesJSON) > 0 && string(rulesJSON) != "[]" {
+				if err := json.Unmarshal(rulesJSON, &record.Rules); err != nil {
+					return fmt.Errorf("unmarshal security group rules: %w", err)
+				}
+			}
+			records = append(records, record)
+		}
+		return rows.Err()
+	})
+	return records, err
 }
 
 func requireNetworkRecord(tenantID string, resourceID string, name string, state ports.NetworkResourceState) error {

@@ -75,6 +75,8 @@ func (r fakeMetadataRow) Scan(dest ...any) error {
 		switch ptr := target.(type) {
 		case *string:
 			*ptr = r.values[i].(string)
+		case *ports.NetworkResourceState:
+			*ptr = ports.NetworkResourceState(r.values[i].(string))
 		case *bool:
 			*ptr = r.values[i].(bool)
 		case *int:
