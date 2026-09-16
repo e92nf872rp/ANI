@@ -848,6 +848,9 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 	v1.POST("/demo/instances/:instance_id/console", api.console)
 	v1.POST("/demo/instances/:instance_id/console/exec", api.consoleExec)
 	v1.GET("/instance-operations/:operation_id", api.getOperation)
+	// Console 首页概览统计（GET /overview）：复用实例链路做实例计数，
+	// handler 定义在 console_overview.go。
+	registerConsoleOverview(v1, api)
 	return api.service, api.observeInstance
 }
 

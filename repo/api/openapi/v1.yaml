@@ -1261,6 +1261,92 @@ components:
           type: array
           items: { type: string }
 
+    ConsoleOverviewResponse:
+      type: object
+      description: "Console 首页四类资源概览统计（仅聚合计数，不承载任何 Services 资源 schema）。"
+      required: [instances, inference_services, models, knowledge_bases]
+      properties:
+        instances:          { $ref: '#/components/schemas/ConsoleInstanceOverview' }
+        inference_services: { $ref: '#/components/schemas/ConsoleInferenceServiceOverview' }
+        models:             { $ref: '#/components/schemas/ConsoleModelOverview' }
+        knowledge_bases:    { $ref: '#/components/schemas/ConsoleKnowledgeBaseOverview' }
+
+    ConsoleInstanceOverview:
+      type: object
+      description: "实例概览统计（全 kind 合计；不含 state=deleted）。"
+      required: [total, by_state]
+      properties:
+        total:    { type: integer, format: int64, minimum: 0, description: "当前租户非 deleted 实例总数" }
+        by_state: { $ref: '#/components/schemas/ConsoleInstanceStateDistribution' }
+
+    ConsoleInstanceStateDistribution:
+      type: object
+      description: "按 state 的实例计数；与 /instances 的 state 枚举一致（不含 deleted）。未出现的 state 返回 0，不省略字段。"
+      required: [pending, provisioning, starting, running, stopping, stopped, failed, deleting]
+      properties:
+        pending:      { type: integer, format: int64, minimum: 0 }
+        provisioning: { type: integer, format: int64, minimum: 0 }
+        starting:     { type: integer, format: int64, minimum: 0 }
+        running:      { type: integer, format: int64, minimum: 0 }
+        stopping:     { type: integer, format: int64, minimum: 0 }
+        stopped:      { type: integer, format: int64, minimum: 0 }
+        failed:       { type: integer, format: int64, minimum: 0 }
+        deleting:     { type: integer, format: int64, minimum: 0 }
+
+    ConsoleInferenceServiceOverview:
+      type: object
+      description: "推理服务概览统计（不含 deleted）。"
+      required: [total, by_status]
+      properties:
+        total:     { type: integer, format: int64, minimum: 0, description: "当前租户推理服务总数" }
+        by_status: { $ref: '#/components/schemas/ConsoleInferenceServiceStatusDistribution' }
+
+    ConsoleInferenceServiceStatusDistribution:
+      type: object
+      description: "按 status 的推理服务计数；与 Services 推理服务 status 枚举一致。未出现的状态返回 0。"
+      required: [pending, deploying, running, stopping, stopped, failed]
+      properties:
+        pending:   { type: integer, format: int64, minimum: 0 }
+        deploying: { type: integer, format: int64, minimum: 0 }
+        running:   { type: integer, format: int64, minimum: 0 }
+        stopping:  { type: integer, format: int64, minimum: 0 }
+        stopped:   { type: integer, format: int64, minimum: 0 }
+        failed:    { type: integer, format: int64, minimum: 0 }
+
+    ConsoleModelOverview:
+      type: object
+      description: "模型仓库概览统计（不含 status=deleted）。"
+      required: [total, by_status]
+      properties:
+        total:     { type: integer, format: int64, minimum: 0, description: "当前租户模型总数" }
+        by_status: { $ref: '#/components/schemas/ConsoleModelStatusDistribution' }
+
+    ConsoleModelStatusDistribution:
+      type: object
+      description: "按 status 的模型计数；与 Services 模型 status 枚举一致（不含 deleted）。未出现的状态返回 0。"
+      required: [pending, downloading, ready, error]
+      properties:
+        pending:     { type: integer, format: int64, minimum: 0 }
+        downloading: { type: integer, format: int64, minimum: 0 }
+        ready:       { type: integer, format: int64, minimum: 0 }
+        error:       { type: integer, format: int64, minimum: 0 }
+
+    ConsoleKnowledgeBaseOverview:
+      type: object
+      description: "知识库概览统计（不含 status=deleted）。"
+      required: [total, by_status]
+      properties:
+        total:     { type: integer, format: int64, minimum: 0, description: "当前租户知识库总数" }
+        by_status: { $ref: '#/components/schemas/ConsoleKnowledgeBaseStatusDistribution' }
+
+    ConsoleKnowledgeBaseStatusDistribution:
+      type: object
+      description: "按 status 的知识库计数；与 Services 知识库 status 枚举一致（不含 deleted）。未出现的状态返回 0。"
+      required: [active, rebuilding]
+      properties:
+        active:     { type: integer, format: int64, minimum: 0 }
+        rebuilding: { type: integer, format: int64, minimum: 0 }
+
     InstanceNetworkConfig:
       type: object
       description: >-
@@ -3888,9 +3974,10 @@ components:
         gpu_index:       { type: integer }
         memory_total_mb: { type: integer }
         driver_version:  { type: string, nullable: true }
-        status:          { type: string, enum: [available, in_use, fault, maintenance] }
-        tenant_id:       { type: string, format: uuid, nullable: true }
+        status:          { type: string, enum: [available, in_use, fault, maintenance, unavailable], description: "available/in_use/fault 为自动观测态；maintenance=人工维护中，unavailable=人工标记不可用" }
+        tenant_id:       { type: string, format: uuid, nullable: true, description: "占用租户（in_use 时来自 Pod 归属）" }
         instance_id:     { type: string, format: uuid, nullable: true }
+        reason:          { type: string, nullable: true, description: "人工操作原因（维护窗口、Xid 79、驱动升级等），来自 PATCH 状态翻转，持久化在平台台账" }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         gpu_mode:            { type: string, nullable: true, enum: [wholecard, vgpu], description: "GPU 隔离模式，从节点标签 ani.kubercloud.io/gpu-mode 读取" }
@@ -3960,6 +4047,11 @@ components:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         vgpu_count:      { type: integer, minimum: 0, description: "vGPU 模式设备数" }
         wholecard_count: { type: integer, minimum: 0, description: "整卡模式设备数" }
+        physical_card_count: { type: integer, minimum: 0, description: "物理卡数：按 node × 物理卡 index 去重计数（与设备记录数同口径）" }
+        logical_card_count:  { type: integer, minimum: 0, description: "逻辑卡数：整卡数 + vGPU 切片数合计（整卡 shares=1，vGPU 卡按切分份数累计）" }
+        maintenance_count:   { type: integer, minimum: 0, description: "人工维护中（maintenance）设备数" }
+        unavailable_count:   { type: integer, minimum: 0, description: "人工标记不可用（unavailable）设备数" }
+        tenant_count:        { type: integer, minimum: 0, description: "当前占用设备覆盖的租户数（in_use 记录按 tenant_id 去重）" }
 
     GPUSchedulingQueue:
       type: object
@@ -4130,7 +4222,32 @@ components:
       description: "设备状态翻转请求"
       required: [status]
       properties:
-        status: { type: string, enum: [maintenance, idle], description: "目标状态：maintenance=维护中，idle=空闲" }
+        status: { type: string, enum: [maintenance, idle, unavailable], description: "目标状态：maintenance=维护中，idle=空闲（清除人工覆盖），unavailable=人工标记不可用；fault 为自动检测态不可手工设置" }
+        reason: { type: string, maxLength: 512, description: "操作原因（如 驱动升级窗口、Xid 79），持久化到平台台账并写入设备事件流；idle 翻转时可省略" }
+
+    GPUDeviceEvent:
+      type: object
+      description: "GPU 设备台账事件（状态翻转/集群切分），BOSS 联动事件流数据源"
+      required: [id, event_type, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        device_id:  { type: string, format: uuid, nullable: true, description: "节点级事件（如集群切分）为 null" }
+        node_name:  { type: string, nullable: true }
+        gpu_type:   { type: string, nullable: true }
+        event_type: { type: string, enum: [status_changed, partition_applied] }
+        reason:     { type: string, nullable: true }
+        actor:      { type: string, nullable: true, description: "操作者（平台管理员身份或 system）" }
+        created_at: { type: string, format: date-time }
+
+    GPUDeviceEventListResponse:
+      type: object
+      required: [items, total, dev_profile]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/GPUDeviceEvent' } }
+        total:       { type: integer }
+        next_cursor: { type: string, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
 
     # ── 集群切分 Schemas（GPU-PARTITION-A 新增）────────────────────────────────
 
@@ -5344,6 +5461,35 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /overview:
+    get:
+      operationId: getConsoleOverview
+      summary: 查询 Console 首页概览统计
+      description: |
+        Console 首页统计卡片的聚合只读端点：一次返回当前租户的实例、推理服务、
+        模型仓库、知识库四类资源的总数与状态分布。
+        口径与各列表接口一致：不含 state/status=deleted 的资源。
+        数据源为当前租户实例视图与 model/inference/kb 三个 Services 组件。
+        部分成功语义：任一数据源失败不整体报错，失败部分以空计数
+        （total=0、状态分布全 0）返回，整体仍 200。
+        本端点仅返回聚合计数，不承载任何 Services 资源 schema。
+      tags: [ConsoleOverview]
+      x-ani-rbac-scope: "scope:instances:read"
+      x-ani-authz:
+        version: v1
+        resource: overview
+        action: get
+        boundary: tenant
+        principal_kinds: [user, api_key]
+      responses:
+        "200":
+          description: Console 首页概览统计（含部分数据源降级为空计数的情形）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleOverviewResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
 
   # ── 计算实例（Core API Alpha）──────────────────────────────────────────────
   /instances:
@@ -9309,7 +9455,7 @@ paths:
       parameters:
         - { name: gpu_type,  in: query, schema: { type: string } }
         - { name: gpu_mode,  in: query, schema: { type: string, enum: [wholecard, vgpu] }, description: "按 GPU 隔离模式过滤" }
-        - { name: status,    in: query, schema: { type: string, enum: [available, in_use, fault, maintenance] } }
+        - { name: status,    in: query, schema: { type: string, enum: [available, in_use, fault, maintenance, unavailable] } }
         - { name: node_name, in: query, schema: { type: string } }
         - { name: limit,  in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 200 } }
         - { name: cursor, in: query, schema: { type: string } }
@@ -9342,8 +9488,10 @@ paths:
       operationId: updateGPUDeviceStatus
       summary: 翻转 GPU 设备状态
       description: |
-        将设备状态翻转为 maintenance（维护中）或 idle（空闲）。
-        BOSS 在 GPU 池管理中用于设备维护操作。
+        将设备状态翻转为 maintenance（维护中）、idle（空闲，清除人工覆盖）或
+        unavailable（人工标记不可用）。fault 为自动检测态，不可手工设置。
+        可携带 reason 说明操作原因（如驱动升级窗口、Xid 79），持久化到平台
+        台账并写入设备事件流。BOSS 在 GPU 池管理中用于设备维护操作。
       tags: [GPUInventory]
       x-ani-rbac-scope: "scope:gpu-inventory:write"
       parameters:
@@ -9360,9 +9508,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GPUInventoryRecord' }
+        "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/DeviceNotFound' }
+
+  # ── GPU 设备事件流（BOSS 联动事件块数据源，平台专属）─────────────────────────
+  /gpu-inventory/events:
+    get:
+      operationId: listGPUDeviceEvents
+      summary: 查询 GPU 设备台账事件流
+      description: |
+        返回设备状态翻转、集群切分等设备台账事件，按时间倒序。
+        BOSS GPU 资源池态势页的联动事件块从本端点取数。
+      tags: [GPUInventory]
+      x-ani-rbac-scope: "scope:gpu-inventory:read"
+      parameters:
+        - { name: device_id, in: query, schema: { type: string, format: uuid } }
+        - { name: event_type, in: query, schema: { type: string, enum: [status_changed, partition_applied] } }
+        - { name: limit,  in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 设备事件流
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GPUDeviceEventListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
 
   # ── GPU 集群切分（GPU-PARTITION-A，BOSS 专属异步操作）─────────────────────────
   /gpu-inventory/gpu-partitions:
@@ -10787,3 +10960,4 @@ tags:
   - { name: TenantUsers,    description: "平台级租户用户与角色（users / user_roles / roles）" }
   - { name: GPUSpec,        description: "GPU 规格目录管理（创建/删除/可用性查询）" }
   - { name: PlatformCapacity, description: "平台容量态势汇总（整平台 = 1 个默认区域，只读）" }
+  - { name: ConsoleOverview,  description: "Console 首页概览统计（实例/推理服务/模型/知识库聚合计数）" }

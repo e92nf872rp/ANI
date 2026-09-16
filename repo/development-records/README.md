@@ -25,6 +25,12 @@
 |---|---|---|
 | IN-INSTANCE-SANDBOX-EXPIRATION-EGRESS-A | 修复 kjs-study Bug-7/Bug-8（LOCAL_VERIFIED，未部署）：① Bug-7 沙箱到点未过期——`SandboxConfig`（JSONB）新增绝对到期 `ExpiresAt`/`LastActivityAt`，创建时=createdAt+SessionTimeout、`extend` 推进绝对到期、`touch_idle` 刷新活跃；新增网关后台 `SandboxExpirationController`（默认 30s 周期、跨租户 `ListRunningSandboxes` 枚举非终态沙箱，`WorkloadInstanceStore.WithPlatformTx`），按 session/idle 到期→映射 `OnTimeout`（kill→delete、pause→pause）→执 `ApplyLifecycle`→置 `SandboxStateExpired`→`UpsertStatus` 幂等持久化；装配经 bootstrap deps→InstanceRuntime→gateway main 启动 goroutine；② Bug-8-A 沙箱详情 egress 白名单回显——`instanceSandboxResponse` 增 `EgressAllowlist`、`sandboxResponseFromRecord` 填入（OpenAPI 已有 schema，无契约/SDK 变更；B 网络策略下发按平台租户 VPC 无 centralized gateway 前提搁置）。新增 sandbox_expiration_controller(_test).go、到期字段/控制器/lifecycle 断言测试；go build + runtime/bootstrap/gateway/router 测试 + validate_architecture + gofmt + git diff --check 全绿 | sandbox-expiration-egress-a.md |
 
+### Console 首页概览统计聚合接口（2026-09，分支 feat/console-overview）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GATEWAY-CONSOLE-OVERVIEW-A | Console 首页四类统计卡片聚合端点 `GET /api/v1/overview`（getConsoleOverview）：契约优先新增 v1.yaml 路径与 ConsoleOverviewResponse（tenant 边界 + x-ani-authz + scope:instances:read；实例 by_state 8 固定键 / 推理 6 键 / 模型 4 键 / 知识库 2 键，0 值不省略，均不含 deleted）；实现为 ani-gateway BFF 聚合——实例复用本进程实例链路（refresh+全量分页+孤儿合并，与 /instances 同口径），model/inference/kb 走既有 gRPC 客户端 cursor 翻页走尽按 status 计数，后端业务服务零改动；**部分成功语义（用户决策，覆盖初版整体 503）**：任一数据源失败该部分空计数（total=0 分布全 0）+ WARN 日志，整体仍 200，gRPC 未装配同走空部分；Core SDK 四语言/API docs/authz 生成物同步（323 routes 0 error）；单测 4 用例（计数一致性/翻页/deleted 与跨租户排除/部分成功）+ go build/test/validate-openapi-spec/validate-gateway-authz/validate-architecture 全绿；K8s 测试环境双环境实测——ani-test2（镜像 test2-20260914-g1→g2，计数与列表接口翻页全量逐字段一致、401/403、netpol 故障注入验证降级与 WARN、幂等 5 次、延迟 197~340ms）与 ani-system（镜像 dev-20260914-overview，只 set image 未改 env，etcd 预检 43%，租户 token 200 实例 54 等四类正常计数）；实测坑：修改 NetworkPolicy 后需重启 gateway pod 才生效（gRPC 复用旧 HTTP/2 长连接）；环境问题：ani-system model-service-gateway-ingress 未放行 ani-test2 gateway 源（既有 /svc/models 同样失败，已 patch 放行）。方案/测试报告/前端对接文档三份在 kjs-study/首页概览相关文档/（未入库） | gateway-console-overview-a.md |
+
 ### BOSS 平台审计日志读取（2026-09，分支 feat/platform-audit-log）
 
 | 批次 | 内容摘要 | 文件 |
@@ -68,6 +74,12 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | GATEWAY-GPU-V1-ROLLBACK-A | 生产 gateway 镜像回退致 BOSS GPU 接口 403 复现，且 main（PR #145）已将 v1.yaml 全量 V2 化、GPU 路径标单域 `scope: platform`，部署后 Console（tenant）将 403。V2 boundary 域互斥无法表达 GPU 双域共享，经产品确认**暂时回退 V1 链路**：v1.yaml 13 个 GPU 操作删除 `x-ani-authz` 且 classification `authorized→authenticated`（交叉校验要求两者一致），operation-registry.v1.json / zz_generated_target_operation_registry.go / zz_generated_core_policies.go 全链同步重生成（GPU 全部 `PolicySourceLegacy`），冻结计数 authenticated 9→22、authorized 278→265；`/quotas`+`/quotas/me` V2 定义与 V1 行为一致故保留；运行时 middleware 零改动（rebase 后已含双放行与 /quotas platform-only）。同期 `hotfix/network-store-read` rebase 到 origin/main（core-schema.d.ts 接受删除、auth.go/auth_test.go 保留 main V2 结构+完整双放行逻辑、修复 rebase 遗留冲突标记）。live 验证（ani-test2 隔离环境 10.10.1.66:30083，镜像 `test2-20260908-b`）：platform token GPU 三端点+/quotas 200、/quotas/me 403；tenant token GPU 三端点+/quotas/me+/instances 200、/quotas 403（泄露封堵保持）；tenant-a/admin Console 登录+核心接口 200。同期 `hotfix/network-store-read` rebase 到含 ANI-IAM-PRE930-CONTAINMENT 的最新 main：V2 target registry 基建（operation-registry.v1.json 等）与 GPU 接口 V2 注解已由 main 整体移除、回退终态由 main 承载，分支残余 delta 为批次记录与 auth-service runtimeadmin replace 构建修复；上述 main 既有红门禁已随隔离批次恢复绿，rebase 文档回归（README 租户列表小节/core.html 旧态）已修复；rebase 后 authz drift/路由覆盖/架构守卫/build/test 复验全绿。后续项：GPU 迁回 V2 前置 boundary 模型双域扩展（cluster） | gateway-gpu-v1-rollback-a.md |
+
+### GPU 资源池状态台账（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GPU-POOL-SURFACE-A | BOSS GPU 资源池态势页后端缺口补齐（设计 `repo/design/gpu-pool-status-surface-gap-plan.md`）：`PATCH /gpu-inventory/{device_id}`（platform-only，幂等）人工翻转 maintenance/unavailable/idle + reason 落台账，`GET /gpu-inventory/events` 设备事件流（status_changed/partition_applied，带 node/gpu_type/actor），occupancy 补 physical/logical/maintenance/unavailable/tenant_count，GPUInventoryRecord 加 reason、status enum 加 unavailable；迁移 `20260911_001_gpu_device_surface.sql`（gpu_device_overlays + gpu_device_events，平台级 RLS + ani_app 授权）+ atlas.sum 重算；SDK/docs/authz 生成物重生成。**二次拍板：设备级预留（assign/revoke/reserved）整体回退**——预留=数量型额度（既有 PUT /admin/tenants/{tid}/reservations），Volcano 无 device-level pinning 不做卡级绑定。**live 验证 PASS（2026-09-11，ani-test2 10.10.1.66:30083，镜像 `test2-20260911-b`）**：PATCH 翻转/事件流/occupancy（physical=24 logical=96）/租户 403 隔离全过；前端对接文档 `repo/design/gpu-pool-status-frontend-integration.md`（cursor 现状与零值字段省略已注明） | gpu-pool-status-surface-a.md |
 
 ### 集群 GPU 等分切分（2026-09，分支 ani-hotfix）
 
