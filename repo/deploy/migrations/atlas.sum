@@ -1,4 +1,4 @@
-h1:XRIQ8ikWIc1NpmsMicU2USRYf90QhhY/4ETknw8zHuw=
+h1:kT+ruThtGwPZCKYFrTFtIbyhKr+Rh+N5kPy4weTLOmE=
 20260501000100_init_schema.sql h1:M4G3Wd+Bw2Zt4FUz5wq1kw519PAMb37SpkfRhS02ubI=
 20260502000200_operations_idempotency.sql h1:c79fYzupq5/lgRDB2t4xMUB4eRKrzpNnJ0UT5ZAOnqQ=
 20260502000300_permissions_schema.sql h1:7E8kXUbRLQZrNrMkGdqIrHvTZjl/7v2IxsPZhz8KIe0=
@@ -54,3 +54,4 @@ h1:XRIQ8ikWIc1NpmsMicU2USRYf90QhhY/4ETknw8zHuw=
 20260904000100_model_import_resolved_revision.sql h1:euHaXDu8afXt/hRKI6TKnC4gckgKaeofxzvPICiQREI=
 20260911000100_kb_default_inference_service.sql h1:Yb4psAAiK60R9lNje/MTsTOJIEDGuvAmmKTw9X/FPHk=
 20260911000200_kb_embedding_model_full_name.sql h1:Gl6k19dYFoSsvEp79f0oT9Ai/F2Nxb7ST1VYOKUd6mQ=
+20260911_001_gpu_device_surface.sql h1:QdI/e7amHhpyy9h8znete6G5Y7rI2JOpmbyUdZbLjss=
