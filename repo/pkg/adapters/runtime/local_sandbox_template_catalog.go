@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -24,10 +23,12 @@ func NewLocalSandboxTemplateCatalog() *LocalSandboxTemplateCatalog {
 	createdAt := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)
 	return &LocalSandboxTemplateCatalog{templates: []ports.SandboxTemplateRecord{
 		{
-			ID:          uuid.NewString(),
+			// Fixed stable ID so that the same template id resolves identically
+			// across separately-constructed catalog instances (list vs. create).
+			ID:          "9ede0a26-3beb-4240-88ac-95a2a33abe13",
 			Name:        "python-secure",
-			Image:       "docker.changqingyun.cn/hub/library/python:3.12",
-			Description: "Python sandbox template backed by a reusable python image (python code-run ready)",
+			Image:       "docker.changqingyun.cn/kubercloud/python-node:3.12",
+			Description: "Python+Node sandbox template backed by a reusable image with python3 and node runtimes (python/js code-run ready)",
 			CPUCores:    &cpuSmall,
 			MemoryGB:    &memSmall,
 			StorageGB:   &storageSmall,
@@ -36,10 +37,11 @@ func NewLocalSandboxTemplateCatalog() *LocalSandboxTemplateCatalog {
 			DevProfile:  sandboxTemplateCatalogDevProfile(),
 		},
 		{
-			ID:          uuid.NewString(),
+			// Fixed stable ID for consistent catalog lookup
+			ID:          "cff3b924-9cca-4355-877b-5c3818864ff7",
 			Name:        "cuda-notebook-secure",
-			Image:       "docker.changqingyun.cn/hub/library/python:3.12",
-			Description: "GPU sandbox template currently backed by a reusable python image (python code-run ready); dedicated GPU/notebook image pending",
+			Image:       "docker.changqingyun.cn/kubercloud/python-node:3.12",
+			Description: "GPU sandbox template currently backed by a reusable python+node image (python/js code-run ready); dedicated GPU/notebook image pending",
 			CPUCores:    &cpuGPU,
 			MemoryGB:    &memGPU,
 			StorageGB:   &storageGPU,

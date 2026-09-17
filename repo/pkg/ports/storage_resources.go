@@ -475,6 +475,8 @@ type StorageResourceListRequest struct {
 	TenantID string
 	Limit    int
 	Cursor   string
+	Status   StorageResourceState
+	Keyword  string
 }
 
 type VolumeSnapshotListRequest struct {

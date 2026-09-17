@@ -487,6 +487,32 @@ func TestHarborImageRegistryInsecureSkipVerifyTransport(t *testing.T) {
 	}
 }
 
+func TestHarborImageRegistryListImagesKeywordHitsTagOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2.0/projects/tenant-a/repositories/runtime/artifacts" {
+			t.Fatalf("request path = %s", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, `[
+			{"digest":"sha256:a","tags":[{"name":"release"}],"labels":null,"scan_overview":{"report":{"scan_status":"Success","summary":{}}}},
+			{"digest":"sha256:b","tags":[{"name":"debug"}],"labels":null,"scan_overview":{"report":{"scan_status":"Success","summary":{}}}}
+		]`)
+	}))
+	defer server.Close()
+
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{Endpoint: server.URL, Username: "admin", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// keyword "release" 只命中 tag、不命中仓库名 "runtime"：必须能通过 tag 命中。
+	result, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{TenantID: "tenant-a", Project: "tenant-a", Repository: "runtime", Keyword: "release"})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Tag != "release" {
+		t.Fatalf("items = %+v, want exactly the release-tag item", result.Items)
+	}
+}
+
 type fakeRegistryImageReferenceReader struct{}
 
 func (fakeRegistryImageReferenceReader) ListRegistryImageReferences(context.Context, ports.RegistryImageReferenceListRequest) (ports.RegistryImageReferenceListResult, error) {

@@ -121,15 +121,17 @@ type NetworkSecurityGroupBindingRecord struct {
 }
 
 type NetworkSecurityGroupRecord struct {
-	TenantID        string
-	SecurityGroupID string
-	Name            string
-	Description     string
-	Rules           []NetworkSecurityGroupRule
-	State           NetworkResourceState
-	Reason          string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	TenantID           string
+	SecurityGroupID    string
+	VPCID              string
+	Name               string
+	Description        string
+	Rules              []NetworkSecurityGroupRule
+	BoundInstanceCount int
+	State              NetworkResourceState
+	Reason             string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type NetworkLoadBalancerListener struct {
@@ -186,6 +188,7 @@ type NetworkSubnetCreateRequest struct {
 type NetworkSecurityGroupCreateRequest struct {
 	TenantID       string
 	IdempotencyKey string
+	VPCID          string
 	Name           string
 	Description    string
 	Rules          []NetworkSecurityGroupRule
@@ -221,6 +224,7 @@ type NetworkResourceListRequest struct {
 	Name     string
 	State    NetworkResourceState
 	VPCID    string
+	Keyword  string // search_field=id 时按资源 ID 匹配的关键词
 	Scheme   string
 	Limit    int
 	Cursor   string
@@ -362,6 +366,14 @@ type NetworkResourceStore interface {
 	GetSubnet(ctx context.Context, tenantID string, subnetID string) (NetworkSubnetRecord, error)
 	ListSubnets(ctx context.Context, tenantID string) ([]NetworkSubnetRecord, error)
 	GetSecurityGroup(ctx context.Context, tenantID string, securityGroupID string) (NetworkSecurityGroupRecord, error)
+	ListSecurityGroups(ctx context.Context, tenantID string) ([]NetworkSecurityGroupRecord, error)
+	UpsertSecurityGroupRule(ctx context.Context, record NetworkSecurityGroupRuleRecord) error
+	GetSecurityGroupRule(ctx context.Context, tenantID string, securityGroupID string, ruleID string) (NetworkSecurityGroupRuleRecord, error)
+	ListSecurityGroupRules(ctx context.Context, tenantID string, securityGroupID string) ([]NetworkSecurityGroupRuleRecord, error)
+	DeleteSecurityGroupRule(ctx context.Context, tenantID string, securityGroupID string, ruleID string) error
+	DeleteSecurityGroupRules(ctx context.Context, tenantID string, securityGroupID string) error
+	ListLoadBalancers(ctx context.Context, tenantID string) ([]NetworkLoadBalancerRecord, error)
+	ListRoutes(ctx context.Context, tenantID string) ([]NetworkRouteRecord, error)
 }
 
 type NetworkProviderRenderer interface {

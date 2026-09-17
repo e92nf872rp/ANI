@@ -171,11 +171,30 @@ func (api *vectorStoreAPI) listVectorStores(ctx context.Context, c *app.RequestC
 		writeVectorStoreError(c, err)
 		return
 	}
+	filterSpec := storageListFilters(c)
 	items := make([]vectorStoreResponse, 0, len(records))
 	for _, record := range records {
+		if !vectorStoreMatchesFilters(record, filterSpec) {
+			continue
+		}
 		items = append(items, vectorStoreFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+// vectorStoreMatchesFilters 按状态精确匹配 + 关键词（大小写不敏感）模糊匹配过滤向量存储。
+// search_field=id 时匹配 StoreID，search_field=name 或缺省时匹配 Name。
+func vectorStoreMatchesFilters(record ports.VectorStoreRecord, spec stringListFilterSpec) bool {
+	if spec.status != "" && string(record.State) != spec.status {
+		return false
+	}
+	if spec.keyword == "" {
+		return true
+	}
+	if spec.searchFieldID {
+		return strings.Contains(strings.ToLower(record.StoreID), spec.keyword)
+	}
+	return strings.Contains(strings.ToLower(record.Name), spec.keyword)
 }
 
 func (api *vectorStoreAPI) getVectorStore(ctx context.Context, c *app.RequestContext) {
