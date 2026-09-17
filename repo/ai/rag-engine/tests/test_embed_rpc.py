@@ -227,7 +227,7 @@ async def test_embed_rpc_short_text_untouched(monkeypatch):
     ctx = FakeContext()
     text = "a" * EMBED_SAFE_CHARS  # exactly at the cap — not truncated
     req = rag_pb.EmbedRequest(texts=[text])
-    resp = await servicer.Embed(req, ctx)
+    await servicer.Embed(req, ctx)
     assert ctx.aborted_code is None
     sent = fake_model.get_text_embedding_batch.call_args[0][0]
     assert sent[0] == text
