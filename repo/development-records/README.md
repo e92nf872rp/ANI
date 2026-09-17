@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 对象存储后端桶一致性修复（2026-09-17，分支 fix/object-storage-bugs）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| OBJECT-STORAGE-BUCKET-FIX-A | 对象存储（桶）控制面记录与底座 MinIO 五项不一致修复（提交 `1e4588c`，来源 `kjs-study/修复bug/对象存储后端Bug详细分析.md`）：① Bug1 创建桶支持 `storage_class`（契约 + ports + 请求结构体全链新增，enum `standard`/`infrequent_access`，非法值 `400 UNSUPPORTED`）并按 `access_mode` 推导 `acl`/`acl_label` 回显；② Bug2 下载预签名 URL 从内部 endpoint 改为浏览器可达的 `publicEndpoint`（与上传一致），未配置底座时返回明确错误而非 mock 链接；③ Bug3 预签名前先 `hydrateObjectsFromStore` 回填对象缓存，对象不存在返回可辨识 `object %q not found in bucket %s`；④ Bug4 新增 `ports.ObjectStorePolicyApplier` 可选能力 + MinIO 租户前缀桶策略（Resource 限定 `arn:aws:s3:::<bucket>/<tenantID>/*`，`tenant_read` 走 `PUT ?policy=`、`private` 走 `DELETE ?policy=` 404 视为成功），ACL 归一（`public_read`→`tenant_read`）后同时写控制面存储与底座；⑤ Bug5 `SetStorageBucketClass` 补 `upsertBucket` 持久化。`applyBucketACLPolicy` 在无底座/底座未实现接口时静默跳过（保持 local profile 兼容）；Bug5 有意不做底座 apply（MinIO storage class 为对象级属性，桶级无法等价表达）。无 DB 迁移、无生成物变更。单测：objectstore 桶策略租户前缀与 public endpoint 断言 + runtime 3 新用例 + gateway stub。验证：相关 `go test` 全通、`make validate-architecture` 通过、`gofmt -l` 改动文件无输出；镜像 `dev-20260917-objstore`（digest `sha256:ee3c4bb6…0942`）部署 ani-system（etcd 预检 42%、只 set image 未改 env、rollout 成功、healthz 200）**实测 28 项断言全 PASS / 0 FAIL**——预签名 host 均为 `10.10.1.66:30900` 且真实 PUT/GET 200；`acl=tenant_read` 裸 URL 匿名 GET 200、切回 `private` 后匿名 GET 403（MinIO AccessDenied）双向证明策略真实落到 MinIO；ACL/存储类型切换重列持久。注意：ani-system 原运行网络存储分支构建，本批次采用并集构建避免回退实例 `kind`/`state` 多值过滤；构建机代码树存在漂移（490 个 .go 中 98 个不一致，`storage_renderer.go` 为旧版导致首构建失败，补传后通过） | object-storage-bucket-fix-a.md |
+
 ### VM 生命周期真实底座修复（2026-09，分支 hotfix/network-store-read）
 
 | 批次 | 内容摘要 | 文件 |
