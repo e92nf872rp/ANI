@@ -61,9 +61,12 @@ func TestMetadataNetworkStoreSerializesNestedNetworkResources(t *testing.T) {
 	if !strings.Contains(tx.sql, "INSERT INTO network_security_groups") {
 		t.Fatalf("sql = %q, want network_security_groups insert", tx.sql)
 	}
-	rules, ok := tx.args[4].(string)
+	if got, want := tx.args[2], ""; got != want {
+		t.Fatalf("vpc_id arg = %v, want empty (record carries no VPC)", got)
+	}
+	rules, ok := tx.args[5].(string)
 	if !ok || !strings.Contains(rules, `"Protocol":"tcp"`) {
-		t.Fatalf("rules arg = %#v, want serialized rule payload", tx.args[4])
+		t.Fatalf("rules arg = %#v, want serialized rule payload", tx.args[5])
 	}
 
 	err = store.UpsertLoadBalancer(context.Background(), ports.NetworkLoadBalancerRecord{
@@ -90,7 +93,20 @@ func TestMetadataNetworkStoreSerializesNestedNetworkResources(t *testing.T) {
 }
 
 func TestLocalNetworkServicePersistsCreateAndDelete(t *testing.T) {
-	tx := &fakeMetadataTx{}
+	// DeleteVPC 在 store 模式下先查持久层 VPC、再遍历关联资源（VPC-4 删除保护），
+	// fake 需提供 GetVPC 行数据与各关联表的空结果集。
+	tx := &fakeMetadataTx{
+		row: fakeMetadataRow{values: []any{
+			networkStoreTenantID, "vpc-persisted", "persisted-vpc", "",
+			string(ports.NetworkResourceAvailable), "", time.Unix(100, 0), time.Unix(100, 0),
+		}},
+		queryRows: map[string]ports.Rows{
+			"FROM network_subnets":         &fakeRows{},
+			"FROM network_security_groups": &fakeRows{},
+			"FROM network_load_balancers":  &fakeRows{},
+			"FROM network_routes":          &fakeRows{},
+		},
+	}
 	service := NewLocalNetworkService(
 		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
 	)
@@ -175,5 +191,44 @@ func TestMetadataNetworkStoreUpdatesResourceState(t *testing.T) {
 	}
 	if got, want := tx.args[2], string(ports.NetworkResourceFailed); got != want {
 		t.Fatalf("state arg = %v, want %s", got, want)
+	}
+}
+
+func TestMetadataNetworkStorePersistsSecurityGroupRule(t *testing.T) {
+	tx := &fakeMetadataTx{}
+	store := NewMetadataNetworkStore(fakeMetadataStore{tx: tx}, WithNetworkStoreClock(func() time.Time {
+		return time.Unix(100, 0)
+	}))
+
+	err := store.UpsertSecurityGroupRule(context.Background(), ports.NetworkSecurityGroupRuleRecord{
+		TenantID:        networkStoreTenantID,
+		RuleID:          "sgr-persisted",
+		SecurityGroupID: "sg-persisted",
+		Priority:        100,
+		Direction:       "ingress",
+		Protocol:        "tcp",
+		PortRange:       "443",
+		CIDR:            "0.0.0.0/0",
+		Action:          "allow",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSecurityGroupRule() error = %v", err)
+	}
+	if !strings.Contains(tx.sql, "INSERT INTO network_security_group_rules") {
+		t.Fatalf("sql = %q, want network_security_group_rules insert", tx.sql)
+	}
+	if got, want := tx.args[1], "sgr-persisted"; got != want {
+		t.Fatalf("rule id arg = %v, want %s", got, want)
+	}
+	if got, want := tx.args[3], 100; got != want {
+		t.Fatalf("priority arg = %v, want %d", got, want)
+	}
+
+	err = store.DeleteSecurityGroupRule(context.Background(), networkStoreTenantID, "sg-persisted", "sgr-persisted")
+	if err != nil {
+		t.Fatalf("DeleteSecurityGroupRule() error = %v", err)
+	}
+	if !strings.Contains(tx.sql, "DELETE FROM network_security_group_rules") {
+		t.Fatalf("sql = %q, want network_security_group_rules delete", tx.sql)
 	}
 }

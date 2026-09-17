@@ -161,3 +161,80 @@ func TestLocalSandboxRuntimeDeleteRemovesSession(t *testing.T) {
 		t.Fatalf("Get() after delete error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestLocalSandboxRuntimeInitializesExpirationFieldsOnCreate(t *testing.T) {
+	createdAt := time.Unix(2100, 0).UTC()
+	runtime := NewLocalSandboxRuntime(WithSandboxRuntimeClock(func() time.Time {
+		return time.Unix(2200, 0).UTC()
+	}))
+	instance, err := runtime.Create(context.Background(), ports.SandboxCreateRequest{
+		TenantID:  "tenant-a",
+		Name:      "expirable",
+		AutoStart: true,
+		CreatedAt: createdAt,
+		Config: ports.SandboxConfig{
+			SessionTimeout: 45 * time.Minute,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	wantExpiresAt := createdAt.Add(45 * time.Minute)
+	if !instance.Config.ExpiresAt.Equal(wantExpiresAt) {
+		t.Fatalf("expires_at = %v, want %v", instance.Config.ExpiresAt, wantExpiresAt)
+	}
+	if !instance.Config.LastActivityAt.Equal(createdAt) {
+		t.Fatalf("last_activity_at = %v, want %v", instance.Config.LastActivityAt, createdAt)
+	}
+}
+
+func TestLocalSandboxRuntimeExtendAdvancesDeadlineAndTouchIdleRefreshesActivity(t *testing.T) {
+	now := time.Unix(3000, 0).UTC()
+	runtime := NewLocalSandboxRuntime(WithSandboxRuntimeClock(func() time.Time { return now }))
+	instance, err := runtime.Create(context.Background(), ports.SandboxCreateRequest{
+		TenantID:  "tenant-a",
+		Name:      "renewable",
+		AutoStart: true,
+		CreatedAt: now,
+		Config:    ports.SandboxConfig{SessionTimeout: 30 * time.Minute},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// extend pushes the absolute deadline forward without mutating SessionTimeout.
+	extended, err := runtime.ApplyLifecycle(context.Background(), ports.SandboxLifecycleRequest{
+		TenantID:    "tenant-a",
+		InstanceID:  instance.InstanceID,
+		Action:      ports.WorkloadLifecycleExtend,
+		Duration:    10 * time.Minute,
+		RequestedAt: now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("ApplyLifecycle(extend) error = %v", err)
+	}
+	wantExpiresAt := now.Add(30 * time.Minute).Add(10 * time.Minute)
+	if !extended.Config.ExpiresAt.Equal(wantExpiresAt) {
+		t.Fatalf("extended expires_at = %v, want %v", extended.Config.ExpiresAt, wantExpiresAt)
+	}
+	if extended.Config.SessionTimeout != 30*time.Minute {
+		t.Fatalf("extended session_timeout = %s, want baseline 30m", extended.Config.SessionTimeout)
+	}
+
+	// touch_idle refreshes the last-activity marker only.
+	touched, err := runtime.ApplyLifecycle(context.Background(), ports.SandboxLifecycleRequest{
+		TenantID:    "tenant-a",
+		InstanceID:  instance.InstanceID,
+		Action:      ports.WorkloadLifecycleTouchIdle,
+		RequestedAt: now.Add(2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("ApplyLifecycle(touch_idle) error = %v", err)
+	}
+	if !touched.Config.LastActivityAt.Equal(now.Add(2 * time.Minute)) {
+		t.Fatalf("touched last_activity_at = %v, want %v", touched.Config.LastActivityAt, now.Add(2*time.Minute))
+	}
+	if !touched.Config.ExpiresAt.Equal(wantExpiresAt) {
+		t.Fatalf("touched expires_at changed = %v, want unchanged %v", touched.Config.ExpiresAt, wantExpiresAt)
+	}
+}

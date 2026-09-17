@@ -2052,8 +2052,15 @@ func TestLocalInstanceServiceUpdatesSandboxRuntimeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyLifecycle(extend) error = %v", err)
 	}
-	if extended.Sandbox == nil || extended.Sandbox.Config.SessionTimeout != 35*time.Minute {
-		t.Fatalf("sandbox = %+v, want session timeout 35m", extended.Sandbox)
+	if extended.Sandbox == nil {
+		t.Fatalf("extended sandbox = nil")
+	}
+	if extended.Sandbox.Config.SessionTimeout != 30*time.Minute {
+		t.Fatalf("session timeout = %s, want 30m (extend advances deadline, not baseline)", extended.Sandbox.Config.SessionTimeout)
+	}
+	wantExpiresAt := time.Unix(100, 0).Add(30 * time.Minute).Add(5 * time.Minute)
+	if !extended.Sandbox.Config.ExpiresAt.Equal(wantExpiresAt) {
+		t.Fatalf("expires_at = %v, want %v", extended.Sandbox.Config.ExpiresAt, wantExpiresAt)
 	}
 
 	deleted, err := service.Delete(context.Background(), ports.WorkloadInstanceLifecycleRequest{
@@ -2753,5 +2760,350 @@ func TestLocalInstanceServiceAttachVolumeAllowsFilesystemShared(t *testing.T) {
 		RequestedAt:     time.Unix(1730, 0),
 	}); err != nil {
 		t.Fatalf("AttachVolume() with only filesystem holders error = %v, want success", err)
+	}
+}
+
+// Bug-2 回归：search_field=id/name 时 keyword 只对该字段匹配；不传时全字段匹配。
+func TestMatchesInstanceListSearchField(t *testing.T) {
+	record := ports.WorkloadInstanceRecord{
+		TenantID:    "tenant-a",
+		InstanceID:  "inst-abc-123",
+		Name:        "my-worker",
+		Description: "a gpu training pod",
+		Kind:        ports.WorkloadKindContainer,
+		Status:      ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		CreatedAt:   time.Unix(100, 0),
+	}
+	cases := []struct {
+		name    string
+		field   string
+		keyword string
+		want    bool
+	}{
+		{"search_field=id 命中 ID", "id", "abc-123", true},
+		{"search_field=id 不含 name", "id", "my-worker", false},
+		{"search_field=name 命中 name", "name", "worker", true},
+		{"search_field=name 不含 id", "name", "inst-abc", false},
+		{"空 search_field 全字段命中 name", "", "worker", true},
+		{"空 search_field 全字段命中 id", "", "inst-abc", true},
+		{"空 search_field 全字段命中 description", "", "gpu", true},
+		{"全字段也匹配任意组合", "", "training pod", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{Keyword: tc.keyword, SearchField: tc.field}
+			if got := matchesInstanceList(record, request); got != tc.want {
+				t.Fatalf("matchesInstanceList(field=%q keyword=%q) = %v, want %v", tc.field, tc.keyword, got, tc.want)
+			}
+		})
+	}
+}
+
+// Bug-6 回归：默认列表不展示已销毁（deleted 终态）实例，显式传 state=deleted 才返回，
+// 且显式传 runing 等其它状态仍按原语义过滤。
+func TestMatchesInstanceListExcludesDeletedByDefault(t *testing.T) {
+	running := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-running",
+		Name:       "running-app",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		CreatedAt:  time.Unix(100, 0),
+	}
+	deleted := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-deleted",
+		Name:       "deleted-app",
+		Kind:       ports.WorkloadKindSandbox,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateDeleted},
+		CreatedAt:  time.Unix(200, 0),
+	}
+	stopped := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-stopped",
+		Name:       "stopped-app",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateStopped},
+		CreatedAt:  time.Unix(300, 0),
+	}
+
+	cases := []struct {
+		name   string
+		record ports.WorkloadInstanceRecord
+		state  string
+		want   bool
+	}{
+		{"默认(空)列表排除 deleted", deleted, "", false},
+		{"默认(空)列表包含 running", running, "", true},
+		{"默认(空)列表包含 stopped", stopped, "", true},
+		{"显式 state=deleted 保留 deleted", deleted, "deleted", true},
+		{"显式 state=deleted 排除 running", running, "deleted", false},
+		{"显式 state=running 保留 running", running, "running", true},
+		{"显式 state=running 排除 deleted", deleted, "running", false},
+		{"显式 state=stopped 保留 stopped", stopped, "stopped", true},
+		{"显式 state=stopped 排除 deleted", deleted, "stopped", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{State: ports.WorkloadState(tc.state)}
+			if got := matchesInstanceList(tc.record, request); got != tc.want {
+				t.Fatalf("matchesInstanceList(state=%q) = %v, want %v", tc.state, got, tc.want)
+			}
+		})
+	}
+}
+
+// Bug-6 集成：LocalInstanceService.List 默认批量隐藏 deleted，显式 state=deleted 返回。
+func TestLocalInstanceServiceListExcludesDeletedByDefault(t *testing.T) {
+	store := &fakeInstanceStore{
+		records: []ports.WorkloadInstanceRecord{
+			{
+				TenantID: "tenant-a", InstanceID: "s1", Name: "sandbox-running",
+				Kind:      ports.WorkloadKindSandbox,
+				Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+				CreatedAt: time.Unix(100, 0),
+			},
+			{
+				TenantID: "tenant-a", InstanceID: "s2", Name: "sandbox-deleted",
+				Kind:      ports.WorkloadKindSandbox,
+				Status:    ports.WorkloadStatus{State: ports.WorkloadStateDeleted},
+				CreatedAt: time.Unix(200, 0),
+			},
+		},
+	}
+	service := NewLocalInstanceService(&fakeInstanceOrchestrator{}, store, NewLocalInstanceOpsGuard())
+
+	got, err := service.List(context.Background(), ports.WorkloadInstanceListRequest{TenantID: "tenant-a", Kind: ports.WorkloadKindSandbox})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 1 || got[0].InstanceID != "s1" {
+		t.Fatalf("默认列表 = %d 条 [%s]，want 仅 running 的 s1（deleted 应被隐藏）", len(got), recordsIDs(got))
+	}
+
+	// 显式 state=deleted：应能查到已销毁实例
+	gotDeleted, err := service.List(context.Background(), ports.WorkloadInstanceListRequest{
+		TenantID: "tenant-a", Kind: ports.WorkloadKindSandbox, State: ports.WorkloadStateDeleted,
+	})
+	if err != nil {
+		t.Fatalf("List(deleted) error = %v", err)
+	}
+	if len(gotDeleted) != 1 || gotDeleted[0].InstanceID != "s2" {
+		t.Fatalf("state=deleted 列表 = %d 条 [%s]，want 仅 s2", len(gotDeleted), recordsIDs(gotDeleted))
+	}
+}
+
+func recordsIDs(records []ports.WorkloadInstanceRecord) []string {
+	ids := make([]string, 0, len(records))
+	for _, r := range records {
+		ids = append(ids, r.InstanceID)
+	}
+	return ids
+}
+
+// 多值过滤回归（MatchesInstanceKind）：kind 逗号多值 OR 语义——块存储"挂载"选择器
+// 一次列多种类型依赖本语义（kind=vm,container,gpu_container）。
+func TestMatchesInstanceKindMultiValue(t *testing.T) {
+	vm := ports.WorkloadInstanceRecord{Kind: ports.WorkloadKindVM}
+	container := ports.WorkloadInstanceRecord{Kind: ports.WorkloadKindContainer}
+	notebook := ports.WorkloadInstanceRecord{Kind: ports.WorkloadKindNotebook}
+
+	cases := []struct {
+		name    string
+		request ports.WorkloadInstanceListRequest
+		record  ports.WorkloadInstanceRecord
+		want    bool
+	}{
+		{"多值命中第一项", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm", "container"}}, vm, true},
+		{"多值命中后续项", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm", "container"}}, container, true},
+		{"多值全不命中", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm", "container"}}, notebook, false},
+		{"单元素多值集合等价单值", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm"}}, vm, true},
+		{"单元素多值集合排除其它 kind", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm"}}, container, false},
+		{"未传 kind 不过滤", ports.WorkloadInstanceListRequest{}, notebook, true},
+		{"旧单值 Kind 字段仍生效", ports.WorkloadInstanceListRequest{Kind: ports.WorkloadKindVM}, vm, true},
+		{"旧单值 Kind 字段排除其它 kind", ports.WorkloadInstanceListRequest{Kind: ports.WorkloadKindVM}, container, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MatchesInstanceKind(tc.record, tc.request); got != tc.want {
+				t.Fatalf("MatchesInstanceKind(kind=%v) = %v, want %v", tc.request.Kinds, got, tc.want)
+			}
+		})
+	}
+}
+
+// 多值过滤回归（MatchesInstanceState）：state 逗号多值 OR 语义——挂载选择器一次列
+// 多种状态依赖本语义（state=running,stopped）；未传时维持默认排除 deleted。
+func TestMatchesInstanceStateMultiValue(t *testing.T) {
+	running := ports.WorkloadInstanceRecord{Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}}
+	stopped := ports.WorkloadInstanceRecord{Status: ports.WorkloadStatus{State: ports.WorkloadStateStopped}}
+	pending := ports.WorkloadInstanceRecord{Status: ports.WorkloadStatus{State: ports.WorkloadStatePending}}
+	deleted := ports.WorkloadInstanceRecord{Status: ports.WorkloadStatus{State: ports.WorkloadStateDeleted}}
+
+	cases := []struct {
+		name    string
+		request ports.WorkloadInstanceListRequest
+		record  ports.WorkloadInstanceRecord
+		want    bool
+	}{
+		{"多值命中第一项", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running", "stopped"}}, running, true},
+		{"多值命中后续项", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running", "stopped"}}, stopped, true},
+		{"多值全不命中 pending", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running", "stopped"}}, pending, false},
+		{"多值全不命中 deleted", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running", "stopped"}}, deleted, false},
+		{"单元素集合等价单值", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running"}}, stopped, false},
+		{"未传 state 默认排除 deleted", ports.WorkloadInstanceListRequest{}, deleted, false},
+		{"未传 state 保留 running", ports.WorkloadInstanceListRequest{}, running, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MatchesInstanceState(tc.record, tc.request); got != tc.want {
+				t.Fatalf("MatchesInstanceState(states=%v) = %v, want %v", tc.request.States, got, tc.want)
+			}
+		})
+	}
+}
+
+// 多值过滤集成：LocalInstanceService.List 对多 kind（OR）+ 多 state（OR）的组合过滤。
+func TestLocalInstanceServiceListMultiValueKindAndState(t *testing.T) {
+	store := &fakeInstanceStore{
+		records: []ports.WorkloadInstanceRecord{
+			{TenantID: "tenant-a", InstanceID: "i-vm-run", Name: "vm-running", Kind: ports.WorkloadKindVM,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(100, 0)},
+			{TenantID: "tenant-a", InstanceID: "i-ct-stop", Name: "ct-stopped", Kind: ports.WorkloadKindContainer,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStateStopped}, CreatedAt: time.Unix(200, 0)},
+			{TenantID: "tenant-a", InstanceID: "i-gpu-pend", Name: "gpu-pending", Kind: ports.WorkloadKindGPUContainer,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStatePending}, CreatedAt: time.Unix(300, 0)},
+			{TenantID: "tenant-a", InstanceID: "i-nb-run", Name: "nb-running", Kind: ports.WorkloadKindNotebook,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(400, 0)},
+			{TenantID: "tenant-a", InstanceID: "i-vm-del", Name: "vm-deleted", Kind: ports.WorkloadKindVM,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStateDeleted}, CreatedAt: time.Unix(500, 0)},
+		},
+	}
+	service := NewLocalInstanceService(&fakeInstanceOrchestrator{}, store, NewLocalInstanceOpsGuard())
+	wantIDs := func(want ...string) string {
+		return strings.Join(want, ",")
+	}
+
+	// 多 kind + 多 state：OR 语义组合（挂载选择器真实请求形态）
+	got, err := service.List(context.Background(), ports.WorkloadInstanceListRequest{
+		TenantID: "tenant-a",
+		Kinds:    []ports.WorkloadKind{"vm", "container", "gpu_container"},
+		States:   []ports.WorkloadState{"running", "stopped"},
+	})
+	if err != nil {
+		t.Fatalf("List(多kind+多state) error = %v", err)
+	}
+	if gotIDs := strings.Join(recordsIDs(got), ","); gotIDs != wantIDs("i-ct-stop", "i-vm-run") {
+		t.Fatalf("多kind+多state 列表 = [%s]，want [i-ct-stop,i-vm-run]（pending/notebook/deleted 均应排除）", gotIDs)
+	}
+
+	// 多 state（不过滤 kind）
+	got, err = service.List(context.Background(), ports.WorkloadInstanceListRequest{
+		TenantID: "tenant-a",
+		States:   []ports.WorkloadState{"running", "stopped"},
+	})
+	if err != nil {
+		t.Fatalf("List(多state) error = %v", err)
+	}
+	if gotIDs := strings.Join(recordsIDs(got), ","); gotIDs != wantIDs("i-nb-run", "i-ct-stop", "i-vm-run") {
+		t.Fatalf("多state 列表 = [%s]，want [i-nb-run,i-ct-stop,i-vm-run]", gotIDs)
+	}
+
+	// 单 kind（多值集合单元素）+ 多 state
+	got, err = service.List(context.Background(), ports.WorkloadInstanceListRequest{
+		TenantID: "tenant-a",
+		Kinds:    []ports.WorkloadKind{"vm"},
+		States:   []ports.WorkloadState{"running", "stopped"},
+	})
+	if err != nil {
+		t.Fatalf("List(单kind+多state) error = %v", err)
+	}
+	if gotIDs := strings.Join(recordsIDs(got), ","); gotIDs != wantIDs("i-vm-run") {
+		t.Fatalf("单kind+多state 列表 = [%s]，want [i-vm-run]", gotIDs)
+	}
+
+	// 空（不过滤 kind/state）：默认排除 deleted 终态
+	got, err = service.List(context.Background(), ports.WorkloadInstanceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("List(空过滤) error = %v", err)
+	}
+	if gotIDs := strings.Join(recordsIDs(got), ","); gotIDs != wantIDs("i-nb-run", "i-gpu-pend", "i-ct-stop", "i-vm-run") {
+		t.Fatalf("空过滤列表 = [%s]，want 排除 deleted 后的全部 4 条", gotIDs)
+	}
+}
+
+// Bug-6 回归：孤儿（live Kubernetes）实例的 state 过滤与 store 记录一致。
+// router 层合并孤儿时会调用 MatchesInstanceState——state=running 的孤儿经
+// filtered-demand 应被排除，默认(空)则排除 deleted。
+func TestMatchesInstanceStateConsistentForOrphans(t *testing.T) {
+	running := ports.WorkloadInstanceRecord{
+		Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	}
+	pending := ports.WorkloadInstanceRecord{
+		Status: ports.WorkloadStatus{State: ports.WorkloadStatePending},
+	}
+	deleted := ports.WorkloadInstanceRecord{
+		Status: ports.WorkloadStatus{State: ports.WorkloadStateDeleted},
+	}
+
+	cases := []struct {
+		name   string
+		record ports.WorkloadInstanceRecord
+		state  string
+		want   bool
+	}{
+		{"默认(空)含 running", running, "", true},
+		{"默认(空)含 pending", pending, "", true},
+		{"默认(空)排除 deleted", deleted, "", false},
+		{"state=running 含 running", running, "running", true},
+		{"state=running 排除 pending(孤儿)", pending, "running", false},
+		{"state=running 排除 deleted", deleted, "running", false},
+		{"state=pending 含 pending", pending, "pending", true},
+		{"state=pending 排除 running", running, "pending", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{State: ports.WorkloadState(tc.state)}
+			if got := MatchesInstanceState(tc.record, request); got != tc.want {
+				t.Fatalf("MatchesInstanceState(state=%q) = %v, want %v", tc.state, got, tc.want)
+			}
+		})
+	}
+}
+
+// VPC-3/子网-3 回归：实例列表的 vpc_id/subnet_id 归属过滤与 store 记录一致，
+// router 层合并孤儿（live Kubernetes）实例时共用 MatchesInstanceNetwork。
+func TestMatchesInstanceNetworkConsistentForOrphans(t *testing.T) {
+	inVPC := ports.WorkloadInstanceRecord{
+		Network: ports.InstanceNetworkSummary{VPCID: "vpc-1", SubnetID: "subnet-1"},
+	}
+	otherVPC := ports.WorkloadInstanceRecord{
+		Network: ports.InstanceNetworkSummary{VPCID: "vpc-2", SubnetID: "subnet-2"},
+	}
+	noNetwork := ports.WorkloadInstanceRecord{}
+
+	cases := []struct {
+		name     string
+		record   ports.WorkloadInstanceRecord
+		vpcID    string
+		subnetID string
+		want     bool
+	}{
+		{"未传过滤参数不过滤", noNetwork, "", "", true},
+		{"vpc_id 匹配", inVPC, "vpc-1", "", true},
+		{"vpc_id 不匹配(孤儿)", otherVPC, "vpc-1", "", false},
+		{"subnet_id 匹配", inVPC, "", "subnet-1", true},
+		{"subnet_id 不匹配(孤儿)", otherVPC, "", "subnet-1", false},
+		{"同时匹配", inVPC, "vpc-1", "subnet-1", true},
+		{"vpc 匹配但 subnet 不匹配", inVPC, "vpc-1", "subnet-2", false},
+		{"无网络归属的孤儿被 vpc_id 过滤排除", noNetwork, "vpc-1", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{VPCID: tc.vpcID, SubnetID: tc.subnetID}
+			if got := MatchesInstanceNetwork(tc.record, request); got != tc.want {
+				t.Fatalf("MatchesInstanceNetwork(vpc=%q, subnet=%q) = %v, want %v", tc.vpcID, tc.subnetID, got, tc.want)
+			}
+		})
 	}
 }

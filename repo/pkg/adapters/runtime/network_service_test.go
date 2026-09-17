@@ -2,9 +2,12 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -612,3 +615,582 @@ func (p *fakeNetworkRouteProvider) Observe(_ context.Context, request ports.Netw
 var _ ports.NetworkProviderDryRun = (*fakeNetworkRouteProvider)(nil)
 var _ ports.NetworkProviderApply = (*fakeNetworkRouteProvider)(nil)
 var _ ports.NetworkProviderStatusReader = (*fakeNetworkRouteProvider)(nil)
+
+func TestLocalNetworkServiceListSubnetsFiltersByName(t *testing.T) {
+	service := NewLocalNetworkService()
+	vpc, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{TenantID: "tenant-a", IdempotencyKey: "net-vpc-name-filter", Name: "vpc-a"})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	names := []string{"app-net", "app-mgmt", "db-net"}
+	for i, name := range names {
+		if _, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+			TenantID:       "tenant-a",
+			IdempotencyKey: "net-subnet-name-" + names[i],
+			VPCID:          vpc.VPCID,
+			Name:           name,
+			CIDR:           "10.20." + string(rune('1'+i)) + ".0/24",
+		}); err != nil {
+			t.Fatalf("CreateSubnet(%s) error = %v", name, err)
+		}
+	}
+
+	// 无条件返回全部 3 条。
+	all, err := service.ListSubnets(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListSubnets() error = %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("subnets = %d, want 3", len(all))
+	}
+
+	// 按名称前缀过滤。
+	filtered, err := service.ListSubnets(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a", Name: "app-"})
+	if err != nil {
+		t.Fatalf("ListSubnets(name) error = %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("name=app- subnets = %d, want 2", len(filtered))
+	}
+
+	// 无命中返回空（非错误）。
+	none, err := service.ListSubnets(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a", Name: "no_such"})
+	if err != nil {
+		t.Fatalf("ListSubnets(no_such) error = %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("name=no_such subnets = %+v, want none", none)
+	}
+}
+
+// 安全组-4 回归：网关重启后内存 map 不含历史 VPC，创建安全组绑定历史 VPC 必须
+// 通过持久层校验，而不是误判 vpc not found。
+func TestLocalNetworkServiceCreateSecurityGroupValidatesVPCViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+		networkStoreTenantID, "vpc-persisted", "vpc-a", "10.30.0.0/16",
+		string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(90, 0),
+	}}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	record, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       networkStoreTenantID,
+		IdempotencyKey: "sg-store-vpc",
+		Name:           "web-sg",
+		VPCID:          "vpc-persisted",
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup() error = %v", err)
+	}
+	if record.VPCID != "vpc-persisted" {
+		t.Fatalf("VPCID = %q, want vpc-persisted", record.VPCID)
+	}
+	if !strings.Contains(tx.queryRowSQL, "FROM network_vpcs") {
+		t.Fatalf("validation must query network_vpcs via store, sql = %q", tx.queryRowSQL)
+	}
+	if len(tx.execs) == 0 || !strings.Contains(tx.execs[len(tx.execs)-1], "INSERT INTO network_security_groups") {
+		t.Fatalf("expected security group persistence, execs = %v", tx.execs)
+	}
+	if got := tx.args[2]; got != "vpc-persisted" {
+		t.Fatalf("vpc_id arg = %v, want vpc-persisted", got)
+	}
+}
+
+// 安全组-4 反向路径：store 查不到 VPC 时必须拒绝创建且不落库。
+func TestLocalNetworkServiceCreateSecurityGroupRejectsMissingVPCViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{err: errors.New("no rows in result set")}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	_, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       networkStoreTenantID,
+		IdempotencyKey: "sg-store-badvpc",
+		Name:           "web-sg",
+		VPCID:          "vpc-missing",
+	})
+	if !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("CreateSecurityGroup() error = %v, want ErrNotFound", err)
+	}
+	if len(tx.execs) != 0 {
+		t.Fatalf("rejected create must not persist, execs = %v", tx.execs)
+	}
+}
+
+func TestMetadataNetworkStoreListsSecurityGroupsWithVPC(t *testing.T) {
+	tx := &fakeMetadataTx{rows: &fakeRows{values: [][]any{
+		{
+			networkStoreTenantID, "sg-a", "vpc-a", "web-sg", "desc",
+			[]byte(`[{"Direction":"ingress","Protocol":"tcp","PortRange":"443","CIDR":"0.0.0.0/0","Action":"allow"}]`),
+			string(ports.NetworkResourceAvailable), "created", time.Unix(90, 0), time.Unix(95, 0),
+		},
+		{
+			networkStoreTenantID, "sg-b", "", "bare-sg", "",
+			[]byte(`[]`),
+			string(ports.NetworkResourceAvailable), "created", time.Unix(91, 0), time.Unix(96, 0),
+		},
+	}}}
+	store := NewMetadataNetworkStore(fakeMetadataStore{tx: tx})
+
+	items, err := store.ListSecurityGroups(context.Background(), networkStoreTenantID)
+	if err != nil {
+		t.Fatalf("ListSecurityGroups() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2", len(items))
+	}
+	if items[0].SecurityGroupID != "sg-a" || items[0].VPCID != "vpc-a" {
+		t.Fatalf("items[0] = %+v, want sg-a in vpc-a", items[0])
+	}
+	if len(items[0].Rules) != 1 || items[0].Rules[0].Protocol != "tcp" {
+		t.Fatalf("rules = %#v, want deserialized tcp rule", items[0].Rules)
+	}
+	if items[1].VPCID != "" || items[1].Name != "bare-sg" {
+		t.Fatalf("items[1] = %+v, want empty vpc_id sg", items[1])
+	}
+}
+
+// 安全组-3 回归：store 模式下列表必须来自持久层并支持 vpc_id 过滤（网关重启后
+// 内存 map 为空，memory-only 列表会让历史安全组消失）。
+func TestLocalNetworkServiceListsSecurityGroupsFromStoreByVPC(t *testing.T) {
+	tx := &fakeMetadataTx{rows: &fakeRows{values: [][]any{
+		{
+			networkStoreTenantID, "sg-a", "vpc-a", "web-sg", "",
+			[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(95, 0),
+		},
+		{
+			networkStoreTenantID, "sg-b", "vpc-b", "db-sg", "",
+			[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(91, 0), time.Unix(96, 0),
+		},
+	}}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	items, err := service.ListSecurityGroups(context.Background(), ports.NetworkResourceListRequest{TenantID: networkStoreTenantID, VPCID: "vpc-a"})
+	if err != nil {
+		t.Fatalf("ListSecurityGroups(vpc_id) error = %v", err)
+	}
+	if len(items) != 1 || items[0].SecurityGroupID != "sg-a" {
+		t.Fatalf("items = %#v, want only sg-a", items)
+	}
+	if items[0].BoundInstanceCount != 0 {
+		t.Fatalf("BoundInstanceCount = %d, want 0 without binds", items[0].BoundInstanceCount)
+	}
+}
+
+// 安全组-5 核心回归：实例侧"更换安全组"只更新实例自身记录，不写独立绑定表，
+// 安全组绑定查询必须按实例记录派生，显式 bindings API 未写入的绑定也要可见。
+func TestLocalNetworkServiceSecurityGroupBindingsDerivedFromInstanceRecords(t *testing.T) {
+	instances := &fakeInstanceStore{}
+	service := NewLocalNetworkService(WithNetworkInstanceStore(instances))
+	sg, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{TenantID: "tenant-a", IdempotencyKey: "sg-derived", Name: "sg"})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup error = %v", err)
+	}
+	instances.records = []ports.WorkloadInstanceRecord{
+		{
+			TenantID: "tenant-a", InstanceID: "inst-1", Name: "inst-1", Kind: ports.WorkloadKindVM,
+			Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+			Network:   ports.InstanceNetworkSummary{SecurityGroups: []ports.InstanceSecurityGroupSummary{{ID: sg.SecurityGroupID}}},
+			CreatedAt: time.Unix(100, 0),
+		},
+		{
+			TenantID: "tenant-a", InstanceID: "inst-2", Name: "inst-2", Kind: ports.WorkloadKindVM,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+			// inst-2 未绑定该安全组，不应出现在派生绑定里。
+			Network:   ports.InstanceNetworkSummary{SecurityGroups: []ports.InstanceSecurityGroupSummary{{ID: "sg-other"}}},
+			CreatedAt: time.Unix(101, 0),
+		},
+		{
+			TenantID: "tenant-a", InstanceID: "inst-3", Name: "inst-3", Kind: ports.WorkloadKindVM,
+			Status:    ports.WorkloadStatus{State: ports.WorkloadStateDeleted},
+			Network:   ports.InstanceNetworkSummary{SecurityGroups: []ports.InstanceSecurityGroupSummary{{ID: sg.SecurityGroupID}}},
+			CreatedAt: time.Unix(102, 0),
+		},
+	}
+	listReq := ports.NetworkSecurityGroupBindingListRequest{TenantID: "tenant-a", SecurityGroupID: sg.SecurityGroupID, TargetType: "instance"}
+	items, err := service.ListSecurityGroupBindings(context.Background(), listReq)
+	if err != nil {
+		t.Fatalf("ListSecurityGroupBindings error = %v", err)
+	}
+	if len(items) != 1 || items[0].TargetID != "inst-1" || items[0].TargetType != "instance" {
+		t.Fatalf("derived bindings = %#v, want only inst-1", items)
+	}
+	if items[0].BindingID != "sgb-inst-inst-1-"+sg.SecurityGroupID {
+		t.Fatalf("derived binding id = %q, want deterministic sgb-inst-inst-1-<sg>", items[0].BindingID)
+	}
+
+	// 显式 bindings API 与派生视图合并：未覆盖目标补充，已覆盖目标去重。
+	if _, err := service.CreateSecurityGroupBinding(context.Background(), ports.NetworkSecurityGroupBindingCreateRequest{
+		TenantID: "tenant-a", SecurityGroupID: sg.SecurityGroupID, IdempotencyKey: "bind-2", TargetType: "instance", TargetID: "inst-2",
+	}); err != nil {
+		t.Fatalf("CreateSecurityGroupBinding(inst-2) error = %v", err)
+	}
+	if _, err := service.CreateSecurityGroupBinding(context.Background(), ports.NetworkSecurityGroupBindingCreateRequest{
+		TenantID: "tenant-a", SecurityGroupID: sg.SecurityGroupID, IdempotencyKey: "bind-1", TargetType: "instance", TargetID: "inst-1",
+	}); err != nil {
+		t.Fatalf("CreateSecurityGroupBinding(inst-1 dup) error = %v", err)
+	}
+	items, err = service.ListSecurityGroupBindings(context.Background(), listReq)
+	if err != nil {
+		t.Fatalf("ListSecurityGroupBindings after explicit binds error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("bindings = %#v, want derived inst-1 + explicit inst-2", items)
+	}
+	// TargetID 过滤同样作用于派生视图。
+	items, err = service.ListSecurityGroupBindings(context.Background(), ports.NetworkSecurityGroupBindingListRequest{
+		TenantID: "tenant-a", SecurityGroupID: sg.SecurityGroupID, TargetType: "instance", TargetID: "inst-2",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroupBindings(target_id) error = %v", err)
+	}
+	if len(items) != 1 || items[0].TargetID != "inst-2" {
+		t.Fatalf("filtered bindings = %#v, want only inst-2", items)
+	}
+
+	// bound_instance_count 聚合同样以派生视图为准（派生 1 + 显式 1，去重后 2）。
+	record, err := service.GetSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: sg.SecurityGroupID})
+	if err != nil {
+		t.Fatalf("GetSecurityGroup error = %v", err)
+	}
+	if record.BoundInstanceCount != 2 {
+		t.Fatalf("GetSecurityGroup BoundInstanceCount = %d, want 2", record.BoundInstanceCount)
+	}
+	listed, err := service.ListSecurityGroups(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListSecurityGroups error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].BoundInstanceCount != 2 {
+		t.Fatalf("ListSecurityGroups BoundInstanceCount = %#v, want 2", listed)
+	}
+}
+
+// 安全组-5 重启回归：store 模式下内存 map 为空时，绑定查询不得因
+// memory-only 存在性检查 404，且派生绑定来自实例记录。
+func TestLocalNetworkServiceSecurityGroupBindingsFromStoreAfterRestart(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+		networkStoreTenantID, "sg-persisted", "vpc-a", "web-sg", "",
+		[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(95, 0),
+	}}}
+	instances := &fakeInstanceStore{records: []ports.WorkloadInstanceRecord{
+		{
+			TenantID: networkStoreTenantID, InstanceID: "inst-persisted", Name: "inst-persisted", Kind: ports.WorkloadKindVM,
+			Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+			Network:   ports.InstanceNetworkSummary{SecurityGroups: []ports.InstanceSecurityGroupSummary{{ID: "sg-persisted"}}},
+			CreatedAt: time.Unix(100, 0),
+		},
+	}}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+		WithNetworkInstanceStore(instances),
+	)
+
+	items, err := service.ListSecurityGroupBindings(context.Background(), ports.NetworkSecurityGroupBindingListRequest{
+		TenantID: networkStoreTenantID, SecurityGroupID: "sg-persisted", TargetType: "instance",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroupBindings error = %v", err)
+	}
+	if len(items) != 1 || items[0].TargetID != "inst-persisted" {
+		t.Fatalf("bindings = %#v, want derived inst-persisted", items)
+	}
+}
+
+// VPC-4 回归（内存模式）：VPC 下存在存活子网/安全组时禁止删除，
+// 错误消息列出各类数量；清理关联后删除恢复可用。
+func TestLocalNetworkServiceDeleteVPCBlockedByLiveAssociations(t *testing.T) {
+	service := NewLocalNetworkService()
+	vpc, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "vpc-del", Name: "vpc", CIDR: "10.5.0.0/16",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	sub, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "sub-del", Name: "sub", VPCID: vpc.VPCID,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubnet error = %v", err)
+	}
+	sg, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "sg-del", Name: "sg", VPCID: vpc.VPCID,
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup error = %v", err)
+	}
+
+	_, err = service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: vpc.VPCID})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DeleteVPC() error = %v, want ErrConflict", err)
+	}
+	for _, fragment := range []string{"1 subnet(s)", "1 security group(s)", "0 load balancer(s)", "0 route(s)"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("error message %q missing %q", err.Error(), fragment)
+		}
+	}
+	got, err := service.GetVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: vpc.VPCID})
+	if err != nil || got.State != ports.NetworkResourceAvailable {
+		t.Fatalf("VPC must stay available after blocked delete, state = %v err = %v", got.State, err)
+	}
+
+	if _, err := service.DeleteSubnet(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: sub.SubnetID}); err != nil {
+		t.Fatalf("DeleteSubnet error = %v", err)
+	}
+	if _, err := service.DeleteSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: sg.SecurityGroupID}); err != nil {
+		t.Fatalf("DeleteSecurityGroup error = %v", err)
+	}
+	deleted, err := service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: vpc.VPCID})
+	if err != nil {
+		t.Fatalf("DeleteVPC after cleanup error = %v", err)
+	}
+	if deleted.State != ports.NetworkResourceDeleted {
+		t.Fatalf("state = %v, want deleted", deleted.State)
+	}
+}
+
+// VPC-4 回归（store 模式）：网关重启后内存 map 为空，删除保护必须以持久层为准。
+// 子网/安全组/LB/路由各返回一行（其中 LB/路由属于其他 VPC，不应计数），
+// 命中冲突时不得触发任何 upsert。
+func TestLocalNetworkServiceDeleteVPCValidatesAssociationsViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{
+		row: fakeMetadataRow{values: []any{
+			networkStoreTenantID, "vpc-persisted", "vpc-a", "10.30.0.0/16",
+			string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(90, 0),
+		}},
+		queryRows: map[string]ports.Rows{
+			"FROM network_subnets": &fakeRows{values: [][]any{{
+				networkStoreTenantID, "subnet-a", "vpc-persisted", "sub", "10.30.1.0/24", "",
+				string(ports.NetworkResourceAvailable), "", time.Unix(91, 0), time.Unix(91, 0),
+			}}},
+			"FROM network_security_groups": &fakeRows{values: [][]any{{
+				networkStoreTenantID, "sg-a", "vpc-persisted", "web-sg", "",
+				[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(92, 0), time.Unix(92, 0),
+			}}},
+			"FROM network_load_balancers": &fakeRows{values: [][]any{{
+				networkStoreTenantID, "lb-a", "lb", "vpc-other", "", "internal", "",
+				[]byte(`[]`), string(ports.NetworkResourceAvailable), "", time.Unix(93, 0), time.Unix(93, 0),
+			}}},
+			"FROM network_routes": &fakeRows{values: [][]any{{
+				networkStoreTenantID, "route-a", "vpc-other", "0.0.0.0/0", "instance", "inst-a", "",
+				string(ports.NetworkResourceAvailable), "", false, time.Unix(94, 0),
+			}}},
+		},
+	}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	_, err := service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: networkStoreTenantID, ResourceID: "vpc-persisted"})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DeleteVPC() error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "1 subnet(s), 1 security group(s), 0 load balancer(s), 0 route(s)") {
+		t.Fatalf("error message = %q, want per-kind counts with cross-VPC resources excluded", err.Error())
+	}
+	if len(tx.execs) != 0 {
+		t.Fatalf("blocked delete must not persist, execs = %v", tx.execs)
+	}
+
+	// 关联清空后（各表均无存活行）删除应放行并落库 deleted 状态。
+	tx.execs = nil
+	tx.queryRows = map[string]ports.Rows{
+		"FROM network_subnets":         &fakeRows{},
+		"FROM network_security_groups": &fakeRows{},
+		"FROM network_load_balancers":  &fakeRows{},
+		"FROM network_routes":          &fakeRows{},
+	}
+	deleted, err := service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: networkStoreTenantID, ResourceID: "vpc-persisted"})
+	if err != nil {
+		t.Fatalf("DeleteVPC after cleanup error = %v", err)
+	}
+	if deleted.State != ports.NetworkResourceDeleted {
+		t.Fatalf("state = %v, want deleted", deleted.State)
+	}
+	if len(tx.execs) != 1 || !strings.Contains(tx.execs[0], "INSERT INTO network_vpcs") {
+		t.Fatalf("expected vpc persistence, execs = %v", tx.execs)
+	}
+	if got := tx.args[4]; got != string(ports.NetworkResourceDeleted) {
+		t.Fatalf("state arg = %v, want deleted", got)
+	}
+}
+
+func TestLocalNetworkServiceListsSecurityGroupRulesViaStore(t *testing.T) {
+	// 重启后内存 map 为空，规则列表必须走持久层；此前该路径直接 404（安全组规则加载失败）。
+	created := time.Unix(100, 0)
+	tx := &fakeMetadataTx{
+		row: fakeMetadataRow{values: []any{
+			networkStoreTenantID, "sg-rules", "vpc-x", "web-sg", "",
+			[]byte("[]"), string(ports.NetworkResourceAvailable), "", created, created,
+		}},
+		queryRows: map[string]ports.Rows{
+			"FROM network_security_group_rules": &fakeRows{values: [][]any{
+				{networkStoreTenantID, "sgr_1", "sg-rules", 100, "ingress", "tcp", "22", "0.0.0.0/0", "allow", "", created, created},
+				{networkStoreTenantID, "sgr_2", "sg-rules", 200, "ingress", "tcp", "443", "0.0.0.0/0", "allow", "", created, created},
+			}},
+		},
+	}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+
+	items, err := service.ListSecurityGroupRules(context.Background(), ports.NetworkSecurityGroupRuleListRequest{
+		TenantID:        networkStoreTenantID,
+		SecurityGroupID: "sg-rules",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroupRules() error = %v", err)
+	}
+	if len(items) != 2 || items[0].RuleID != "sgr_1" || items[1].RuleID != "sgr_2" {
+		t.Fatalf("rules = %+v, want two persisted rules ordered by priority", items)
+	}
+
+	filtered, err := service.ListSecurityGroupRules(context.Background(), ports.NetworkSecurityGroupRuleListRequest{
+		TenantID:        networkStoreTenantID,
+		SecurityGroupID: "sg-rules",
+		Protocol:        "icmp",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroupRules(protocol filter) error = %v", err)
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("filtered rules = %+v, want empty for icmp filter", filtered)
+	}
+}
+
+func TestLocalNetworkServiceDeletesSecurityGroupRuleViaStore(t *testing.T) {
+	// 删除流程：查规则明细 -> DELETE 明细 -> 从明细重建摘要回写 network_security_groups.rules。
+	created := time.Unix(100, 0)
+	tx := &fakeMetadataTx{
+		rowBySQL: map[string]fakeMetadataRow{
+			"FROM network_security_group_rules": {values: []any{
+				networkStoreTenantID, "sgr_1", "sg-rules", 100, "ingress", "tcp", "22", "0.0.0.0/0", "allow", "", created, created,
+			}},
+			"FROM network_security_groups": {values: []any{
+				networkStoreTenantID, "sg-rules", "vpc-x", "web-sg", "",
+				[]byte(`[{"Priority":100,"Direction":"ingress","Protocol":"tcp","PortRange":"22","CIDR":"0.0.0.0/0","Action":"allow"}]`),
+				string(ports.NetworkResourceAvailable), "", created, created,
+			}},
+		},
+		queryRows: map[string]ports.Rows{
+			"FROM network_security_group_rules": &fakeRows{},
+		},
+	}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+
+	record, err := service.DeleteSecurityGroupRule(context.Background(), ports.NetworkSecurityGroupRuleGetRequest{
+		TenantID:        networkStoreTenantID,
+		SecurityGroupID: "sg-rules",
+		RuleID:          "sgr_1",
+	})
+	if err != nil {
+		t.Fatalf("DeleteSecurityGroupRule() error = %v", err)
+	}
+	if record.RuleID != "sgr_1" {
+		t.Fatalf("deleted rule id = %s, want sgr_1", record.RuleID)
+	}
+	if len(tx.execs) != 2 || !strings.Contains(tx.execs[0], "DELETE FROM network_security_group_rules") {
+		t.Fatalf("execs = %v, want rule delete then summary persistence", tx.execs)
+	}
+	if !strings.Contains(tx.execs[1], "INSERT INTO network_security_groups") {
+		t.Fatalf("second exec = %q, want security group summary upsert", tx.execs[1])
+	}
+}
+
+func TestLocalNetworkServiceCreateSecurityGroupWithRulesPersistsRuleDetails(t *testing.T) {
+	// 创建安全组时携带的预设规则（Console「常用远程端口」模板）在 store 模式下
+	// 必须同步写规则明细表，否则详情页规则列表读明细表时为空。
+	tx := &fakeMetadataTx{}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+
+	record, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       networkStoreTenantID,
+		IdempotencyKey: "sg-create-with-rules",
+		Name:           "preset-sg",
+		Rules: []ports.NetworkSecurityGroupRule{
+			{Direction: "ingress", Protocol: "tcp", PortRange: "22", CIDR: "0.0.0.0/0", Action: "allow"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup() error = %v", err)
+	}
+	ruleUpsertCount := 0
+	var ruleUpsertSQL string
+	for _, sql := range tx.execs {
+		if strings.Contains(sql, "INSERT INTO network_security_group_rules") {
+			ruleUpsertCount++
+			ruleUpsertSQL = sql
+		}
+	}
+	if ruleUpsertCount != 1 {
+		t.Fatalf("network_security_group_rules upsert count = %d, want 1", ruleUpsertCount)
+	}
+	if !strings.Contains(ruleUpsertSQL, "ON CONFLICT (tenant_id, rule_id)") {
+		t.Fatalf("rule upsert sql = %q, want ON CONFLICT (tenant_id, rule_id)", ruleUpsertSQL)
+	}
+	if len(tx.ruleUpsertArgs) != 1 {
+		t.Fatalf("captured %d rule upsert arg sets, want 1", len(tx.ruleUpsertArgs))
+	}
+	if got, want := tx.ruleUpsertArgs[0][3], 1000; got != want {
+		t.Fatalf("rule priority arg = %v, want default %v", got, want)
+	}
+	if got, want := tx.ruleUpsertArgs[0][2], record.SecurityGroupID; got != want {
+		t.Fatalf("rule security_group_id arg = %v, want %s", got, want)
+	}
+}
+
+func TestLocalNetworkServiceDeletesSecurityGroupViaStore(t *testing.T) {
+	// 重启后内存 map 为空，删除历史安全组必须走持久层；此前该路径直接 404。
+	created := time.Unix(100, 0)
+	tx := &fakeMetadataTx{
+		row: fakeMetadataRow{values: []any{
+			networkStoreTenantID, "sg-delete", "vpc-x", "web-sg", "",
+			[]byte(`[{"Priority":100,"Direction":"ingress","Protocol":"tcp","PortRange":"22","CIDR":"0.0.0.0/0","Action":"allow"}]`),
+			string(ports.NetworkResourceAvailable), "", created, created,
+		}},
+	}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+
+	record, err := service.DeleteSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{
+		TenantID:   networkStoreTenantID,
+		ResourceID: "sg-delete",
+	})
+	if err != nil {
+		t.Fatalf("DeleteSecurityGroup() error = %v", err)
+	}
+	if record.State != ports.NetworkResourceDeleted {
+		t.Fatalf("state = %s, want deleted", record.State)
+	}
+	if len(record.Rules) != 0 {
+		t.Fatalf("rules = %+v, want empty summary after cascade clear", record.Rules)
+	}
+	if len(tx.execs) != 2 {
+		t.Fatalf("exec count = %d, want rule cascade delete then security group delete upsert", len(tx.execs))
+	}
+	if !strings.Contains(tx.execs[0], "DELETE FROM network_security_group_rules") {
+		t.Fatalf("first exec = %q, want rule cascade delete", tx.execs[0])
+	}
+	if !strings.Contains(tx.execs[1], "INSERT INTO network_security_groups") {
+		t.Fatalf("second exec = %q, want security group delete upsert", tx.execs[1])
+	}
+	if got, want := tx.args[6], string(ports.NetworkResourceDeleted); got != want {
+		t.Fatalf("persisted state = %v, want deleted", got)
+	}
+}
+
+func TestLocalNetworkServiceDeleteSecurityGroupMissingViaStore(t *testing.T) {
+	// DB 中不存在（或已删除）的安全组：GetSecurityGroup 无行 → 404，且不产生任何写操作。
+	tx := &fakeMetadataTx{row: fakeMetadataRow{err: pgx.ErrNoRows}}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+	if _, err := service.DeleteSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{
+		TenantID:   networkStoreTenantID,
+		ResourceID: "sg-missing",
+	}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("DeleteSecurityGroup() error = %v, want ErrNotFound", err)
+	}
+	if len(tx.execs) != 0 {
+		t.Fatalf("exec count = %d, want no writes for missing security group", len(tx.execs))
+	}
+}

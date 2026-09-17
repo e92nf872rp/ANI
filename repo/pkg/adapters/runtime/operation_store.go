@@ -108,23 +108,39 @@ func (s *LocalOperationStore) ListOperations(_ context.Context, request ports.Wo
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]ports.WorkloadOperationRecord, 0, len(s.records))
+	var totalCount int
 	for _, record := range s.records {
 		if record.TenantID != request.TenantID || record.InstanceID != request.InstanceID {
 			continue
 		}
+		totalCount++
 		record.Steps = append([]ports.WorkloadOperationStep(nil), s.stepIndex[record.ID]...)
 		items = append(items, record)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].CreatedAt.After(items[j].CreatedAt)
 	})
+	// 支持游标翻页：DESC 序下下一页取 created_at 严格早于 cursor 的记录。
+	if strings.TrimSpace(request.Cursor) != "" {
+		cursor, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(request.Cursor))
+		if err == nil {
+			truncated := items[:0]
+			for _, record := range items {
+				if record.CreatedAt.Before(cursor) {
+					truncated = append(truncated, record)
+				}
+			}
+			items = truncated
+		}
+	}
 	if len(items) > limit {
 		return ports.WorkloadOperationListResult{
 			Items:      append([]ports.WorkloadOperationRecord(nil), items[:limit]...),
-			NextCursor: items[limit].CreatedAt.Format(time.RFC3339Nano),
+			Total:      totalCount,
+			NextCursor: items[limit-1].CreatedAt.Format(time.RFC3339Nano),
 		}, nil
 	}
-	return ports.WorkloadOperationListResult{Items: items}, nil
+	return ports.WorkloadOperationListResult{Items: items, Total: totalCount}, nil
 }
 
 func (s *LocalOperationStore) AddOperationStep(_ context.Context, operationID string, step ports.WorkloadOperationStep) (ports.WorkloadOperationStep, error) {
@@ -316,13 +332,42 @@ func (s *MetadataOperationStore) ListOperations(ctx context.Context, request por
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	// 游标采用 created_at（RFC3339Nano），与 LocalOperationStore 一致；DESC 分页取 < cursor。
+	var cursorTime *time.Time
+	if strings.TrimSpace(request.Cursor) != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(request.Cursor))
+		if err != nil {
+			return ports.WorkloadOperationListResult{}, fmt.Errorf("%w: invalid cursor", ports.ErrInvalid)
+		}
+		cursorTime = &parsed
+	}
+	// 多取一条判断下一页是否存在。
+	queryLimit := limit + 1
+	baseFilter := "WHERE tenant_id = $1::uuid AND instance_id = $2"
+	args := []any{request.TenantID, request.InstanceID}
+
+	var total int
 	var records []ports.WorkloadOperationRecord
 	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
-		rows, err := tx.Query(ctx, operationSelectSQL()+`
-			WHERE tenant_id = $1::uuid AND instance_id = $2
-			ORDER BY created_at DESC
-			LIMIT $3
-		`, request.TenantID, request.InstanceID, limit)
+		if err := tx.QueryRow(ctx,
+			`SELECT COUNT(*) FROM workload_instance_operations `+baseFilter,
+			request.TenantID, request.InstanceID,
+		).Scan(&total); err != nil {
+			return err
+		}
+		queryArgs := append([]any(nil), args...)
+		filter := baseFilter
+		idx := len(queryArgs) + 1
+		if cursorTime != nil {
+			filter += fmt.Sprintf(" AND created_at < $%d", idx)
+			queryArgs = append(queryArgs, *cursorTime)
+		}
+		queryArgs = append(queryArgs, queryLimit) // 占下一序号
+		sql := operationSelectSQL() + `
+			` + filter + `
+			ORDER BY created_at DESC, id DESC
+			LIMIT $` + fmt.Sprintf("%d", len(queryArgs))
+		rows, err := tx.Query(ctx, sql, queryArgs...)
 		if err != nil {
 			return err
 		}
@@ -339,14 +384,28 @@ func (s *MetadataOperationStore) ListOperations(ctx context.Context, request por
 	if err != nil {
 		return ports.WorkloadOperationListResult{}, err
 	}
-	for i := range records {
-		steps, err := s.listSteps(ctx, records[i].ID)
+	limitRecords := records
+	if len(records) > limit {
+		limitRecords = records[:limit]
+	}
+	for i := range limitRecords {
+		steps, err := s.listSteps(ctx, limitRecords[i].ID)
 		if err != nil {
 			return ports.WorkloadOperationListResult{}, err
 		}
-		records[i].Steps = steps
+		limitRecords[i].Steps = steps
 	}
-	return ports.WorkloadOperationListResult{Items: records}, nil
+	nextCursor := ""
+	if len(records) > limit {
+		// 游标采用本页最后一条的 created_at（keyset 分页），语义与 LocalOperationStore 一致；
+		// 前端用该 cursor 做 created_at < cursor 即可无缝翻页。
+		nextCursor = records[limit-1].CreatedAt.Format(time.RFC3339Nano)
+	}
+	return ports.WorkloadOperationListResult{
+		Items:      limitRecords,
+		Total:      total,
+		NextCursor: nextCursor,
+	}, nil
 }
 
 func (s *MetadataOperationStore) AddOperationStep(ctx context.Context, operationID string, step ports.WorkloadOperationStep) (ports.WorkloadOperationStep, error) {

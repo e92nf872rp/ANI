@@ -26,21 +26,33 @@ func (s fakeMetadataStore) WithPlatformTx(ctx context.Context, fn func(context.C
 }
 
 type fakeMetadataTx struct {
-	sql          string
-	args         []any
-	execs        []string
-	querySQL     string
-	rows         ports.Rows
+	sql      string
+	args     []any
+	execs    []string
+	querySQL string
+	rows     ports.Rows
+	// queryRows 按 SQL 中的表名关键字路由不同的 Rows，
+	// 用于一次事务里查询多张表的场景（如 VPC 删除保护遍历关联资源）。
+	queryRows    map[string]ports.Rows
 	queryRowSQL  string
 	queryRowArgs []any
 	row          fakeMetadataRow
-	zeroRows     bool
+	// rowBySQL 按 SQL 关键字路由不同的 QueryRow 行，
+	// 用于一次事务里对多张表做 QueryRow 的场景（如规则删除流程先查规则再查安全组）。
+	rowBySQL map[string]fakeMetadataRow
+	// ruleUpsertArgs 捕获每次命中 network_security_group_rules 的 Exec 参数，
+	// 用于「创建安全组携带预设规则」明细写路径的参数断言。
+	ruleUpsertArgs [][]any
+	zeroRows       bool
 }
 
 func (tx *fakeMetadataTx) Exec(_ context.Context, sql string, args ...any) (ports.CommandTag, error) {
 	tx.sql = sql
 	tx.args = args
 	tx.execs = append(tx.execs, sql)
+	if strings.Contains(sql, "network_security_group_rules") {
+		tx.ruleUpsertArgs = append(tx.ruleUpsertArgs, append([]any(nil), args...))
+	}
 	affected := int64(1)
 	if tx.zeroRows {
 		affected = 0
@@ -50,6 +62,11 @@ func (tx *fakeMetadataTx) Exec(_ context.Context, sql string, args ...any) (port
 
 func (tx *fakeMetadataTx) Query(_ context.Context, sql string, _ ...any) (ports.Rows, error) {
 	tx.querySQL = sql
+	for marker, rows := range tx.queryRows {
+		if strings.Contains(sql, marker) {
+			return rows, nil
+		}
+	}
 	if tx.rows != nil {
 		return tx.rows, nil
 	}
@@ -59,6 +76,11 @@ func (tx *fakeMetadataTx) Query(_ context.Context, sql string, _ ...any) (ports.
 func (tx *fakeMetadataTx) QueryRow(_ context.Context, sql string, args ...any) ports.Row {
 	tx.queryRowSQL = sql
 	tx.queryRowArgs = args
+	for marker, row := range tx.rowBySQL {
+		if strings.Contains(sql, marker) {
+			return row
+		}
+	}
 	return tx.row
 }
 
@@ -75,6 +97,8 @@ func (r fakeMetadataRow) Scan(dest ...any) error {
 		switch ptr := target.(type) {
 		case *string:
 			*ptr = r.values[i].(string)
+		case *ports.NetworkResourceState:
+			*ptr = ports.NetworkResourceState(r.values[i].(string))
 		case *bool:
 			*ptr = r.values[i].(bool)
 		case *int:

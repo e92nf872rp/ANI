@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +91,72 @@ func TestMetadataOperationStorePersistsAndReadsStepTaskCorrelation(t *testing.T)
 	}
 }
 
+// Bug-3 回归：LocalOperationStore 分页 total 应为全量、next_cursor 非空，且可用 cursor 翻页。
+func TestLocalOperationStoreListOperationsPagination(t *testing.T) {
+	store := NewLocalOperationStore()
+	for i := 0; i < 25; i++ {
+		if _, _, err := store.RecordOperation(context.Background(), ports.WorkloadOperationRecord{
+			TenantID:       "tenant-a",
+			InstanceID:     "inst-abc",
+			Operation:      ports.WorkloadLifecycleStart,
+			RequestedBy:    "user-a",
+			IdempotencyKey: fmt.Sprintf("idem-%02d", i),
+			CreatedAt:      time.Unix(int64(100+i), 0),
+		}); err != nil {
+			t.Fatalf("RecordOperation(%d) error = %v", i, err)
+		}
+	}
+
+	first, err := store.ListOperations(context.Background(), ports.WorkloadOperationListRequest{
+		TenantID: "tenant-a", InstanceID: "inst-abc", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperations() error = %v", err)
+	}
+	if len(first.Items) != 10 {
+		t.Fatalf("first page items = %d, want 10", len(first.Items))
+	}
+	// 全量 total，而非当页条数。
+	if first.Total != 25 {
+		t.Fatalf("first.Total = %d, want full 25", first.Total)
+	}
+	if first.NextCursor == "" {
+		t.Fatalf("first.NextCursor = %q, want non-empty when more records", first.NextCursor)
+	}
+
+	second, err := store.ListOperations(context.Background(), ports.WorkloadOperationListRequest{
+		TenantID: "tenant-a", InstanceID: "inst-abc", Limit: 10, Cursor: first.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("ListOperations(page2) error = %v", err)
+	}
+	if len(second.Items) != 10 {
+		t.Fatalf("second page items = %d, want 10", len(second.Items))
+	}
+	if second.Total != 25 {
+		t.Fatalf("second.Total = %d, want full 25", second.Total)
+	}
+	if second.NextCursor == "" {
+		t.Fatalf("second.NextCursor = %q, want non-empty", second.NextCursor)
+	}
+
+	last, err := store.ListOperations(context.Background(), ports.WorkloadOperationListRequest{
+		TenantID: "tenant-a", InstanceID: "inst-abc", Limit: 10, Cursor: second.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("ListOperations(page3) error = %v", err)
+	}
+	if len(last.Items) != 5 {
+		t.Fatalf("last page items = %d, want 5", len(last.Items))
+	}
+	if last.Total != 25 {
+		t.Fatalf("last.Total = %d, want full 25", last.Total)
+	}
+	if last.NextCursor != "" {
+		t.Fatalf("last.NextCursor = %q, want empty at end", last.NextCursor)
+	}
+}
+
 type fakeOperationMetadataTx struct {
 	queries    []string
 	execSQL    []string
@@ -166,6 +233,10 @@ func assignScanValues(dest []any, values []any) error {
 		switch ptr := target.(type) {
 		case *string:
 			*ptr = values[i].(string)
+		case *int:
+			*ptr = values[i].(int)
+		case *ports.NetworkResourceState:
+			*ptr = ports.NetworkResourceState(values[i].(string))
 		case *[]byte:
 			*ptr = values[i].([]byte)
 		case *bool:

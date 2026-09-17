@@ -5506,9 +5506,10 @@ paths:
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:read"
       parameters:
-        - { name: kind,             in: query, schema: { type: string, enum: [vm, container, gpu_container, sandbox, batch_job, notebook, k8s_cluster, bare_metal, dpu_node] } }
-        - { name: state,            in: query, schema: { type: string, enum: [pending, provisioning, starting, running, stopping, stopped, failed, deleting, deleted] } }
-        - { name: keyword,          in: query, schema: { type: string }, description: "按实例名称、ID 或描述搜索。" }
+        - { name: kind,             in: query, schema: { type: string, enum: [vm, container, gpu_container, sandbox, batch_job, notebook, k8s_cluster, bare_metal, dpu_node] }, description: "支持逗号分隔多值（OR 语义），如 vm,container,gpu_container；缺省不过滤。" }
+        - { name: state,            in: query, schema: { type: string, enum: [pending, provisioning, starting, running, stopping, stopped, failed, deleting, deleted] }, description: "支持逗号分隔多值（OR 语义），如 running,stopped；缺省时排除 deleted 终态。" }
+        - { name: keyword,          in: query, schema: { type: string }, description: "按实例名称、ID 或描述搜索（配合 search_field 可限定字段）。" }
+        - { name: search_field,     in: query, schema: { type: string, enum: [id, name] }, description: "限定 keyword 在哪个字段匹配；缺省时对 ID/名称/描述全字段匹配。" }
         - { name: created_after,    in: query, schema: { type: string, format: date-time } }
         - { name: created_before,   in: query, schema: { type: string, format: date-time } }
         - { name: spec_id,          in: query, schema: { type: string }, description: "VM/GPU 规格 ID。" }
@@ -5520,6 +5521,8 @@ paths:
         - { name: scheduling_state, in: query, schema: { type: string, enum: [pending, queued, scheduled, running, failed] } }
         - { name: template_id,      in: query, schema: { type: string } }
         - { name: session_state,    in: query, schema: { type: string, enum: [pending, running, paused, expired, stopped] } }
+        - { name: vpc_id,           in: query, schema: { type: string }, description: "按所属 VPC 过滤实例。" }
+        - { name: subnet_id,        in: query, schema: { type: string }, description: "按所属子网过滤实例。" }
         - { name: limit,            in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor,           in: query, schema: { type: string } }
         - { name: sort,             in: query, schema: { type: string, enum: [created_at_asc, created_at_desc, name_asc, name_desc], default: created_at_desc } }
@@ -6150,7 +6153,9 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
-        - { name: name,   in: query, schema: { type: string }, description: "按 VPC 名称过滤；可选，服务端可做精确或前缀匹配。" }
+        - { name: name,  in: query, schema: { type: string }, description: "（兼容旧前端）按 VPC 名称前缀过滤。" }
+        - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
+        - { name: keyword, in: query, schema: { type: string }, description: "配合 search_field 的关键词。" }
         - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按 VPC 状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
@@ -6226,6 +6231,9 @@ paths:
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
         - { name: vpc_id, in: query, schema: { type: string }, description: "按所属 VPC 过滤子网。" }
+        - { name: name, in: query, schema: { type: string }, description: "（兼容旧前端）按名称前缀过滤。" }
+        - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
+        - { name: keyword, in: query, schema: { type: string }, description: "配合 search_field 的关键词。" }
         - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按子网状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
@@ -6323,7 +6331,9 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
-        - { name: name,   in: query, schema: { type: string }, description: "按安全组名称过滤；可选，服务端可做精确或前缀匹配。" }
+        - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
+        - { name: keyword, in: query, schema: { type: string }, description: "配合 search_field 的关键词。" }
+        - { name: name,   in: query, schema: { type: string }, description: "（兼容旧前端）按安全组名称过滤；可选，服务端可做精确或前缀匹配。" }
         - { name: vpc_id, in: query, schema: { type: string }, description: "按所属 VPC 过滤安全组。" }
         - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按安全组状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
@@ -6727,6 +6737,9 @@ paths:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户活跃实例（pending/provisioning/starting/running/stopping）的 storage_attachments 引用" }
+        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；省略时不过滤" }
+        - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
+        - { name: keyword, in: query, schema: { type: string }, description: "按名称/id 模糊过滤（大小写不敏感）；省略时不过滤" }
       responses:
         "200":
           description: 块存储卷列表
@@ -7031,6 +7044,9 @@ paths:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户 provisioning/running 状态实例的 storage_attachments 引用" }
+        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；省略时不过滤" }
+        - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
+        - { name: keyword, in: query, schema: { type: string }, description: "按名称/id 模糊过滤（大小写不敏感）；省略时不过滤" }
       responses:
         "200":
           description: 文件存储列表
@@ -7256,6 +7272,8 @@ paths:
       parameters:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
+        - { name: keyword, in: query, schema: { type: string }, description: "按名称/id 模糊过滤（大小写不敏感）" }
       responses:
         "200":
           description: 对象存储桶列表
@@ -7535,6 +7553,9 @@ paths:
       parameters:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；省略时不过滤" }
+        - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按 桶/对象名(默认)，id=按对象 ID。" }
+        - { name: keyword, in: query, schema: { type: string }, description: "按 桶/对象名/id 模糊过滤（大小写不敏感）；省略时不过滤" }
       responses:
         "200":
           description: 对象元数据列表
@@ -7675,6 +7696,9 @@ paths:
       parameters:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: state,  in: query, schema: { type: string }, description: "按状态过滤（pending/ready/failed/deleting/deleted）" }
+        - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
+        - { name: keyword, in: query, schema: { type: string }, description: "按名称/id 模糊过滤（大小写不敏感）" }
       responses:
         "200":
           description: 向量存储列表
@@ -7936,6 +7960,7 @@ paths:
         - { name: tag, in: query, schema: { type: string } }
         - { name: purpose, in: query, schema: { type: string, enum: [container, gpu, sandbox, system] } }
         - { name: scan_status, in: query, schema: { type: string, enum: [not_scanned, pending, running, complete, failed] } }
+        - { name: keyword, in: query, schema: { type: string }, description: "按 仓库名/tag 模糊过滤（大小写不敏感）；省略时不过滤" }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:

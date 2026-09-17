@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -33,6 +34,7 @@ type networkCreateSubnetRequest struct {
 
 type networkCreateSecurityGroupRequest struct {
 	IdempotencyKey string                     `json:"idempotency_key"`
+	VPCID          string                     `json:"vpc_id"`
 	Name           string                     `json:"name"`
 	Description    string                     `json:"description"`
 	Rules          []networkSecurityGroupRule `json:"rules"`
@@ -124,16 +126,18 @@ type networkSubnetResponse struct {
 }
 
 type networkSecurityGroupResponse struct {
-	ID          string                     `json:"id"`
-	TenantID    string                     `json:"tenant_id"`
-	Name        string                     `json:"name"`
-	Description string                     `json:"description,omitempty"`
-	Rules       []networkSecurityGroupRule `json:"rules"`
-	State       string                     `json:"state"`
-	Reason      string                     `json:"reason,omitempty"`
-	DevProfile  coreDevProfileResponse     `json:"dev_profile"`
-	CreatedAt   string                     `json:"created_at"`
-	UpdatedAt   string                     `json:"updated_at"`
+	ID                 string                     `json:"id"`
+	TenantID           string                     `json:"tenant_id"`
+	VPCID              string                     `json:"vpc_id,omitempty"`
+	Name               string                     `json:"name"`
+	Description        string                     `json:"description,omitempty"`
+	Rules              []networkSecurityGroupRule `json:"rules"`
+	BoundInstanceCount int                        `json:"bound_instance_count,omitempty"`
+	State              string                     `json:"state"`
+	Reason             string                     `json:"reason,omitempty"`
+	DevProfile         coreDevProfileResponse     `json:"dev_profile"`
+	CreatedAt          string                     `json:"created_at"`
+	UpdatedAt          string                     `json:"updated_at"`
 }
 
 type networkLoadBalancerResponse struct {
@@ -313,7 +317,8 @@ func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
 func (api *networkAPI) listVPCs(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListVPCs(ctx, ports.NetworkResourceListRequest{
 		TenantID: instanceTenantID(c),
-		Name:     c.Query("name"),
+		Name:     networkNameFilter(c),
+		Keyword:  networkIDKeyword(c),
 		State:    ports.NetworkResourceState(c.Query("state")),
 	})
 	if err != nil {
@@ -370,6 +375,8 @@ func (api *networkAPI) listSubnets(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSubnets(ctx, ports.NetworkResourceListRequest{
 		TenantID: instanceTenantID(c),
 		VPCID:    c.Query("vpc_id"),
+		Name:     networkNameFilter(c),
+		Keyword:  networkIDKeyword(c),
 		State:    ports.NetworkResourceState(c.Query("state")),
 	})
 	if err != nil {
@@ -428,6 +435,7 @@ func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestCo
 	record, err := api.service.CreateSecurityGroup(ctx, ports.NetworkSecurityGroupCreateRequest{
 		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
+		VPCID:          req.VPCID,
 		Name:           req.Name,
 		Description:    req.Description,
 		Rules:          networkRulesToPorts(req.Rules),
@@ -442,7 +450,9 @@ func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestCo
 func (api *networkAPI) listSecurityGroups(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSecurityGroups(ctx, ports.NetworkResourceListRequest{
 		TenantID: instanceTenantID(c),
-		Name:     c.Query("name"),
+		VPCID:    c.Query("vpc_id"),
+		Name:     networkNameFilter(c),
+		Keyword:  networkIDKeyword(c),
 		State:    ports.NetworkResourceState(c.Query("state")),
 	})
 	if err != nil {
@@ -472,6 +482,29 @@ func (api *networkAPI) deleteSecurityGroup(ctx context.Context, c *app.RequestCo
 		return
 	}
 	c.JSON(http.StatusOK, networkSecurityGroupFromRecord(record))
+}
+
+// networkNameFilter normalizes the name list filter for search_field=name
+// (the default) into the Name querystring, so service layers keep matching by
+// name prefix while frontends uniformly pass search_field=name&keyword=…
+func networkNameFilter(c *app.RequestContext) string {
+	searchField := strings.TrimSpace(c.Query("search_field"))
+	if searchField == "id" {
+		return ""
+	}
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		return keyword
+	}
+	return c.Query("name")
+}
+
+// networkIDKeyword returns the keyword when search_field=id is requested, so
+// service layers can match records by resource ID.
+func networkIDKeyword(c *app.RequestContext) string {
+	if strings.TrimSpace(c.Query("search_field")) != "id" {
+		return ""
+	}
+	return strings.TrimSpace(c.Query("keyword"))
 }
 
 func (api *networkAPI) listSecurityGroupRules(ctx context.Context, c *app.RequestContext) {
@@ -766,16 +799,18 @@ func networkSubnetFromRecord(record ports.NetworkSubnetRecord) networkSubnetResp
 
 func networkSecurityGroupFromRecord(record ports.NetworkSecurityGroupRecord) networkSecurityGroupResponse {
 	return networkSecurityGroupResponse{
-		ID:          record.SecurityGroupID,
-		TenantID:    record.TenantID,
-		Name:        record.Name,
-		Description: record.Description,
-		Rules:       networkRulesFromPorts(record.Rules),
-		State:       string(record.State),
-		Reason:      record.Reason,
-		DevProfile:  localCoreDevProfile("local-network-service", "Core dev/local profile; provider execution is gated separately"),
-		CreatedAt:   networkTime(record.CreatedAt),
-		UpdatedAt:   networkTime(record.UpdatedAt),
+		ID:                 record.SecurityGroupID,
+		TenantID:           record.TenantID,
+		VPCID:              record.VPCID,
+		Name:               record.Name,
+		Description:        record.Description,
+		Rules:              networkRulesFromPorts(record.Rules),
+		BoundInstanceCount: record.BoundInstanceCount,
+		State:              string(record.State),
+		Reason:             record.Reason,
+		DevProfile:         localCoreDevProfile("local-network-service", "Core dev/local profile; provider execution is gated separately"),
+		CreatedAt:          networkTime(record.CreatedAt),
+		UpdatedAt:          networkTime(record.UpdatedAt),
 	}
 }
 
