@@ -42,6 +42,7 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | INSTANCE-CONTAINER-SECRET-BIND-A | 容器与 GPU 容器实例「绑定/解绑密钥」"不支持"修复（PR #168，容器-6/GPU-6）：lifecycle 契约/路由/服务层校验/幂等本就就绪，缺口在 `KubernetesLifecycleExecutor.Apply` 无 `bind_secret`/`unbind_secret` case 落入 default 返回 unsupported。修复：executor 新增 `applyKubernetesSecretBind` 分支——bind env 带 `env_name` 走 per-key `valueFrom.secretKeyRef` 条目、不带走 `envFrom` 整 secret（原子列表 GET live 全量回写，已绑定幂等 no-op）；bind file 写 secret volume + readOnly volumeMount（卷名按 secret_id+mount_path 确定性派生）；unbind 不依赖 record、GET live Deployment 反查该 secret 全部注入形态（env/envFrom/volume/volumeMount）用 `$patch: delete` 定向移除，四类均空返回 404；record `ContainerInstanceStatus.SecretBindings` 随 container_status JSONB 持久化（无迁移，GPU-5 同模式），bind/unbind 后 RolloutStatus=progressing 由 reconciler 观测收敛；ports `WorkloadSecretBinding` 新增 EnvName。一处修复覆盖 container 与 gpu_container。单测 10 用例。**live 验证 PASS（2026-09-17，ani-test2 隔离环境，镜像 `test2-20260917-secretbind`）**：container bind env（DATABASE_URL secretKeyRef）/bind file（volume+readOnly mount）/record 2 条 SecretBindings（psql container_status 直查）/unbind 全形态移除+record 清空+回 running；gpu_container 复用实例 bind env+unbind 全过。环境配套：租户 Secret K8s apply 需 gateway `SECRET_PROVIDER_MODE=kubernetes_rest`（本环境此前未配置，验证期间已补配） | instance-container-secret-bind-a.md |
+
 ### 模型配置动态切换 M3（2026-09-11）
 
 | 批次 | 内容摘要 | 文件 |
