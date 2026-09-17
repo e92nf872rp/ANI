@@ -207,7 +207,9 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
                     self._embed_svc = EmbedRPCService()
         svc = self._embed_svc
         try:
-            vectors, dim = await asyncio.to_thread(svc.embed, list(request.texts))
+            vectors, dim = await asyncio.to_thread(
+                svc.embed, list(request.texts), request.model
+            )
         except Exception as exc:
             logger.exception("rag-engine Embed failed")
             await context.abort(grpc.StatusCode.INTERNAL, str(exc))

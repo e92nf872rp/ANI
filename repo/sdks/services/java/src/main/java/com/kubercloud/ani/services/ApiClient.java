@@ -319,6 +319,7 @@ public final class ApiClient {
         "AdminWithTenant",
         "AssignableTenantRoleListResponse",
         "AsyncTask",
+        "AsyncTaskRef",
         "AvailableGpu",
         "AvailableTenantListResponse",
         "AvailableTenantPlan",

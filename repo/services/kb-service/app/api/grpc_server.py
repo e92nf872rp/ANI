@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import queue
 import threading
@@ -214,7 +215,25 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 result = existing["result"]
                 if isinstance(result, str):
                     result = json.loads(result)
-                return _kb_row_to_pb(result)
+                # Replay only while the recorded KB is still alive. The
+                # name-fallback key above is shared by every same-name
+                # create in this tenant, so a soft-deleted KB's record
+                # must not shadow the re-create: get_kb hides deleted rows
+                # (None), and falling through to the INSERT path builds
+                # the new KB instead of returning a stale snapshot
+                # (bug: delete → same-name re-create returned the old id
+                # and the new KB never showed up in the list).
+                replay_id = str(result.get("id") or "")
+                replay_kb = (
+                    await kb_repo.get_kb(
+                        conn, tenant_id=tenant_id, kb_id=replay_id
+                    )
+                    if replay_id
+                    else None
+                )
+                if replay_kb is not None:
+                    return _kb_row_to_pb(result)
+                # deleted/unknown KB → skip replay, re-create below
 
             # 3. INSERT knowledge_bases
             # Name-collision 23505 → ALREADY_EXISTS. Two paths lead here:
@@ -227,6 +246,13 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             #     step 5 below, which self-heals by reusing the row.)
             # No SAVEPOINT needed: create_kb runs in its own transaction, so
             # the connection is clean when the exception is caught.
+            # embedding_model 兜底：未显式传入时用 env 的 EMBEDDING_MODEL
+            # （与 rag-engine 读同一份 .env，键一致；SiliconFlow 只认全名
+            # 前缀，如 "BAAI/bge-m3"）。只求值一次，DB 行与 Core 向量库
+            # 共用同一变量，防止两处表达式日后单边改动导致静默漂移。
+            embedding_model = (
+                request.embedding_model or settings.embedding_model
+            )
             try:
                 async with conn.transaction():
                     kb_row = await kb_repo.create_kb(
@@ -234,13 +260,17 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                         tenant_id=tenant_id,
                         name=request.name,
                         description=request.description,
-                        embedding_model=request.embedding_model or "bge-m3",
+                        embedding_model=embedding_model,
                         chunk_size=request.chunk_size or 1024,
                         top_k=request.top_k or 5,
                         # 未显式传入时落库存 0（表示未设置；运行时由 rag-engine 的
                         # DEFAULT_SCORE_THRESHOLD 兜底），而不是硬编码 0.3。
                         score_threshold=request.score_threshold or 0.0,
                         retrieval_mode=request.retrieval_mode or "hybrid",
+                        # 建库时选定的默认推理模型；空串落库为 NULL（未设置），
+                        # 问答时由三级回落链解析（request → KB 行 → ""，
+                        # rag-engine 端由 settings.vllm_model 接管）。
+                        default_inference_service=request.default_inference_service or "",
                     )
                     # audit kb.create (plan §6.3) — same transaction as the kb
                     # INSERT, so the audit row exists iff the KB does.
@@ -268,18 +298,46 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             kb_id = str(kb_row["id"])
 
         # 4. Core POST /vector-stores (SPEC §6.1)
+        # 维度探测：用选定的 embedding 模型实测一条短文本，取返回的
+        # dimension 作为 collection 维度——collection 随模型自动切换，
+        # 不再固定读 env 的 EMBEDDING_DIM。探测失败（网络异常/模型名
+        # 无效等）不阻断建库：回落 env 值并记 warning。
+        probe_dim = 0
+        try:
+            if self._rag_engine_grpc_client_factory is not None:
+                rag_engine_grpc = self._rag_engine_grpc_client_factory()
+            else:
+                rag_engine_grpc = _default_rag_engine_grpc_client()
+            _, probe_dim = await rag_engine_grpc.embed(
+                texts=["dimension probe"], model=embedding_model
+            )
+        except Exception as exc:  # noqa: BLE001 — 探测仅降级，不阻断建库
+            logger.warning(
+                "embedding dimension probe failed (model=%s), "
+                "falling back to EMBEDDING_DIM=%s: %s",
+                embedding_model,
+                settings.embedding_dim,
+                exc,
+            )
+        dimension = probe_dim or settings.embedding_dim
         vector_store_id = ""
         try:
             async with self._core_client_factory(tenant_id) as core:
-                # dimension: bge-m3 = 1024; fallback to 1024 when unknown.
-                dim = 1024
+                # 优先用上方实测维度；探测失败回落 env 值。
                 vs_resp = await core.create_vector_store(
                     name=_vector_store_name(kb_id),
-                    dimension=dim,
+                    dimension=dimension,
                     metric="cosine",
-                    embedding_model=request.embedding_model or "bge-m3",
-                    idempotency_key=idem_key,
-                )
+                    # 与上方 kb_repo.create_kb 用同一局部变量（同一模型）。
+                # 幂等 key 用派生唯一值而非 idem_key：idem_key 在 HTTP
+                # 请求未传幂等 key 时回退为 create_kb:{tenant}:{name}，
+                # 同名重建会撞 Core 侧同 key 重放（Core 的
+                # FindByCreateIdempotency 不过滤已删除的 vector store），
+                # 返回已删 KB 的旧 vector store。用本请求新生成的 kb_id
+                # 派生，天然唯一，同名重建每次都拿到新 vector store。
+                embedding_model=embedding_model,
+                idempotency_key=f"create_vs:{tenant_id}:{kb_id}",
+            )
                 # Persist the Core-returned vector store id (Plan §3.1).
                 vector_store_id = str(vs_resp.get("id") or "")
                 if vector_store_id:
@@ -298,7 +356,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                             vector_store_id=vector_store_id,
                             kb_id=kb_id,
                             kb_name=request.name or _vector_store_name(kb_id),
-                            idempotency_key=f"{idem_key}:kblink",
+                            # 同上：派生 key，避免 Core 侧同 key重放
+                            # 返回已删 KB 的旧 link。
+                            idempotency_key=f"create_vs:{tenant_id}:{kb_id}:kblink",
                         )
                     except CoreAPIError as link_err:
                         logger.warning(
@@ -458,6 +518,14 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                     before_row = await kb_repo.get_kb(
                         conn, tenant_id=tenant_id, kb_id=request.kb_id
                     )
+                    if before_row and before_row.get("status") == "rebuilding":
+                        # B6 (#24): write ops are mutually exclusive with a
+                        # running full-KB rebuild (queries stay served).
+                        context.abort(
+                            grpc.StatusCode.FAILED_PRECONDITION,
+                            "knowledge base is rebuilding",
+                        )
+                        return  # unreachable; for type checkers
 
                     # 3. UPDATE (empty name/description keep current values)
                     try:
@@ -582,6 +650,16 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 if not kb_row:
                     context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
                     return
+                if kb_row.get("status") == "rebuilding":
+                    # B6 (#24): deletes are mutually exclusive with a running
+                    # full-KB rebuild (the rebuild consumer's restoring
+                    # transition is conditional on rebuilding → active, so a
+                    # concurrent delete leaves no stuck state).
+                    context.abort(
+                        grpc.StatusCode.FAILED_PRECONDITION,
+                        "knowledge base is rebuilding",
+                    )
+                    return
                 await audit_repo.insert_audit_in_tx(
                     conn,
                     tenant_id=tenant_id,
@@ -597,6 +675,24 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         if not deleted:
             context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
             return
+
+        # C-fix (best-effort): drop this KB's kb.create idempotency replay
+        # rows. The create fallback key create_kb:{tenant}:{name} is shared
+        # by every same-name create in the tenant, so a surviving row would
+        # make the next same-name create replay this KB's stale snapshot
+        # (old id returned, nothing inserted). The _create_kb replay guard
+        # also skips deleted KBs, so a failure here only leaves a stale row
+        # for that guard to bypass — not a correctness break.
+        try:
+            async with self._pool.acquire() as conn:
+                await async_task_repo.delete_kb_create_replay_records(
+                    conn, tenant_id=tenant_id, kb_id=kb_id
+                )
+        except Exception as e:  # noqa: BLE001 — cleanup is best-effort
+            logger.warning(
+                "kb-service: DeleteKB kb_id=%s kb.create replay-record "
+                "cleanup failed (best-effort): %s", kb_id, e,
+            )
 
         # 2. Core DELETE /vector-stores/{id} (SPEC §6.1) — best-effort.
         # Use the persisted vector_store_id (Core UUID), not the derived name.
@@ -669,6 +765,14 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 )
             if kb_row is None:
                 context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
+            if kb_row.get("status") == "rebuilding":
+                # B6 (#24): uploads are mutually exclusive with a running
+                # full-KB rebuild (doc.create failure audits this path).
+                context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "knowledge base is rebuilding",
+                )
                 return
 
             doc_id = str(uuid.uuid4())
@@ -812,6 +916,22 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 #    outbox.insert_event and create_task_in_tx / update_parse_status_in_tx
                 #    do NOT open their own transactions; they run inside this one.
                 async with conn.transaction():
+                    # a0. B6 (#24): KB gate — a KB under full rebuild rejects
+                    #     new parses (mutual exclusion matrix, write ops).
+                    #     Checked inside the tx so the read is consistent
+                    #     with the write below.
+                    from app.repositories import knowledge_base as kb_repo
+
+                    kb_gate_row = await kb_repo.get_kb(
+                        conn, tenant_id=tenant_id, kb_id=kb_id
+                    )
+                    if kb_gate_row is not None and kb_gate_row.get("status") == "rebuilding":
+                        context.abort(
+                            grpc.StatusCode.FAILED_PRECONDITION,
+                            "knowledge base is rebuilding",
+                        )
+                        return  # unreachable; for type checkers
+
                     # a. read the doc row BEFORE the update: the audit
                     #    before_state is the row as it stood pre-notify.
                     doc_row = await document_repo.get_document(
@@ -1060,6 +1180,16 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                     if not kb_row:
                         context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
                         return
+                    if kb_row.get("status") == "rebuilding":
+                        # B6 (#24): doc deletes are mutually exclusive with a
+                        # running full-KB rebuild (the rebuild consumer skips
+                        # docs that vanish mid-run; soft-deleted rows are
+                        # excluded from the rebuild snapshot).
+                        context.abort(
+                            grpc.StatusCode.FAILED_PRECONDITION,
+                            "knowledge base is rebuilding",
+                        )
+                        return
                     # before snapshot: the row as it stands pre-delete. None
                     # when the doc is already soft-deleted (get_document
                     # filters the 'deleted' marker) — a repeated delete
@@ -1206,6 +1336,10 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             # 未设置(0)时透传给 rag-engine，由 DEFAULT_SCORE_THRESHOLD 兜底。
             "score_threshold": kb_row.get("score_threshold") or 0.0,
             "retrieval_mode": kb_row.get("retrieval_mode") or "hybrid",
+            "embedding_model": kb_row.get("embedding_model") or "",
+            "default_inference_service": str(
+                kb_row.get("default_inference_service") or ""
+            ),
         }
 
         # 3-4. persist user message + Redis cache (best-effort).
@@ -1253,8 +1387,13 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             top_k=top_k,
             score_threshold=score_threshold,
             retrieval_mode=retrieval_mode,
-            inference_service_name=request.inference_service_name or "default",
+            inference_service_name=(
+                request.inference_service_name
+                or kb_cfg["default_inference_service"]
+                or ""
+            ),
             vector_store_id=str(kb_row.get("vector_store_id") or ""),
+            embedding_model=kb_cfg["embedding_model"],
             cache=cache,
         )
         answer = result.answer
@@ -1434,6 +1573,10 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             "top_k": kb_row.get("top_k") or 5,
             "score_threshold": kb_row.get("score_threshold") or 0.0,
             "retrieval_mode": kb_row.get("retrieval_mode") or "hybrid",
+            "embedding_model": kb_row.get("embedding_model") or "",
+            "default_inference_service": str(
+                kb_row.get("default_inference_service") or ""
+            ),
         }
 
         # 3-4. persist user message + Redis cache (mirror Query).
@@ -1467,7 +1610,11 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             else kb_cfg["score_threshold"]
         )
         retrieval_mode = request.retrieval_mode or kb_cfg["retrieval_mode"] or "hybrid"
-        inference_service_name = request.inference_service_name or "default"
+        inference_service_name = (
+            request.inference_service_name
+            or kb_cfg["default_inference_service"]
+            or ""
+        )
         vector_store_id = str(kb_row.get("vector_store_id") or "")
 
         # 6. Load chat history (includes current-turn user, already persisted).
@@ -1519,6 +1666,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             retrieval_mode=retrieval_mode,
             inference_service_name=inference_service_name,
             vector_store_id=vector_store_id,
+            embedding_model=kb_cfg["embedding_model"],
             history=history,
         ):
             if isinstance(ev, StreamTokenEvent):
@@ -1659,6 +1807,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         retrieval_mode: str,
         inference_service_name: str,
         vector_store_id: str,
+        embedding_model: str = "",
         cache: Any,
     ) -> QueryResult:
         """QueryOrchestrator: retrieve → gates → Generate RPC.
@@ -1708,6 +1857,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             retrieval_mode=retrieval_mode,
             inference_service_name=inference_service_name,
             vector_store_id=vector_store_id,
+            embedding_model=embedding_model,
             history=history,
         )
 
@@ -2141,6 +2291,264 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             location_url="",
         )
 
+    async def _trigger_rebuild_in_tx(
+        self,
+        conn: asyncpg.Connection,
+        context,
+        *,
+        tenant_id: str,
+        kb_id: str,
+        kb_row: dict[str, Any],
+        idem_key: str,
+        actor: str | None,
+    ) -> common_pb2.AsyncTaskRef:
+        """Same-transaction rebuild orchestration shared by RebuildKB (B6,
+        P1 #24) and UpdateKBConfig (B7, P1 #23): the conditional
+        active→rebuilding status transition (the authoritative mutual
+        exclusion), the kb.rebuild audit row, the pending kb.rebuild async
+        task (SAVEPOINT UNIQUE-race self-heal), and the kb.rebuild outbox
+        event.
+
+        Must run INSIDE the caller's outer transaction — every write here
+        commits or rolls back with the caller's own writes (UpdateKBConfig
+        pairs this with its config UPDATE so a failed trigger rolls the
+        config change back too). ``kb_row`` supplies the rebuild payload:
+        RebuildKB passes the gate-read row, UpdateKBConfig passes the row
+        RETURNed by update_config_in_tx (the NEW embedding settings the
+        rebuild must apply). Any abort() here rolls the whole caller
+        transaction back before the failure audit lands in its own tx.
+        """
+        from app.repositories import outbox as outbox_repo
+
+        # Conditional active→rebuilding: the authoritative mutual
+        # exclusion. A concurrent rebuild (or any state change between
+        # the caller's read and here) makes this UPDATE match 0 rows →
+        # FAILED_PRECONDITION.
+        transitioned = await kb_repo.set_status_in_tx(
+            conn,
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            from_status="active",
+            to_status="rebuilding",
+        )
+        if not transitioned:
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "knowledge base is rebuilding or not active",
+            )
+            return  # unreachable; for type checkers
+
+        # audit kb.rebuild (plan §6.3) — same transaction as the status
+        # transition. before = the active state the gate validated;
+        # after = rebuilding.
+        await audit_repo.insert_audit_in_tx(
+            conn,
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            action="kb.rebuild",
+            actor_user_id=actor,
+            before_state={"status": "active"},
+            after_state={"status": "rebuilding"},
+        )
+
+        # UNIQUE race self-heal (same pattern as _reparse_document): a
+        # concurrent rebuild with the same idempotency key can win the
+        # INSERT between the caller's replay check and here. The nested
+        # SAVEPOINT keeps the outer tx usable; the loser either replays
+        # the winner's task (pending/completed) or rejects the poisoned
+        # key (failed).
+        publish_event = True
+        task_id = ""
+        try:
+            async with conn.transaction():
+                task_row = await async_task_repo.create_task_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.rebuild",
+                    resource_type="knowledge_base",
+                    resource_id=kb_id,
+                    payload={
+                        "kb_id": kb_id,
+                        "embedding_model": kb_row.get("embedding_model") or "",
+                        "chunk_size": kb_row.get("chunk_size") or 1024,
+                    },
+                    status="pending",
+                )
+            task_id = str(task_row["id"])
+        except asyncpg.UniqueViolationError:
+            existing = await async_task_repo.find_by_idempotency_key(
+                conn,
+                tenant_id=tenant_id,
+                idempotency_key=idem_key,
+                task_type="kb.rebuild",
+            )
+            if existing is None:
+                # RLS raced the row away between INSERT and SELECT;
+                # surface as UNKNOWN rather than masking.
+                raise
+            if existing.get("status") == "failed":
+                # SPEC §5.4: a failed task must NOT be replayed on the
+                # same key — abort() rolls back the whole outer
+                # transaction INCLUDING the rebuilding transition, so the
+                # KB returns to active and the failed state stays intact.
+                context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "task already failed with this idempotency_key; "
+                    "retry with a new key",
+                )
+                return  # unreachable; for type checkers
+            # pending/completed: the concurrent winner's tx already
+            # transitioned + published — replay, publish nothing.
+            task_id = str(existing["id"])
+            publish_event = False
+
+        if publish_event:
+            await outbox_repo.insert_event(
+                conn,
+                tenant_id=tenant_id,
+                aggregate_type="knowledge_bases",
+                aggregate_id=kb_id,
+                event_type="kb.rebuild",
+                payload={
+                    "kb_id": kb_id,
+                    "tenant_id": tenant_id,
+                    # Lets the rebuild consumer advance/close the
+                    # async_tasks row (progress_pct, terminal status) —
+                    # prevents tasks stuck pending.
+                    "task_id": task_id,
+                },
+            )
+
+        return common_pb2.AsyncTaskRef(
+            task_id=task_id,
+            task_type="kb.rebuild",
+            status="pending",
+            location_url="",
+        )
+
+    # ── P1 RPC: full-KB rebuild (B6, P1 #24) ──────────────────────────────────
+
+    def RebuildKB(self, request, context):
+        return _run_async(self._rebuild_kb(request, context))
+
+    async def _rebuild_kb(
+        self, request, context
+    ) -> common_pb2.AsyncTaskRef:
+        """RebuildKB — full-KB re-parse of all ready/failed docs (P1 #24).
+
+        202-style async semantics, structurally mirroring _reparse_document's
+        atomic outbox transaction with three divergences:
+        - the aggregate is the KB, not a document: the conditional
+          active→rebuilding status transition (set_status_in_tx) IS the
+          mutual exclusion — a second concurrent rebuild finds status=
+          'rebuilding' and aborts FAILED_PRECONDITION;
+        - no per-document reset here: the rebuild consumer (rebuild_consumer)
+          snapshots doc ids and resets each document just before re-parsing
+          it (reset_for_reparse_in_tx), so queries keep being served from
+          the existing index while the rebuild runs;
+        - the outbox event type 'kb.rebuild' is routed by the dispatcher
+          to the dedicated rebuild subject (subject_overrides).
+
+        Guards: KB missing → NOT_FOUND; KB already rebuilding →
+        FAILED_PRECONDITION (both the gate read and the conditional UPDATE
+        race window are covered — the loser's UPDATE matches 0 rows).
+        """
+        if not request.idempotency_key:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
+            )
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        tenant_id = request.tenant_id or ""
+        kb_id = request.kb_id or ""
+        if not tenant_id or not kb_id:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "tenant_id and kb_id are required",
+            )
+            return
+        idem_key = request.idempotency_key
+
+        # audit kb.rebuild (plan §6.3): intent for the failure path; the
+        # KB gate passing means the kb_audit_log.kb_id FK is satisfiable.
+        actor = _actor_user_id(context)
+        intent: dict[str, Any] = {"kb_id": kb_id}
+        try:
+            async with self._pool.acquire() as conn:
+                # 1. idempotent replay: pending/completed task with the same
+                #    key → return the same AsyncTaskRef (a failed task is NOT
+                #    replayed — the client submits a fresh key, SPEC §5.4).
+                existing = await async_task_repo.find_by_idempotency_key(
+                    conn,
+                    tenant_id=tenant_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.rebuild",
+                )
+                if existing and existing.get("status") in ("pending", "completed"):
+                    return common_pb2.AsyncTaskRef(
+                        task_id=str(existing["id"]),
+                        task_type=existing.get("task_type") or "kb.rebuild",
+                        status=existing.get("status") or "pending",
+                        location_url="",
+                    )
+
+                # 2. KB gate: missing (or RLS-hidden) → NOT_FOUND. The
+                #    rebuilding check happens in the conditional UPDATE below
+                #    (authoritative) — this read is only the fast path.
+                kb_row = await kb_repo.get_kb(
+                    conn, tenant_id=tenant_id, kb_id=kb_id
+                )
+                if not kb_row:
+                    context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                    return
+
+                # 3. single transaction: KB status transition + audit +
+                #    async_tasks + outbox_events (atomic outbox shape) —
+                #    _trigger_rebuild_in_tx owns the whole three-write
+                #    orchestration (shared with UpdateKBConfig, B7 #23).
+                async with conn.transaction():
+                    return await self._trigger_rebuild_in_tx(
+                        conn,
+                        context,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        kb_row=kb_row,
+                        idem_key=idem_key,
+                        actor=actor,
+                    )
+        except Exception:
+            # failure audit kb.rebuild (plan §6.3): business rejections are
+            # recorded; the replay branch returns (not an exception) and the
+            # failed-key abort rolls the business tx back before the audit
+            # lands in its own fresh transaction.
+            info = _audit_failure_info(context)
+            if info is not None:
+                await _record_failure_audit(
+                    self._pool,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    action="kb.rebuild",
+                    intent=intent,
+                    error_code=info[0],
+                    error_msg=info[1],
+                    actor_user_id=actor,
+                )
+            raise
+
+        # unreachable: both success paths return inside the try block
+        # (replay → the recorded task, fresh → _trigger_rebuild_in_tx).
+
     def ListKBCitations(self, request, context):
         return _run_async(self._list_kb_citations(request, context))
 
@@ -2348,6 +2756,356 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             updated_at=_ts(updated_at),
         )
 
+    def GetKBConfig(self, request, context):
+        return _run_async(self._get_kb_config(request, context))
+
+    async def _get_kb_config(self, request, context) -> kb_pb.KBConfig:
+        # 1. validate (read path: no idempotency)
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+        if not request.kb_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "kb_id is required")
+            return
+        if self._pool is None:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
+            return
+
+        # 2. RLS-scoped read; a deleted KB is 404 (same semantics as GetKB).
+        async with self._pool.acquire() as conn:
+            row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+        if not row:
+            context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+            return
+
+        # 3. column-direct mapping (B5 #22; retrieval_mode aligns the
+        #    contract fix: vector | hybrid | keyword) — shared with
+        #    UpdateKBConfig's response and replay paths (_kb_config_msg).
+        return _kb_config_msg(request.tenant_id, request.kb_id, row)
+
+    # ── P1 RPC: config update + paired rebuild (B7, P1 #23) ──────────────────
+
+    def UpdateKBConfig(self, request, context):
+        return _run_async(self._update_kb_config(request, context))
+
+    async def _update_kb_config(
+        self, request, context
+    ) -> kb_pb.UpdateKBConfigResponse:
+        """UpdateKBConfig — explicit-partial config update (B7, P1 #23).
+
+        Tri-state request fields (proto3 optional + BoolValue): only
+        fields explicitly carried in the request are change candidates;
+        an absent field keeps its current value (unlike UpdateKB's
+        COALESCE "empty keeps current"). A patch that changes nothing
+        is 400 "no effective change". Changing embedding_model or
+        chunk_size invalidates existing vectors, so the same transaction
+        pairs the config UPDATE with a full-KB rebuild (via
+        _trigger_rebuild_in_tx) — a failed trigger rolls the config
+        change back. The rebuild's idempotency key is derived from the
+        config key ("rebuild:<uuid>"), so a config replay can never
+        re-trigger the rebuild either. 200 carries the new config plus
+        the AsyncTaskRef of the paired rebuild (unset when none — the
+        wire form of the contract's nullable rebuild_task).
+        """
+        # 1. validate idempotency_key / kb_id / tenant_id (align UpdateKB)
+        if not request.idempotency_key:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        try:
+            uuid.UUID(request.idempotency_key.strip())
+        except ValueError:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key must be a uuid"
+            )
+            return
+        if not request.kb_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "kb_id is required")
+            return
+        if not request.tenant_id:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
+            return
+
+        # 2. value ranges on the explicitly-carried fields (align CreateKB;
+        #    embedding_model is accepted as any non-empty string — the model
+        #    catalog (ListKBModels) is deferred beyond P1).
+        if request.HasField("chunk_size") and not (
+            1 <= request.chunk_size <= 8192
+        ):
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                f"chunk_size must be in [1, 8192], got {request.chunk_size}",
+            )
+            return
+        if request.HasField("top_k") and not (1 <= request.top_k <= 20):
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                f"top_k must be in [1, 20], got {request.top_k}",
+            )
+            return
+        if request.HasField("score_threshold") and not (
+            0 <= request.score_threshold <= 1
+        ):
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                f"score_threshold must be in [0, 1], got {request.score_threshold}",
+            )
+            return
+        if request.HasField("retrieval_mode") and request.retrieval_mode not in (
+            "vector",
+            "hybrid",
+            "keyword",
+        ):
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "retrieval_mode must be one of ['hybrid', 'keyword', 'vector'], "
+                f"got {request.retrieval_mode}",
+            )
+            return
+        if request.HasField("embedding_model") and not (
+            request.embedding_model.strip()
+        ):
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "embedding_model must not be empty"
+            )
+            return
+        if self._pool is None:
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured"
+            )
+            return
+
+        tenant_id = request.tenant_id
+        kb_id = request.kb_id
+        idem_key = request.idempotency_key
+
+        # 3. single transaction (same shape as UpdateKB): replay check,
+        #    KB gate, config UPDATE, the kb.config.update audit, the
+        #    kb.config.update idempotency record (insert + complete), and
+        #    — when the embedding settings changed — the paired rebuild
+        #    trigger, all commit atomically. A failed trigger (rebuilding
+        #    race, poisoned rebuild key) rolls the config change back with
+        #    everything else.
+        actor = _actor_user_id(context)
+        intent: dict[str, Any] = {"kb_id": kb_id}
+        try:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    # 3a. idempotency replay: the recorded result carries the
+                    # config row + the paired rebuild ref (None when the
+                    # change did not touch the embedding settings).
+                    existing = await async_task_repo.find_by_idempotency_key(
+                        conn,
+                        tenant_id=tenant_id,
+                        idempotency_key=idem_key,
+                        task_type="kb.config.update",
+                    )
+                    if existing and existing.get("result"):
+                        result = existing["result"]
+                        if isinstance(result, str):
+                            result = json.loads(result)
+                        # None → the field stays unset: the wire form of
+                        # the contract's nullable rebuild_task.
+                        rebuild_ref_pb = None
+                        if result.get("rebuild_task"):
+                            rt = result["rebuild_task"]
+                            rebuild_ref_pb = common_pb2.AsyncTaskRef(
+                                task_id=str(rt.get("task_id", "")),
+                                task_type=str(rt.get("task_type", "kb.rebuild")),
+                                status=str(rt.get("status", "pending")),
+                                location_url=str(rt.get("location_url", "")),
+                            )
+                        return kb_pb.UpdateKBConfigResponse(
+                            config=_kb_config_msg(tenant_id, kb_id, result["config"]),
+                            rebuild_task=rebuild_ref_pb,
+                        )
+
+                    # 3b. KB gate: missing (or RLS-hidden) → NOT_FOUND;
+                    #     rebuilding → FAILED_PRECONDITION (B6 mutex).
+                    kb_row = await kb_repo.get_kb(
+                        conn, tenant_id=tenant_id, kb_id=kb_id
+                    )
+                    if not kb_row:
+                        context.abort(
+                            grpc.StatusCode.NOT_FOUND, "knowledge base not found"
+                        )
+                        return
+                    if kb_row.get("status") == "rebuilding":
+                        context.abort(
+                            grpc.StatusCode.FAILED_PRECONDITION,
+                            "knowledge base is rebuilding",
+                        )
+                        return
+
+                    # 3c. explicit-change detection: HasField = "explicitly
+                    #     carried" (tri-state); value comparison = "effective".
+                    #     embedding_model / chunk_size changes additionally
+                    #     invalidate existing vectors → paired rebuild.
+                    patch: dict[str, Any] = {}
+                    rebuild_needed = False
+                    if request.HasField("embedding_model") and (
+                        request.embedding_model.strip()
+                        != (kb_row.get("embedding_model") or "")
+                    ):
+                        patch["embedding_model"] = request.embedding_model.strip()
+                        rebuild_needed = True
+                    if request.HasField("chunk_size") and request.chunk_size != (
+                        kb_row.get("chunk_size") or 0
+                    ):
+                        patch["chunk_size"] = request.chunk_size
+                        rebuild_needed = True
+                    if request.HasField("ocr_enabled") and (
+                        request.ocr_enabled.value
+                        != bool(kb_row.get("ocr_enabled"))
+                    ):
+                        patch["ocr_enabled"] = request.ocr_enabled.value
+                    if request.HasField("top_k") and request.top_k != (
+                        kb_row.get("top_k") or 0
+                    ):
+                        patch["top_k"] = request.top_k
+                    if request.HasField("score_threshold") and (
+                        not math.isclose(
+                            request.score_threshold,
+                            float(kb_row.get("score_threshold") or 0.0),
+                            rel_tol=1e-6,
+                            abs_tol=1e-9,
+                        )
+                    ):
+                        patch["score_threshold"] = request.score_threshold
+                    if request.HasField("retrieval_mode") and (
+                        request.retrieval_mode
+                        != (kb_row.get("retrieval_mode") or "")
+                    ):
+                        patch["retrieval_mode"] = request.retrieval_mode
+                    if not patch:
+                        context.abort(
+                            grpc.StatusCode.INVALID_ARGUMENT, "no effective change"
+                        )
+                        return
+
+                    intent = {"kb_id": kb_id, "patch": patch,
+                              "rebuild_needed": rebuild_needed}
+
+                    # 3d. config UPDATE (explicit-partial: patch keys only).
+                    updated = await kb_repo.update_config_in_tx(
+                        conn, tenant_id=tenant_id, kb_id=kb_id, patch=patch
+                    )
+                    if updated is None:
+                        context.abort(
+                            grpc.StatusCode.NOT_FOUND, "knowledge base not found"
+                        )
+                        return
+
+                    # 3e. paired rebuild, same transaction — takes the NEW
+                    #     embedding settings from the row just RETURNed.
+                    #     Derived key "rebuild:<uuid>": a replayed config
+                    #     request can never re-trigger it.
+                    rebuild_ref = None
+                    if rebuild_needed:
+                        rebuild_ref = await self._trigger_rebuild_in_tx(
+                            conn,
+                            context,
+                            tenant_id=tenant_id,
+                            kb_id=kb_id,
+                            kb_row=updated,
+                            idem_key=f"rebuild:{idem_key}",
+                            actor=actor,
+                        )
+
+                    # 3f. audit kb.config.update (plan §6.3) — same
+                    #     transaction as the config UPDATE itself.
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        action="kb.config.update",
+                        actor_user_id=actor,
+                        before_state=_kb_audit_snapshot(kb_row),
+                        after_state=_kb_audit_snapshot(updated),
+                    )
+
+                    # 3g. write async_tasks idempotency record. Poison-key
+                    #     self-heal: same pattern as UpdateKB — a prior
+                    #     crash between create_task and complete_task
+                    #     leaves a pending row the replay check skips; the
+                    #     SAVEPOINT keeps the outer tx usable after the
+                    #     UNIQUE violation, and the retry completes the
+                    #     reused row.
+                    try:
+                        async with conn.transaction():
+                            task_row = await async_task_repo.create_task_in_tx(
+                                conn,
+                                tenant_id=tenant_id,
+                                idempotency_key=idem_key,
+                                task_type="kb.config.update",
+                                resource_type="knowledge_base",
+                                resource_id=kb_id,
+                                payload={"kb_id": kb_id, "patch": patch,
+                                         "rebuild_needed": rebuild_needed},
+                                status="pending",
+                            )
+                    except asyncpg.UniqueViolationError:
+                        existing = await async_task_repo.find_by_idempotency_key(
+                            conn,
+                            tenant_id=tenant_id,
+                            idempotency_key=idem_key,
+                            task_type="kb.config.update",
+                        )
+                        if existing is None:
+                            # RLS raced the row away between INSERT and
+                            # SELECT; surface as UNKNOWN rather than masking.
+                            raise
+                        task_row = existing
+                    rebuild_ref_dict = (
+                        {
+                            "task_id": rebuild_ref.task_id,
+                            "task_type": rebuild_ref.task_type,
+                            "status": rebuild_ref.status,
+                            "location_url": rebuild_ref.location_url,
+                        }
+                        if rebuild_ref is not None
+                        else None
+                    )
+                    await async_task_repo.complete_task_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        task_id=str(task_row["id"]),
+                        result={
+                            "config": updated,
+                            "rebuild_task": rebuild_ref_dict,
+                        },
+                    )
+        except Exception:
+            # failure audit kb.config.update (plan §6.3): business
+            # rejections (404/409/412) are recorded; INVALID_ARGUMENT never
+            # reaches here (validated before the acquire block). The
+            # business tx has already rolled back, so the audit lands in
+            # its own tx.
+            info = _audit_failure_info(context)
+            if info is not None:
+                await _record_failure_audit(
+                    self._pool,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    action="kb.config.update",
+                    intent=intent,
+                    error_code=info[0],
+                    error_msg=info[1],
+                    actor_user_id=actor,
+                )
+            raise
+
+        # 4. 200 carries the new config + the paired rebuild ref (None →
+        #    unset on the wire: the contract's nullable rebuild_task, only
+        #    present when the change touched embedding/chunk settings).
+        return kb_pb.UpdateKBConfigResponse(
+            config=_kb_config_msg(tenant_id, kb_id, updated),
+            rebuild_task=rebuild_ref,
+        )
+
     def UpdateKBPermissions(self, request, context):
         return _run_async(self._update_kb_permissions(request, context))
 
@@ -2433,6 +3191,15 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                             grpc.StatusCode.NOT_FOUND, "knowledge base not found"
                         )
                         return
+                    if kb_row.get("status") == "rebuilding":
+                        # B6 (#24): permission writes are mutually exclusive
+                        # with a running full-KB rebuild (reads via
+                        # GetKBPermissions stay served).
+                        context.abort(
+                            grpc.StatusCode.FAILED_PRECONDITION,
+                            "knowledge base is rebuilding",
+                        )
+                        return  # unreachable; for type checkers
 
                     # before snapshot: the permission row as it stands
                     # (defaults when no row exists yet — get_permissions
@@ -2716,10 +3483,32 @@ def _kb_row_to_pb(row: dict[str, Any]) -> kb_pb.KnowledgeBase:
         top_k=row.get("top_k") or 0,
         score_threshold=row.get("score_threshold") or 0.0,
         retrieval_mode=row.get("retrieval_mode") or "",
+        default_inference_service=str(
+            row.get("default_inference_service") or ""
+        ),
         status=row.get("status") or "",
         doc_count=row.get("doc_count") or 0,
         created_at=_ts(row.get("created_at")),
         updated_at=_ts(row.get("updated_at")),
+    )
+
+
+def _kb_config_msg(tenant_id: str, kb_id: str, row: dict[str, Any]) -> kb_pb.KBConfig:
+    """Convert a knowledge_bases row (or its JSON-serialized replay form)
+    to a proto KBConfig (B5 #22 / B7 #23).
+
+    Shared by GetKBConfig and UpdateKBConfig (fresh + replay paths);
+    retrieval_mode aligns the contract fix: vector | hybrid | keyword.
+    """
+    return kb_pb.KBConfig(
+        tenant_id=tenant_id,
+        kb_id=kb_id,
+        embedding_model=row.get("embedding_model") or "",
+        chunk_size=row.get("chunk_size") or 0,
+        ocr_enabled=bool(row.get("ocr_enabled")),
+        top_k=row.get("top_k") or 0,
+        score_threshold=float(row.get("score_threshold") or 0.0),
+        retrieval_mode=row.get("retrieval_mode") or "hybrid",
     )
 
 
@@ -2945,9 +3734,11 @@ def _kb_audit_snapshot(kb_row: dict[str, Any] | None) -> dict[str, Any] | None:
         "description": kb_row.get("description"),
         "embedding_model": kb_row.get("embedding_model"),
         "chunk_size": kb_row.get("chunk_size"),
+        "ocr_enabled": kb_row.get("ocr_enabled"),
         "top_k": kb_row.get("top_k"),
         "score_threshold": kb_row.get("score_threshold"),
         "retrieval_mode": kb_row.get("retrieval_mode"),
+        "default_inference_service": kb_row.get("default_inference_service"),
         "status": kb_row.get("status"),
         "doc_count": kb_row.get("doc_count"),
     }

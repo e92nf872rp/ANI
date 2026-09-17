@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\trag.proto\x12\x06rag.v1\"p\n\x0bSourceChunk\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64oc_id\x18\x02 \x01(\t\x12\x11\n\tfile_name\x18\x03 \x01(\t\x12\x0c\n\x04page\x18\x04 \x01(\x05\x12\x0f\n\x07\x63ontent\x18\x05 \x01(\t\x12\r\n\x05score\x18\x06 \x01(\x02\"^\n\x0cParseRequest\x12\x14\n\x0c\x64ownload_url\x18\x01 \x01(\t\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12\x11\n\tfile_type\x18\x03 \x01(\t\x12\x12\n\nchunk_size\x18\x04 \x01(\x05\"\xe2\x01\n\x0bParsedChunk\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x14\n\x0c\x63ontent_type\x18\x03 \x01(\t\x12\x13\n\x0bpage_number\x18\x04 \x01(\x05\x12\x16\n\x0eparent_content\x18\x05 \x01(\t\x12\x12\n\nchunk_type\x18\x06 \x01(\t\x12\x15\n\rmetadata_json\x18\x07 \x01(\t\x12\x13\n\x0bimage_bytes\x18\x08 \x01(\x0c\x12\x14\n\x0cimage_format\x18\t \x01(\t\x12\x17\n\x0fparent_chunk_id\x18\n \x01(\t\"4\n\rParseResponse\x12#\n\x06\x63hunks\x18\x01 \x03(\x0b\x32\x13.rag.v1.ParsedChunk\"\x1d\n\x0c\x45mbedRequest\x12\r\n\x05texts\x18\x01 \x03(\t\"G\n\rEmbedResponse\x12\x14\n\x0cvectors_flat\x18\x01 \x03(\x02\x12\x11\n\tdimension\x18\x02 \x01(\x05\x12\r\n\x05\x63ount\x18\x03 \x01(\x05\"\xb7\x01\n\x0fGenerateRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12$\n\x07\x63ontext\x18\x03 \x03(\x0b\x32\x13.rag.v1.SourceChunk\x12\x1e\n\x16inference_service_name\x18\x04 \x01(\t\x12\x12\n\nmax_tokens\x18\x05 \x01(\x05\x12$\n\x07history\x18\x06 \x03(\x0b\x32\x13.rag.v1.ChatMessage\",\n\x0b\x43hatMessage\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"c\n\x10GenerateResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x14\n\x0cinput_tokens\x18\x02 \x01(\x05\x12\x15\n\routput_tokens\x18\x03 \x01(\x05\x12\x12\n\nsession_id\x18\x04 \x01(\t\"[\n\rGenerateToken\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x0c\n\x04\x64one\x18\x02 \x01(\x08\x12\x14\n\x0cinput_tokens\x18\x03 \x01(\x05\x12\x15\n\routput_tokens\x18\x04 \x01(\x05\x32\xfa\x01\n\tRagEngine\x12\x34\n\x05Parse\x12\x14.rag.v1.ParseRequest\x1a\x15.rag.v1.ParseResponse\x12\x34\n\x05\x45mbed\x12\x14.rag.v1.EmbedRequest\x1a\x15.rag.v1.EmbedResponse\x12=\n\x08Generate\x12\x17.rag.v1.GenerateRequest\x1a\x18.rag.v1.GenerateResponse\x12\x42\n\x0eGenerateStream\x12\x17.rag.v1.GenerateRequest\x1a\x15.rag.v1.GenerateToken0\x01\x42\x44ZBgithub.com/kubercloud/ani/ai/rag-engine/app/generated/rag/v1;ragv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\trag.proto\x12\x06rag.v1\"p\n\x0bSourceChunk\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64oc_id\x18\x02 \x01(\t\x12\x11\n\tfile_name\x18\x03 \x01(\t\x12\x0c\n\x04page\x18\x04 \x01(\x05\x12\x0f\n\x07\x63ontent\x18\x05 \x01(\t\x12\r\n\x05score\x18\x06 \x01(\x02\"^\n\x0cParseRequest\x12\x14\n\x0c\x64ownload_url\x18\x01 \x01(\t\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12\x11\n\tfile_type\x18\x03 \x01(\t\x12\x12\n\nchunk_size\x18\x04 \x01(\x05\"\xe2\x01\n\x0bParsedChunk\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x14\n\x0c\x63ontent_type\x18\x03 \x01(\t\x12\x13\n\x0bpage_number\x18\x04 \x01(\x05\x12\x16\n\x0eparent_content\x18\x05 \x01(\t\x12\x12\n\nchunk_type\x18\x06 \x01(\t\x12\x15\n\rmetadata_json\x18\x07 \x01(\t\x12\x13\n\x0bimage_bytes\x18\x08 \x01(\x0c\x12\x14\n\x0cimage_format\x18\t \x01(\t\x12\x17\n\x0fparent_chunk_id\x18\n \x01(\t\"4\n\rParseResponse\x12#\n\x06\x63hunks\x18\x01 \x03(\x0b\x32\x13.rag.v1.ParsedChunk\",\n\x0c\x45mbedRequest\x12\r\n\x05texts\x18\x01 \x03(\t\x12\r\n\x05model\x18\x02 \x01(\t\"G\n\rEmbedResponse\x12\x14\n\x0cvectors_flat\x18\x01 \x03(\x02\x12\x11\n\tdimension\x18\x02 \x01(\x05\x12\r\n\x05\x63ount\x18\x03 \x01(\x05\"\xb7\x01\n\x0fGenerateRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12$\n\x07\x63ontext\x18\x03 \x03(\x0b\x32\x13.rag.v1.SourceChunk\x12\x1e\n\x16inference_service_name\x18\x04 \x01(\t\x12\x12\n\nmax_tokens\x18\x05 \x01(\x05\x12$\n\x07history\x18\x06 \x03(\x0b\x32\x13.rag.v1.ChatMessage\",\n\x0b\x43hatMessage\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"c\n\x10GenerateResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x14\n\x0cinput_tokens\x18\x02 \x01(\x05\x12\x15\n\routput_tokens\x18\x03 \x01(\x05\x12\x12\n\nsession_id\x18\x04 \x01(\t\"[\n\rGenerateToken\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x0c\n\x04\x64one\x18\x02 \x01(\x08\x12\x14\n\x0cinput_tokens\x18\x03 \x01(\x05\x12\x15\n\routput_tokens\x18\x04 \x01(\x05\x32\xfa\x01\n\tRagEngine\x12\x34\n\x05Parse\x12\x14.rag.v1.ParseRequest\x1a\x15.rag.v1.ParseResponse\x12\x34\n\x05\x45mbed\x12\x14.rag.v1.EmbedRequest\x1a\x15.rag.v1.EmbedResponse\x12=\n\x08Generate\x12\x17.rag.v1.GenerateRequest\x1a\x18.rag.v1.GenerateResponse\x12\x42\n\x0eGenerateStream\x12\x17.rag.v1.GenerateRequest\x1a\x15.rag.v1.GenerateToken0\x01\x42\x44ZBgithub.com/kubercloud/ani/ai/rag-engine/app/generated/rag/v1;ragv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -41,17 +41,17 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_PARSERESPONSE']._serialized_start=460
   _globals['_PARSERESPONSE']._serialized_end=512
   _globals['_EMBEDREQUEST']._serialized_start=514
-  _globals['_EMBEDREQUEST']._serialized_end=543
-  _globals['_EMBEDRESPONSE']._serialized_start=545
-  _globals['_EMBEDRESPONSE']._serialized_end=616
-  _globals['_GENERATEREQUEST']._serialized_start=619
-  _globals['_GENERATEREQUEST']._serialized_end=802
-  _globals['_CHATMESSAGE']._serialized_start=804
-  _globals['_CHATMESSAGE']._serialized_end=848
-  _globals['_GENERATERESPONSE']._serialized_start=850
-  _globals['_GENERATERESPONSE']._serialized_end=949
-  _globals['_GENERATETOKEN']._serialized_start=951
-  _globals['_GENERATETOKEN']._serialized_end=1042
-  _globals['_RAGENGINE']._serialized_start=1045
-  _globals['_RAGENGINE']._serialized_end=1295
+  _globals['_EMBEDREQUEST']._serialized_end=558
+  _globals['_EMBEDRESPONSE']._serialized_start=560
+  _globals['_EMBEDRESPONSE']._serialized_end=631
+  _globals['_GENERATEREQUEST']._serialized_start=634
+  _globals['_GENERATEREQUEST']._serialized_end=817
+  _globals['_CHATMESSAGE']._serialized_start=819
+  _globals['_CHATMESSAGE']._serialized_end=863
+  _globals['_GENERATERESPONSE']._serialized_start=865
+  _globals['_GENERATERESPONSE']._serialized_end=964
+  _globals['_GENERATETOKEN']._serialized_start=966
+  _globals['_GENERATETOKEN']._serialized_end=1057
+  _globals['_RAGENGINE']._serialized_start=1060
+  _globals['_RAGENGINE']._serialized_end=1310
 # @@protoc_insertion_point(module_scope)

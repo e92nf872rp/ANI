@@ -297,6 +297,7 @@ export const schemas = [
   "AdminWithTenant",
   "AssignableTenantRoleListResponse",
   "AsyncTask",
+  "AsyncTaskRef",
   "AvailableGpu",
   "AvailableTenantListResponse",
   "AvailableTenantPlan",

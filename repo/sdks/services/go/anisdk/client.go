@@ -313,6 +313,7 @@ var Schemas = []string{
 	"AdminWithTenant",
 	"AssignableTenantRoleListResponse",
 	"AsyncTask",
+	"AsyncTaskRef",
 	"AvailableGpu",
 	"AvailableTenantListResponse",
 	"AvailableTenantPlan",

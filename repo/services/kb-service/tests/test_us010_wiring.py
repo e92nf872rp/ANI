@@ -337,7 +337,7 @@ class _QueryMockConn:
         # get_kb (KB existence check) → return a KB row with defaults
         if "FROM knowledge_bases" in sql:
             return {"top_k": 5, "score_threshold": 0.3, "retrieval_mode": "hybrid",
-                    "vector_store_id": "vs-test-001"}
+                    "vector_store_id": "vs-test-001", "embedding_model": "bge-m3"}
         # create_session returns id; insert_message returns a row
         if "kb_sessions" in sql:
             self.events.append(("create_session", args))
@@ -609,7 +609,189 @@ def test_query_rag_engine_error_returns_unavailable():
     # the exception (grpc abort raises ValueError/RuntimeError in test).
 
 
+# ── M3: inference_service_name 三级回落（request → KB 行 → ""）──────────
+
+
+class _RecordingRagGrpcClient:
+    """Records the kwargs of every generate/generate_stream call so tests
+    can assert which inference_service_name the servicer resolved."""
+
+    def __init__(self, stream=False):
+        self.generate_kwargs: list[dict] = []
+        self.generate_stream_kwargs: list[dict] = []
+        self._stream = stream
+
+    async def generate(self, **kwargs):
+        self.generate_kwargs.append(kwargs)
+        return {"answer": "hello", "input_tokens": 10, "output_tokens": 5,
+                "session_id": kwargs.get("session_id", "")}
+
+    async def generate_stream(self, **kwargs):
+        self.generate_stream_kwargs.append(kwargs)
+        yield {"content": "he"}
+        yield {"content": "llo"}
+        yield {"done": True, "input_tokens": 10, "output_tokens": 5,
+               "session_id": kwargs.get("session_id", "")}
+
+    async def aclose(self):
+        pass
+
+
+class _KBDefaultConn:
+    """Conn whose get_kb row carries a default_inference_service value."""
+
+    def __init__(self, default_inference_service=None):
+        self._default = default_inference_service
+
+    def transaction(self):
+        @asynccontextmanager
+        async def _tx():
+            yield self
+        return _tx()
+
+    async def execute(self, sql, *args):
+        return "UPDATE 1"
+
+    async def fetchrow(self, sql, *args):
+        if "FROM knowledge_bases" in sql:
+            row = {"top_k": 5, "score_threshold": 0.3, "retrieval_mode": "hybrid",
+                   "vector_store_id": "vs-test-001", "embedding_model": "bge-m3"}
+            if self._default is not None:
+                row["default_inference_service"] = self._default
+            return row
+        if "kb_sessions" in sql:
+            return {"id": uuid.uuid4()}
+        if "kb_messages" in sql:
+            return {"id": uuid.uuid4()}
+        return None
+
+    async def fetch(self, sql, *args):
+        return []
+
+    async def fetchval(self, sql, *args):
+        return 0
+
+
+class _KBDefaultPool:
+    def __init__(self, default_inference_service=None):
+        self._default = default_inference_service
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield _KBDefaultConn(self._default)
+
+
+def _make_fallback_servicer(default_inference_service=None):
+    rag = _RecordingRagGrpcClient()
+    servicer = KBServiceServicer(
+        pool=_KBDefaultPool(default_inference_service),
+        retrieve_service_factory=lambda tenant_id: _MockRetrieveService(),
+        rag_engine_grpc_client_factory=lambda: rag,
+        session_cache_factory=lambda: _MockSessionCache(),
+    )
+    return servicer, rag
+
+
+def test_query_falls_back_to_kb_default_inference_service():
+    """M3: request.inference_service_name 为空 → 用 KB 行的
+    default_inference_service（回落链第二级），而非直接 "default"。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service="qwen3-32b")
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
+
+    assert len(rag.generate_kwargs) == 1
+    assert rag.generate_kwargs[0]["inference_service_name"] == "qwen3-32b"
+
+
+def test_query_request_level_inference_service_overrides_kb_default():
+    """M3: 请求级 inference_service_name 优先于 KB 行默认值（回落链第一级）。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service="qwen3-32b")
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+        inference_service_name="deepseek-v3",
+    )
+    import asyncio
+    asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
+
+    assert len(rag.generate_kwargs) == 1
+    assert rag.generate_kwargs[0]["inference_service_name"] == "deepseek-v3"
+
+
+def test_query_falls_back_to_default_when_kb_row_unset():
+    """M3: 请求与 KB 行都未设置 → ""（回落链第三级，rag-engine 端由
+    ``model or settings.vllm_model`` 接管默认模型）。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service=None)
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
+
+    assert len(rag.generate_kwargs) == 1
+    assert rag.generate_kwargs[0]["inference_service_name"] == ""
+
+
+def test_retrieve_stream_falls_back_to_kb_default_inference_service():
+    """M3（流式场景）：Retrieve 流式路径同样走三级回落链。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service="qwen3-32b")
+    ctx = _make_context()
+    req = kb_pb.RetrieveRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+
+    async def _drain():
+        events = []
+        async for ev in servicer._retrieve_stream(req, ctx):
+            events.append(ev)
+        return events
+
+    events = asyncio.new_event_loop().run_until_complete(_drain())
+
+    assert len(rag.generate_stream_kwargs) == 1
+    assert (
+        rag.generate_stream_kwargs[0]["inference_service_name"] == "qwen3-32b"
+    )
+    # 流式事件完整：token* → sources → done
+    kinds = [e.WhichOneof("event") for e in events]
+    assert kinds[0] == "token" and "sources" in kinds and kinds[-1] == "done"
+
+
+def test_retrieve_stream_request_level_overrides_kb_default():
+    """M3（流式场景）：请求级 inference_service_name 优先于 KB 默认值。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service="qwen3-32b")
+    ctx = _make_context()
+    req = kb_pb.RetrieveRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+        inference_service_name="deepseek-v3",
+    )
+    import asyncio
+
+    async def _drain():
+        async for _ev in servicer._retrieve_stream(req, ctx):
+            pass
+
+    asyncio.new_event_loop().run_until_complete(_drain())
+
+    assert len(rag.generate_stream_kwargs) == 1
+    assert (
+        rag.generate_stream_kwargs[0]["inference_service_name"] == "deepseek-v3"
+    )
+
+
 # ── gRPC server-level regression: skeleton mode still works ───────────────────
+
 
 
 @pytest.fixture

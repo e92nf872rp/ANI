@@ -47,19 +47,35 @@ class _FakeRagEngine:
     def __init__(self, vectors=None, dimension=4):
         self._vectors = vectors or [[0.1, 0.2, 0.3, 0.4]]
         self._dimension = dimension
-        self.embed_calls: list[list[str]] = []
+        self.embed_calls: list[dict] = []
 
-    async def embed(self, *, texts):
-        self.embed_calls.append(list(texts))
+    async def embed(self, *, texts, model: str = ""):
+        self.embed_calls.append({"texts": list(texts), "model": model})
         return list(self._vectors), self._dimension
 
 
 class _FakeCoreClient:
-    """Fake CoreClient.search_vector_store."""
+    """Fake CoreClient.search_vector_store.
+
+    Mirrors the real CoreClient's async context manager interface
+    (aclose/__aenter__/__aexit__) — RetrieveService now acquires the
+    per-call client with ``async with`` to release the httpx pool.
+    """
 
     def __init__(self, vector_results=None):
         self._vector_results = vector_results or []
         self.search_calls: list[dict] = []
+        self.close_count = 0
+
+    async def aclose(self):
+        self.close_count += 1
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.aclose()
+        return False
 
     async def search_vector_store(self, *, vector_store_id, vector, top_k, filter_expr=None):
         self.search_calls.append({

@@ -13,8 +13,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -162,7 +160,7 @@ func BuildArchive(ctx context.Context, source Source, repository Repository, lim
 		digest:       digest,
 		max:          limits.MaxOutputBytes,
 		flushEvery:   archiveCacheWindow,
-		releaseCache: unix.Fadvise,
+		releaseCache: archiveReleaseCache,
 	}
 	gzipWriter := gzip.NewWriter(writer)
 	gzipWriter.Header = gzip.Header{ModTime: archiveEpoch, OS: 255}
@@ -319,7 +317,7 @@ func (w *archiveWriter) Write(data []byte) (int, error) {
 			return count, errors.New("sync archive window")
 		}
 		if w.releaseCache != nil {
-			if releaseErr := w.releaseCache(int(w.file.Fd()), w.flushed, w.written-w.flushed, unix.FADV_DONTNEED); releaseErr != nil {
+			if releaseErr := w.releaseCache(int(w.file.Fd()), w.flushed, w.written-w.flushed, archiveFADV); releaseErr != nil {
 				return count, errors.New("release archive cache")
 			}
 		}

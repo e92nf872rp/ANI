@@ -11,11 +11,11 @@ use (
 	./services/inference-service
 	./services/metering-service
 	./services/model-service
-	./services/reconcile-worker
 	./services/pkg
+	./services/platform-settings-service
+	./services/reconcile-worker
 	./services/task-service
 	./services/tenant-service
-	./services/platform-settings-service
 	./tools/kms-sm4-live-fixture
 )
 

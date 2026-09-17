@@ -45,6 +45,7 @@ P1_RPCS = [
     "UpdateKBPermissions",
     "GetKBPermissions",
     "ListKBAuditLogs",
+    "RebuildKB",
 ]
 
 
@@ -324,4 +325,29 @@ def test_list_kb_audit_logs_missing_tenant_invalid_argument(stub):
                 page=common_pb2.CursorPageRequest(limit=20),
             )
         )
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_get_kb_config_b5_wired_not_unimplemented(stub):
+    # B5 #22: without a pool the servicer returns FAILED_PRECONDITION — never
+    # UNIMPLEMENTED (the config read RPC is wired like the B4/B8 read pairs).
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetKBConfig(
+            kb_pb.GetKBConfigRequest(tenant_id="t", kb_id=str(uuid.uuid4()))
+        )
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_get_kb_config_missing_tenant_invalid_argument(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetKBConfig(
+            kb_pb.GetKBConfigRequest(tenant_id="", kb_id=str(uuid.uuid4()))
+        )
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_get_kb_config_missing_kb_id_invalid_argument(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetKBConfig(kb_pb.GetKBConfigRequest(tenant_id="t", kb_id=""))
     assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT

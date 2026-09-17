@@ -54,6 +54,7 @@ _nats_client = None
 _session_cache = None
 _grpc_server: grpc.Server | None = None
 _parse_consumer = None                       # Plan step 6: NATS consumer
+_rebuild_consumer = None                     # P1 #24: rebuild NATS consumer
 _rag_engine_grpc = None                      # Plan step 6: rag-engine gRPC client (parse consumer, uvicorn loop)
 _query_rag_engine_grpc = None                 # Query path client (dedicated gRPC loop)
 
@@ -212,7 +213,7 @@ def _start_grpc_server(
 async def lifespan(app: FastAPI):
     """Manage DB pools + NATS + outbox dispatcher + gRPC server lifecycle."""
     global _db_pool, _outbox_pool, _outbox_dispatcher, _nats_client, _session_cache, _grpc_server
-    global _parse_consumer, _rag_engine_grpc, _query_rag_engine_grpc
+    global _parse_consumer, _rag_engine_grpc, _query_rag_engine_grpc, _rebuild_consumer
 
     # 1. start the dedicated gRPC event loop on a background thread
     _start_grpc_loop()
@@ -269,6 +270,44 @@ async def lifespan(app: FastAPI):
                 logger.exception("parse consumer failed to start (continuing)")
                 _parse_consumer = None
 
+        # P1 #24: rebuild consumer. Subscribes BEFORE the dispatcher
+        # starts (same NATS no-persistence ordering rule as the parse
+        # consumer). Builds its own ParseOrchestrator instance (cheap —
+        # it holds no mutable state, only pool/client refs), so the
+        # parse consumer flag does not gate the rebuild consumer; the
+        # shared RagEngineGRPCClient channel below is loop-safe on
+        # this uvicorn loop.
+        if settings.kb_rebuild_consumer_enabled:
+            try:
+                from app.consumers.rebuild_consumer import build_rebuild_consumer
+                from app.rag_engine.client import RagEngineGRPCClient
+                from app.services.parse_orchestrator import ParseOrchestrator
+                from app.api.grpc_server import _default_core_client
+
+                if _rag_engine_grpc is None:
+                    _rag_engine_grpc = RagEngineGRPCClient(
+                        addr=settings.rag_engine_grpc_addr
+                    )
+                rebuild_orchestrator = ParseOrchestrator(
+                    db_pool=_outbox_pool,
+                    core_client_factory=_default_core_client,
+                    rag_engine_client=_rag_engine_grpc,
+                )
+                _rebuild_consumer = build_rebuild_consumer(
+                    nats_client=_nats_client,
+                    db_pool=_outbox_pool,
+                    orchestrator=rebuild_orchestrator,
+                    subject=settings.nats_rebuild_subject,
+                )
+                await _rebuild_consumer.start()
+                logger.info(
+                    "rebuild consumer started (subject=%s)",
+                    settings.nats_rebuild_subject,
+                )
+            except Exception:  # noqa: BLE001 — best-effort, service still starts
+                logger.exception("rebuild consumer failed to start (continuing)")
+                _rebuild_consumer = None
+
         from app.outbox.dispatcher import OutboxDispatcher
 
         # Plan step 6: switch outbox subject by flag. When the kb-service
@@ -284,6 +323,14 @@ async def lifespan(app: FastAPI):
             pool=_outbox_pool,
             nats_client=_nats_client,
             subject=outbox_subject,
+            # P1 #24: route rebuild outbox events to the dedicated
+            # rebuild subject regardless of the parse consumer flag —
+            # the rebuild consumer is gated by its own flag, and the
+            # events stay queued in the outbox (at-least-once) until it
+            # is enabled.
+            subject_overrides={
+                "kb.rebuild": settings.nats_rebuild_subject,
+            },
         )
         _outbox_dispatcher.start()
         logger.info("outbox dispatcher started (subject=%s)", outbox_subject)
@@ -333,6 +380,11 @@ async def lifespan(app: FastAPI):
     if _parse_consumer is not None:
         try:
             await _parse_consumer.stop()
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            pass
+    if _rebuild_consumer is not None:
+        try:
+            await _rebuild_consumer.stop()
         except Exception:  # noqa: BLE001 — best-effort cleanup
             pass
     if _grpc_server is not None:
@@ -431,6 +483,7 @@ async def readyz():
         "session_cache": _session_cache is not None,
         "grpc": _grpc_server is not None,
         "parse_consumer": _parse_consumer is not None,
+        "rebuild_consumer": _rebuild_consumer is not None,
     }
     # Cache is best-effort: only db + outbox + grpc gate the "ok" status.
     ok = ready["db"] and ready["outbox_dispatcher"] and ready["grpc"]

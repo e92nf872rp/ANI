@@ -85,12 +85,15 @@ class RagEngineClientProtocol(Protocol):
         ...
 
     async def embed(
-        self, *, texts: list[str]
+        self, *, texts: list[str], model: str = ""
     ) -> tuple[list[list[float]], int]:
         """Call rag-engine Embed RPC.
 
         Args:
             texts: Texts to embed.
+            model: Per-KB embedding model name (from the KB row's
+                  ``embedding_model`` column); empty uses the rag-engine
+                  server default model.
 
         Returns:
             (vectors, dimension) tuple. vectors[i] is the embedding of
@@ -124,8 +127,8 @@ class RagEngineClientProtocol(Protocol):
                                     user message (reproduces legacy behavior
                                     where kb-service appends user to Redis
                                     before calling rag-engine).
-            inference_service_name: vLLM service name; "default" / "" uses the
-                                    default model.
+            inference_service_name: vLLM service name; empty uses the default
+                                    model (rag-engine ``settings.vllm_model``).
             max_tokens:             Max completion tokens.
 
         Returns:
@@ -311,6 +314,7 @@ class RetrieveServiceProtocol(Protocol):
         score_threshold: float = 0.3,
         retrieval_mode: str = "hybrid",
         vector_store_id: str | None = None,
+        embedding_model: str = "",
     ) -> tuple[list[dict[str, Any]], float]:
         """Run hybrid retrieval and return (sources, max_score).
 
@@ -324,6 +328,9 @@ class RetrieveServiceProtocol(Protocol):
             retrieval_mode:  hybrid | vector | keyword.
             vector_store_id: Core vector store id; None falls back to
                              kb_metadata.vector_store_id.
+            embedding_model: Per-KB embedding model name (routed by the
+                             rag-engine Embed RPC); empty string uses the
+                             rag-engine default model.
 
         Returns:
             (sources, max_score) tuple.
@@ -361,6 +368,7 @@ class ParseOrchestratorProtocol(Protocol):
         file_type: str,
         chunk_size: int,
         vector_store_id: str,
+        embedding_model: str = "",
     ) -> None:
         """Process a single document end-to-end through the parse pipeline.
 
@@ -375,6 +383,9 @@ class ParseOrchestratorProtocol(Protocol):
             file_type:       pdf | docx | xlsx | pptx | md | txt.
             chunk_size:      Child chunk size.
             vector_store_id: Target Core vector store id for this KB.
+            embedding_model: Per-KB embedding model name (from the KB row's
+                            ``embedding_model`` column); empty uses the
+                            rag-engine server default.
 
         Returns:
             None. The document's parse_status is updated to `ready` on
@@ -427,7 +438,8 @@ class QueryOrchestratorProtocol(Protocol):
             top_k:                  Override KB default if nonzero.
             score_threshold:        Override KB default if nonzero.
             retrieval_mode:         hybrid | vector | keyword.
-            inference_service_name: vLLM service name; "default" if empty.
+            inference_service_name: vLLM service name; empty falls back to
+                                    rag-engine default (settings.vllm_model).
             vector_store_id:        Core vector store id for this KB.
             history:                Chat history INCLUDING the current-turn
                                     user message (reproduces legacy behavior:

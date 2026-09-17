@@ -47,13 +47,17 @@ class _MockNATS:
         self.published.append((subject, payload))
 
 
-def _make_event(event_id: int, payload: dict | None = None):
+def _make_event(
+    event_id: int,
+    payload: dict | None = None,
+    event_type: str | None = "kb.parse",
+):
     """Build an outbox_events row dict as returned by list_undispatched."""
     return {
         "id": event_id,
         "aggregate_type": "kb_documents",
         "aggregate_id": uuid.UUID(DOC_ID),
-        "event_type": "kb.parse",
+        "event_type": event_type,
         "tenant_id": uuid.UUID(TENANT_ID),
         "payload": payload or {"doc_id": DOC_ID, "kb_id": "kb-1"},
         "published": False,
@@ -403,3 +407,125 @@ async def test_payload_string_is_passed_through():
     await dispatcher._dispatch_once()
     decoded = json.loads(nats.published[0][1].decode("utf-8"))
     assert decoded["doc_id"] == DOC_ID
+
+
+# ── P1 #24: per-event_type subject routing (subject_overrides) ────────────────
+
+
+def _rebuild_overrides() -> dict[str, str]:
+    """The production wiring from main.py: 'kb.rebuild' → rebuild subject."""
+    from app.core.config import Settings
+
+    return {"kb.rebuild": Settings().nats_rebuild_subject}
+
+
+@pytest.mark.asyncio
+async def test_rebuild_event_routes_to_override_subject():
+    """P1 #24: an event whose event_type matches a subject_overrides key
+    is published to the override subject (kb.rebuild → rebuild subject),
+    NOT the default parse subject."""
+    rows = [_make_event(1, event_type="kb.rebuild")]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2",
+        subject_overrides=_rebuild_overrides(),
+    )
+    await dispatcher._dispatch_once()
+    assert len(nats.published) == 1
+    assert nats.published[0][0] == "ani.tasks.kb.rebuild.v1"
+
+
+@pytest.mark.asyncio
+async def test_parse_event_keeps_default_subject_with_overrides_set():
+    """P1 #24: events whose event_type has no override entry keep the
+    default subject even when subject_overrides is non-empty."""
+    rows = [_make_event(1, event_type="kb.parse")]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2",
+        subject_overrides=_rebuild_overrides(),
+    )
+    await dispatcher._dispatch_once()
+    assert nats.published[0][0] == "ani.tasks.kb.parse.v2"
+
+
+@pytest.mark.asyncio
+async def test_mixed_batch_routes_each_event_by_its_event_type():
+    """P1 #24: a single batch containing both parse and rebuild events
+    publishes each to its own subject (per-row routing, not per-batch)."""
+    rows = [
+        _make_event(1, event_type="kb.parse"),
+        _make_event(2, event_type="kb.rebuild"),
+        _make_event(3, event_type="kb.parse"),
+    ]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2",
+        subject_overrides=_rebuild_overrides(),
+    )
+    dispatched = await dispatcher._dispatch_once()
+    assert dispatched == 3
+    subjects = [s for s, _ in nats.published]
+    assert subjects == [
+        "ani.tasks.kb.parse.v2",
+        "ani.tasks.kb.rebuild.v1",
+        "ani.tasks.kb.parse.v2",
+    ]
+    # Both kinds of events are still batch-marked in the same UPDATE.
+    assert len(pool._conns) == 2
+    assert pool._conns[1]._marked == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_missing_event_type_falls_back_to_default_subject():
+    """P1 #24: a row without event_type (None or empty) must not raise a
+    KeyError from the overrides lookup; it falls back to the default
+    subject (str(... or "") guards the None case)."""
+    rows = [_make_event(1, event_type=None)]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2",
+        subject_overrides=_rebuild_overrides(),
+    )
+    await dispatcher._dispatch_once()
+    assert nats.published[0][0] == "ani.tasks.kb.parse.v2"
+
+    rows = [_make_event(2, event_type="")]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2",
+        subject_overrides=_rebuild_overrides(),
+    )
+    await dispatcher._dispatch_once()
+    assert nats.published[0][0] == "ani.tasks.kb.parse.v2"
+
+
+@pytest.mark.asyncio
+async def test_subject_overrides_none_equals_empty_dict():
+    """P1 #24: default construction (subject_overrides=None) behaves the
+    same as an empty mapping — every event takes the default subject."""
+    rows = [_make_event(1, event_type="kb.rebuild"), _make_event(2)]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher_default = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2",
+        subject_overrides=None,
+    )
+    await dispatcher_default._dispatch_once()
+    dispatcher_empty = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2",
+        subject_overrides={},
+    )
+    await dispatcher_empty._dispatch_once()
+    subjects = [s for s, _ in nats.published]
+    assert subjects == [
+        "ani.tasks.kb.parse.v2",
+        "ani.tasks.kb.parse.v2",
+        "ani.tasks.kb.parse.v2",
+        "ani.tasks.kb.parse.v2",
+    ]

@@ -8,6 +8,7 @@ require (
 	github.com/kubercloud/ani/pkg v0.0.0
 	github.com/kubercloud/ani/runtimeadmin v0.0.0
 	github.com/zhangzhe-ctrl/ani-session-gateway/api v0.1.0
+	golang.org/x/crypto v0.55.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
@@ -57,7 +58,6 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
