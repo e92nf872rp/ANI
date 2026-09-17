@@ -58,10 +58,20 @@
 | Bug5 存储类型 | `standard`/`infrequent_access` 双向切换 200，重列持久 |
 | 回归 | 桶列表、实例列表仍 200 |
 
+## merge origin/main 后复测（2026-09-17，镜像 `dev-20260917-objstore2`）
+
+`git merge origin/main 143c4fe` 后代码树统一，重新构建部署复测（digest `sha256:b0886c7e6167f222ed4c9d7e6dd4b5b8c8309aaa5ec0299654f18d220a3869d7`）：
+
+- 部署：etcd 预检 912990208/2147483648（43%）→ `kubectl set image -n ani-system`（未改 env）→ rollout 成功 → healthz 200（Pod `ani-gateway-6778c5789-qmx62` 1/1 Running）。
+- 本批次 28 项断言复跑 **28 PASS / 0 FAIL**（预签名 host 仍为 `10.10.1.66:30900`；`tenant_read` 裸 URL 匿名 GET 200、切回 `private` 后 403；ACL/存储类型切换重列持久）。
+- 网络存储系列回归 **19 PASS / 0 FAIL**：历史安全组规则列表 200（3 条）、创建带预设规则安全组后 `GET /rules` 立即 3 条且落库、删除安全组 200 且明细级联清零、有存活子网时 `DELETE /vpcs/{id}` 409、清理子网后 200、实例列表 `vpc_id`/`subnet_id` 过滤与全量结果精确一致（10/10）且未知值返回 0。
+- `network_security_group_rules` 幂等回填在 ani-system `INSERT 0 0`（无断层）；ani-test2 补齐 3 行后摘要/明细全对齐。
+- 探针脚本自身两处缺陷（非产品缺陷）：`/instances?limit=200` 超上限返回 400（上限 100）；`vpc_id`/`subnet_id` 嵌套在 `network` 对象下而非顶层字段。
+
 ## 备注
 
-- **并集构建**：ani-system 原运行 `dev-20260917-multival`（网络存储分支构建）。本批次分支基于 merge-base，故构建时保留原分支代码只覆盖本批次文件；两个重叠文件（`pkg/ports/storage_resources.go`、`services/ani-gateway/internal/router/storage_resources.go`）使用并集版本，避免回退实例 `kind`/`state` 多值过滤能力。
-- **构建机代码树漂移**：部署构建机（192.168.18.35）`/root/ani-build` 与分支树存在漂移（490 个 `.go` 中 98 个 md5 不一致）；其中 `pkg/adapters/runtime/storage_renderer.go` 为旧版本（默认 StorageClass 未含 `ani-block`），首次构建报 `undefined: defaultVolumeStorageClassName`，已补传该文件后构建通过。构建机代码树同步为独立待办。
+- **并集构建（已不再需要）**：ani-system 原运行 `dev-20260917-multival`（网络存储分支构建），本批次分支基于 merge-base，首次构建曾保留原分支代码只覆盖本批次文件（两个重叠文件用并集版本）。2026-09-17 merge `origin/main 143c4fe` 后代码树统一，已改为整体覆盖构建机源码树后构建，并集方式废弃。
+- **构建机代码树漂移**：部署构建机（192.168.18.35）`/root/ani-build` 与分支树存在漂移（490 个 `.go` 中 98 个 md5 不一致）。本轮改用 `git archive HEAD` 打包 `pkg`/`runtimeadmin`/`services/ani-gateway` 整体覆盖（旧树备份为 `_backup_premerge.tar.gz`），漂移问题在本次构建路径上已消除。
 - **Bug5 有意不做底座 apply**：MinIO 的 storage class 是对象级属性，桶级无法等价表达，故只做控制面持久化，不做"假成功"的底座调用。
 - **`applyBucketACLPolicy` 静默跳过语义**：`objectStore == nil` 或底座未实现 `ObjectStorePolicyApplier` 时返回 nil（保持 local profile 兼容），与原分析文档"无底座应报错"的建议不同。
 - 遗留：桶详情无独立 `GET /buckets/{id}` 端点（实测只能经列表接口回查，本次未新增端点）；`public_read` 在响应中归一为 `tenant_read`，语义上并非真正的公网匿名读。

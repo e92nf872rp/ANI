@@ -112,6 +112,8 @@ ani-test2（`NETWORK_PROVIDER=kubeovn_rest`，NodePort 30083）部署同批代�
 - **实测（ani-test2，镜像 test2-20260917-b，构建秒级缓存命中；用户确认仅部署 test2）**：创建带 3 条模板规则的 SG → 201；**创建后立即 `GET /rules` 200 返回 3 条明细**（修复前为空）；清理 DELETE 200。ani-system 未部署该修复（仍为 `kb-20260917`，并行会话所置）——**在 ani-system 下次 gateway 部署前，ani-system 上新建带模板规则的 SG 仍会产生明细断层**，需部署后重跑回填。
 - **部署教训（已入 project_memory）**：源码未变时 Docker 构建秒级（层缓存全命中），不同环境部署同一份代码直接 `docker tag` retag 即可；rollout 完成后 healthz 可能短暂 000（服务未开始监听），需轮询至 200 再实测。
 
+> **已收口（2026-09-17）**：ani-system 已部署含 merge `origin/main 143c4fe` 的镜像 `dev-20260917-objstore2`，该修复随之生效；部署后重跑幂等回填 `INSERT 0 0`（ani-system 无断层），ani-test2 补齐 3 行，两库摘要=明细全对齐。实测创建带 3 条预设规则的安全组后 `GET /rules` 立即返回 3 条且明细落库，删除安全组后明细级联清零（回归 19 PASS / 0 FAIL）。
+
 ## 已知边界
 
 - 规则创建幂等 map（`securityRuleIdem`）仍为进程内存：网关重启后同一 idempotency key 重试会生成新规则（与既有 VPC/子网等内存幂等 map 同一 trade-off，未扩大范围）
