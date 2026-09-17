@@ -538,9 +538,15 @@ type WorkloadInstanceGetRequest struct {
 }
 
 type WorkloadInstanceListRequest struct {
-	TenantID        string
-	Kind            WorkloadKind
-	State           WorkloadState
+	TenantID string
+	Kind     WorkloadKind
+	State    WorkloadState
+	// Kinds 是 kind 的逗号多值集合（OR 语义）：记录命中任一即通过；空 = 不过滤。
+	// 非空时优先于单值 Kind 字段。
+	Kinds []WorkloadKind
+	// States 是 state 的逗号多值集合（OR 语义）：记录命中任一即通过；空 = 不过滤
+	// （维持默认排除 deleted 终态语义）。非空时优先于单值 State 字段。
+	States          []WorkloadState
 	Keyword         string
 	SearchField     string // "id"/"name" 限定 target，空 = 全部字段（InstanceID+Name+Description）
 	CreatedAfter    time.Time

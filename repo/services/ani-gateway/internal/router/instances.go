@@ -1745,8 +1745,8 @@ func (api *instanceAPI) get(ctx context.Context, c *app.RequestContext) {
 
 func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 	tenantID := instanceTenantID(c)
-	kind := ports.WorkloadKind(c.Query("kind"))
-	listReq, err := instanceListRequestFromQuery(c, tenantID, kind)
+	kinds := parseMultiValueQuery(c.Query("kind"))
+	listReq, err := instanceListRequestFromQuery(c, tenantID, kinds)
 	if err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
@@ -1756,7 +1756,13 @@ func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 	// "provisioning" captured at create time. This is an on-demand refresh
 	// triggered by the list request; there is no background reconcile loop
 	// data from the in-memory store.
-	api.refreshStoreStatuses(ctx, tenantID, kind)
+	// 单值 kind 时把过滤下推给 store 精准刷新；多值时刷新租户全量记录，
+	// kind 多值 OR 语义由 matchesInstanceList/MatchesInstanceKind 承担。
+	refreshKind := ports.WorkloadKind("")
+	if len(kinds) == 1 {
+		refreshKind = ports.WorkloadKind(kinds[0])
+	}
+	api.refreshStoreStatuses(ctx, tenantID, refreshKind)
 	records, err := api.service.List(ctx, listReq)
 	if err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "INSTANCE_LIST_FAILED", err.Error())
@@ -1776,14 +1782,12 @@ func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 		if _, found := existing[orphan.InstanceID]; found {
 			continue
 		}
-		if kind != "" && orphan.Kind != kind {
-			continue
-		}
 		// 孤儿实例同样要遵循请求里的过滤语义，否则与 store 记录不一致，live
 		// Kubernetes 实例会无条件返回（Bug-2：keyword/search_field 不生效；
 		// Bug-6：state 过滤不生效，state=running 会把 pending 孤儿也带回；
-		// VPC-3/子网-3：vpc_id/subnet_id 归属过滤不生效）。
-		if !runtimeadapter.MatchesInstanceKeyword(orphan, listReq) {
+		// VPC-3/子网-3：vpc_id/subnet_id 归属过滤不生效；
+		// 多值：kind/state 逗号多值 OR 过滤）。
+		if !runtimeadapter.MatchesInstanceKind(orphan, listReq) {
 			continue
 		}
 		if !runtimeadapter.MatchesInstanceState(orphan, listReq) {
@@ -1808,7 +1812,45 @@ func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": total, "next_cursor": optionalString(nextCursor)})
 }
 
-func instanceListRequestFromQuery(c *app.RequestContext, tenantID string, kind ports.WorkloadKind) (ports.WorkloadInstanceListRequest, error) {
+// parseMultiValueQuery 把逗号分隔的查询参数拆成集合（OR 语义过滤）。
+// 去除每项首尾空白并丢弃空白项；空串或全空白返回 nil 表示"不过滤"。
+func parseMultiValueQuery(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func toWorkloadKinds(values []string) []ports.WorkloadKind {
+	if len(values) == 0 {
+		return nil
+	}
+	kinds := make([]ports.WorkloadKind, 0, len(values))
+	for _, value := range values {
+		kinds = append(kinds, ports.WorkloadKind(value))
+	}
+	return kinds
+}
+
+func toWorkloadStates(values []string) []ports.WorkloadState {
+	if len(values) == 0 {
+		return nil
+	}
+	states := make([]ports.WorkloadState, 0, len(values))
+	for _, value := range values {
+		states = append(states, ports.WorkloadState(value))
+	}
+	return states
+}
+
+func instanceListRequestFromQuery(c *app.RequestContext, tenantID string, kinds []string) (ports.WorkloadInstanceListRequest, error) {
 	createdAfter, err := optionalRFC3339Query(c, "created_after")
 	if err != nil {
 		return ports.WorkloadInstanceListRequest{}, err
@@ -1819,8 +1861,8 @@ func instanceListRequestFromQuery(c *app.RequestContext, tenantID string, kind p
 	}
 	return ports.WorkloadInstanceListRequest{
 		TenantID:        tenantID,
-		Kind:            kind,
-		State:           ports.WorkloadState(c.Query("state")),
+		Kinds:           toWorkloadKinds(kinds),
+		States:          toWorkloadStates(parseMultiValueQuery(c.Query("state"))),
 		Keyword:         c.Query("keyword"),
 		SearchField:     c.Query("search_field"),
 		CreatedAfter:    createdAfter,

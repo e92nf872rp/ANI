@@ -605,7 +605,7 @@ func (s *LocalInstanceService) List(ctx context.Context, request ports.WorkloadI
 	if !validInstanceListSort(request.Sort) {
 		return nil, fmt.Errorf("%w: unsupported instance sort %q", ports.ErrInvalid, request.Sort)
 	}
-	records, err := s.store.List(ctx, request.TenantID, request.Kind)
+	records, err := s.store.List(ctx, request.TenantID, kindForStoreQuery(request))
 	if err != nil {
 		return nil, err
 	}
@@ -653,16 +653,58 @@ func MatchesInstanceKeyword(record ports.WorkloadInstanceRecord, request ports.W
 	return strings.Contains(strings.ToLower(haystack), keyword)
 }
 
-// MatchesInstanceState 判断单条实例记录是否命中 request.State 过滤。
+// MatchesInstanceState 判断单条实例记录是否命中 request 的 state 过滤。
 // 导出使 router 层合并的 live Kubernetes 孤儿实例与 store 记录共用同一 state 语义：
-//   - 显式传 state 时精确匹配该状态（孤儿、store 一致）；
-//   - 未显式传 state 时默认排除 deleted 终态（Bug-6），孤儿为活跃 Deployment 不含 deleted，
+//   - States 多值集合（逗号分隔 OR 语义）非空时，命中任一状态即通过；
+//   - 显式传单值 state 时精确匹配该状态（孤儿、store 一致）；
+//   - 未传 state 时默认排除 deleted 终态（Bug-6），孤儿为活跃 Deployment 不含 deleted，
 //     无副作用；但 state=running 等显式过滤必须对孤儿生效。
 func MatchesInstanceState(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if len(request.States) > 0 {
+		for _, state := range request.States {
+			if record.Status.State == state {
+				return true
+			}
+		}
+		return false
+	}
 	if request.State != "" {
 		return record.Status.State == request.State
 	}
 	return record.Status.State != ports.WorkloadStateDeleted
+}
+
+// MatchesInstanceKind 判断单条实例记录是否命中 request 的 kind 过滤。
+// 导出使 router 层合并的 live Kubernetes 孤儿实例与 store 记录共用同一 kind 语义：
+//   - Kinds 多值集合（逗号分隔 OR 语义）非空时，命中任一 kind 即通过；
+//   - 显式传单值 kind 时精确匹配该 kind；
+//   - 未传时不过滤。
+func MatchesInstanceKind(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if len(request.Kinds) > 0 {
+		for _, kind := range request.Kinds {
+			if record.Kind == kind {
+				return true
+			}
+		}
+		return false
+	}
+	if request.Kind != "" {
+		return record.Kind == request.Kind
+	}
+	return true
+}
+
+// kindForStoreQuery 推导传给 store 的单值 kind 过滤：单值请求（含多值集合只含
+// 一项时）下推到 store SQL 精确过滤；多值或未指定时返回空串，由内存过滤
+// （matchesInstanceList → MatchesInstanceKind）承担多值 OR 语义。
+func kindForStoreQuery(request ports.WorkloadInstanceListRequest) ports.WorkloadKind {
+	if request.Kind != "" {
+		return request.Kind
+	}
+	if len(request.Kinds) == 1 {
+		return request.Kinds[0]
+	}
+	return ""
 }
 
 // MatchesInstanceNetwork 判断单条实例记录是否命中 request 的 VPC/Subnet 归属过滤。
@@ -679,6 +721,9 @@ func MatchesInstanceNetwork(record ports.WorkloadInstanceRecord, request ports.W
 }
 
 func matchesInstanceList(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if !MatchesInstanceKind(record, request) {
+		return false
+	}
 	if !MatchesInstanceState(record, request) {
 		return false
 	}

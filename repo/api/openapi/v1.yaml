@@ -5502,8 +5502,8 @@ paths:
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:read"
       parameters:
-        - { name: kind,             in: query, schema: { type: string, enum: [vm, container, gpu_container, sandbox, batch_job, notebook, k8s_cluster, bare_metal, dpu_node] } }
-        - { name: state,            in: query, schema: { type: string, enum: [pending, provisioning, starting, running, stopping, stopped, failed, deleting, deleted] } }
+        - { name: kind,             in: query, schema: { type: string, enum: [vm, container, gpu_container, sandbox, batch_job, notebook, k8s_cluster, bare_metal, dpu_node] }, description: "支持逗号分隔多值（OR 语义），如 vm,container,gpu_container；缺省不过滤。" }
+        - { name: state,            in: query, schema: { type: string, enum: [pending, provisioning, starting, running, stopping, stopped, failed, deleting, deleted] }, description: "支持逗号分隔多值（OR 语义），如 running,stopped；缺省时排除 deleted 终态。" }
         - { name: keyword,          in: query, schema: { type: string }, description: "按实例名称、ID 或描述搜索（配合 search_field 可限定字段）。" }
         - { name: search_field,     in: query, schema: { type: string, enum: [id, name] }, description: "限定 keyword 在哪个字段匹配；缺省时对 ID/名称/描述全字段匹配。" }
         - { name: created_after,    in: query, schema: { type: string, format: date-time } }

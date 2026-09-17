@@ -2520,3 +2520,101 @@ func TestVMReadRepairDispatchesGetListAndTaskObservation(t *testing.T) {
 		t.Fatalf("task observation = %+v, want refreshed running VM", observed)
 	}
 }
+
+// 多值过滤回归：parseMultiValueQuery 把逗号分隔查询参数拆成集合（OR 语义），
+// 空白项与首尾空白剔除，空串/全空白返回 nil 表示不过滤。
+func TestParseMultiValueQuery(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"vm", []string{"vm"}},
+		{"vm,container,gpu_container", []string{"vm", "container", "gpu_container"}},
+		{" vm , container , ", []string{"vm", "container"}},
+		{",,", nil},
+	}
+	for _, tc := range cases {
+		got := parseMultiValueQuery(tc.raw)
+		if len(got) != len(tc.want) {
+			t.Fatalf("parseMultiValueQuery(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("parseMultiValueQuery(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		}
+	}
+}
+
+// 多值过滤回归：GET /api/v1/instances 的 kind/state 支持逗号多值（OR 语义）。
+// 块存储"挂载"选择器请求 kind=vm,container,gpu_container&state=running,stopped，
+// 修复前整个逗号串被当单值精确匹配，必然返回空列表。
+func TestInstanceListMultiValueKindAndStateFilters(t *testing.T) {
+	api := newInstanceAPI()
+	seed := []ports.WorkloadInstanceRecord{
+		{TenantID: "tenant-a", InstanceID: "inst_vm_run", Name: "vm-running", Kind: ports.WorkloadKindVM,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(100, 0).UTC()},
+		{TenantID: "tenant-a", InstanceID: "inst_ct_stop", Name: "ct-stopped", Kind: ports.WorkloadKindContainer,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStateStopped}, CreatedAt: time.Unix(200, 0).UTC()},
+		{TenantID: "tenant-a", InstanceID: "inst_gpu_pend", Name: "gpu-pending", Kind: ports.WorkloadKindGPUContainer,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStatePending}, CreatedAt: time.Unix(300, 0).UTC()},
+		{TenantID: "tenant-a", InstanceID: "inst_nb_run", Name: "nb-running", Kind: ports.WorkloadKindNotebook,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(400, 0).UTC()},
+	}
+	for i := range seed {
+		if err := api.store.UpsertStatus(context.Background(), seed[i]); err != nil {
+			t.Fatalf("UpsertStatus(%s) error = %v", seed[i].InstanceID, err)
+		}
+	}
+
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Set("user_id", "user-a")
+		c.Next(ctx)
+	})
+	v1 := h.Group("/api/v1")
+	v1.GET("/instances", api.list)
+
+	// 多 kind + 多 state（URL 编码逗号，与前端真实请求一致）
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/instances?kind=vm%2Ccontainer%2Cgpu_container&state=running%2Cstopped", nil).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("多值列表 status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	body := string(resp.Body())
+	if !strings.Contains(body, "inst_vm_run") || !strings.Contains(body, "inst_ct_stop") {
+		t.Fatalf("多值列表应包含 vm-running 与 ct-stopped，body=%s", body)
+	}
+	if strings.Contains(body, "inst_gpu_pend") {
+		t.Fatalf("多值列表不应包含 pending 的 gpu 实例，body=%s", body)
+	}
+	if strings.Contains(body, "inst_nb_run") {
+		t.Fatalf("多值列表不应包含 kind 未命中的 notebook 实例，body=%s", body)
+	}
+
+	// 单 kind + 多 state 回归：结果不为空且只含该 kind
+	resp = ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/instances?kind=vm&state=running%2Cstopped", nil).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("单kind多state status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	body = string(resp.Body())
+	if !strings.Contains(body, "inst_vm_run") || strings.Contains(body, "inst_ct_stop") {
+		t.Fatalf("单kind多state 应仅含 inst_vm_run，body=%s", body)
+	}
+
+	// 不带过滤参数回归：默认排除 deleted，其余全量
+	resp = ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances", nil).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("空过滤 status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	body = string(resp.Body())
+	for _, want := range []string{"inst_vm_run", "inst_ct_stop", "inst_gpu_pend", "inst_nb_run"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("空过滤列表应包含 %s，body=%s", want, body)
+		}
+	}
+}
