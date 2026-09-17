@@ -1,6 +1,6 @@
 # MODEL-IMPORT-REDRIVE-A
 
-> **日期**：2026-09-17　**分支**：`hotfix/network-store-read`（fork: djm-afk）　**PR**：待创建　**状态**：live verified（隔离测试环境 ani-test2，镜像 tag `test2-20260917-redrive`）
+> **日期**：2026-09-17　**分支**：`hotfix/network-store-read`（fork: djm-afk）　**PR**：e92nf872rp/ANI#174　**状态**：live verified（隔离测试环境 ani-test2，镜像 tag `test2-20260917-redrive`）
 > **性质**：Feature batch（hotfix 系列，Services 侧模型导入卡住补偿能力落地）
 > **来源**：测试异常结果记录 模型仓库系列与 `特有Bug修复问题清单.md`（模型仓库-1）
 
