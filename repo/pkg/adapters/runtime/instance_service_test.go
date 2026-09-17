@@ -37,6 +37,57 @@ func TestLocalInstanceServiceCreatesContainerThroughOrchestrator(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceCreateProvisionsVMDataDisks(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	storage := &fakeInstanceStorageBinder{}
+	service := NewLocalInstanceServiceWithOptions(
+		orchestrator,
+		&fakeInstanceStore{},
+		NewLocalInstanceOpsGuard(),
+		WithInstanceStorageService(storage),
+	)
+	_, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey: "vm-create-datadisk-01",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "vm-data",
+			Kind:     ports.WorkloadKindVM,
+			Image:    "harbor/app:1",
+			VM: &ports.VMInstanceSpec{
+				BootImage: "ubuntu.qcow2",
+				DataDiskSpecs: []ports.InstanceDiskSpec{
+					{Name: "data-1", SizeGiB: 100},
+					{VolumeID: "vol-existing"},
+				},
+			},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(storage.createdVolumes) != 1 {
+		t.Fatalf("createdVolumes = %d, want 1", len(storage.createdVolumes))
+	}
+	created := storage.createdVolumes[0]
+	if created.Name != "data-1" || created.SizeGiB != 100 || created.TenantID != "tenant-a" {
+		t.Fatalf("created volume = %#v, want data-1/100GiB/tenant-a", created)
+	}
+	if created.IdempotencyKey != "vm-create-datadisk-01:vm-data-disk:data-1" {
+		t.Fatalf("idempotency key = %q, want derived from instance create key", created.IdempotencyKey)
+	}
+	if len(orchestrator.last.Spec.VM.DataDiskSpecs) != 2 {
+		t.Fatalf("data disk specs = %#v, want 2", orchestrator.last.Spec.VM.DataDiskSpecs)
+	}
+	if got := orchestrator.last.Spec.VM.DataDiskSpecs[0].VolumeID; got != "vol-provisioned-1" {
+		t.Fatalf("provisioned data disk volume id = %q, want vol-provisioned-1", got)
+	}
+	if got := orchestrator.last.Spec.VM.DataDiskSpecs[1].VolumeID; got != "vol-existing" {
+		t.Fatalf("existing data disk volume id = %q, want vol-existing", got)
+	}
+}
+
 func TestLocalInstanceServiceCreateOrchestratesNetworkAndStorage(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	operations := NewLocalOperationStore()
@@ -1037,6 +1088,71 @@ func TestLocalInstanceServiceVMSnapshotRecordsLocalProfile(t *testing.T) {
 		},
 	}
 	operations := NewLocalOperationStore()
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(operations),
+	)
+
+	record, err := service.Snapshot(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "snap-vm-a",
+		TenantID:        "tenant-a",
+		InstanceID:      "vm-a",
+		SnapshotName:    "before-upgrade",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1500, 0),
+	})
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if store.upserts != 1 {
+		t.Fatalf("upserts = %d, want 1", store.upserts)
+	}
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if len(record.Snapshots) != 1 {
+		t.Fatalf("snapshots = %d, want 1", len(record.Snapshots))
+	}
+	snapshot := record.Snapshots[0]
+	if snapshot.ID != "snap-snap-vm-a" || snapshot.Name != "before-upgrade" || snapshot.State != "ready" {
+		t.Fatalf("snapshot = %+v, want ready named before-upgrade", snapshot)
+	}
+	if snapshot.SourceInstanceID != "vm-a" || !snapshot.ReadyAt.Equal(time.Unix(1500, 0)) {
+		t.Fatalf("snapshot source=%q ready=%s, want vm-a at request time", snapshot.SourceInstanceID, snapshot.ReadyAt)
+	}
+	operation, err := operations.GetOperation(context.Background(), "tenant-a", record.OperationID)
+	if err != nil {
+		t.Fatalf("GetOperation(snapshot) error = %v", err)
+	}
+	if operation.Operation != ports.WorkloadLifecycleSnapshot || operation.Status != ports.WorkloadOperationSucceeded {
+		t.Fatalf("operation=%s status=%s, want snapshot/succeeded", operation.Operation, operation.Status)
+	}
+	if got := operation.DestructiveImpact["creates_snapshot"]; got != true {
+		t.Fatalf("creates_snapshot = %v, want true", got)
+	}
+	if got := operation.AfterSpec["snapshot_count"]; got != 1 {
+		t.Fatalf("after snapshot_count = %v, want 1", got)
+	}
+	if len(operation.Steps) != 2 || operation.Steps[1].StepName != "create_snapshot" {
+		t.Fatalf("steps = %#v, want precheck + create_snapshot", operation.Steps)
+	}
+}
+
+func TestLocalInstanceServiceVMSnapshotCallsProviderWhenConfigured(t *testing.T) {
+	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "vm-a",
+		Name:       "vm-01",
+		Kind:       ports.WorkloadKindVM,
+		Provider:   "kubevirt",
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateRunning,
+		},
+	}}
+	operations := NewLocalOperationStore()
 	lifecycle := &fakeLifecycleExecutor{}
 	service := NewLocalInstanceServiceWithOptions(
 		&fakeInstanceOrchestrator{},
@@ -1058,40 +1174,11 @@ func TestLocalInstanceServiceVMSnapshotRecordsLocalProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if lifecycle.calls != 0 {
-		t.Fatalf("lifecycle calls = %d, want 0 for local snapshot metadata", lifecycle.calls)
-	}
-	if store.upserts != 1 {
-		t.Fatalf("upserts = %d, want 1", store.upserts)
-	}
-	if record.Status.State != ports.WorkloadStateRunning {
-		t.Fatalf("state = %s, want running", record.Status.State)
+	if lifecycle.calls != 1 || lifecycle.action != ports.WorkloadLifecycleSnapshot {
+		t.Fatalf("lifecycle calls=%d action=%s, want 1 snapshot", lifecycle.calls, lifecycle.action)
 	}
 	if len(record.Snapshots) != 1 {
 		t.Fatalf("snapshots = %d, want 1", len(record.Snapshots))
-	}
-	snapshot := record.Snapshots[0]
-	if snapshot.ID != "snap_snap-vm-a" || snapshot.Name != "before-upgrade" || snapshot.State != "ready" {
-		t.Fatalf("snapshot = %+v, want ready named before-upgrade", snapshot)
-	}
-	if snapshot.SourceInstanceID != "vm-a" || !snapshot.ReadyAt.Equal(time.Unix(1500, 0)) {
-		t.Fatalf("snapshot source=%q ready=%s, want vm-a at request time", snapshot.SourceInstanceID, snapshot.ReadyAt)
-	}
-	operation, err := operations.GetOperation(context.Background(), "tenant-a", record.OperationID)
-	if err != nil {
-		t.Fatalf("GetOperation(snapshot) error = %v", err)
-	}
-	if operation.Operation != ports.WorkloadLifecycleSnapshot || operation.Status != ports.WorkloadOperationSucceeded {
-		t.Fatalf("operation=%s status=%s, want snapshot/succeeded", operation.Operation, operation.Status)
-	}
-	if got := operation.DestructiveImpact["creates_snapshot"]; got != true {
-		t.Fatalf("creates_snapshot = %v, want true", got)
-	}
-	if got := operation.AfterSpec["snapshot_count"]; got != 1 {
-		t.Fatalf("after snapshot_count = %v, want 1", got)
-	}
-	if len(operation.Steps) != 2 || operation.Steps[1].StepName != "create_snapshot" {
-		t.Fatalf("steps = %#v, want precheck + create_snapshot", operation.Steps)
 	}
 }
 
@@ -1426,6 +1513,49 @@ func TestLocalInstanceServiceClearsStaleImageMetadataOnUpdate(t *testing.T) {
 	}
 	if record.Image != (ports.InstanceImageSummary{ID: "image-new"}) {
 		t.Fatalf("image = %+v, want only new image ID", record.Image)
+	}
+}
+
+func TestLocalInstanceServiceResolvesImageRefForUpdateImage(t *testing.T) {
+	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "container-a", Name: "app-01", Kind: ports.WorkloadKindContainer,
+		Image:     ports.InstanceImageSummary{ID: "image-old", Ref: "registry/old:tag"},
+		Container: &ports.ContainerInstanceStatus{Replicas: 2, RolloutStatus: "completed"},
+		Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	}}
+	resolver := &capturingInstanceResourceResolver{result: ports.WorkloadResourceResolveResult{
+		Spec: ports.WorkloadSpec{ImageSummary: ports.InstanceImageSummary{
+			ID: "image-new", Ref: "registry.example/tenant-a/app:2", Digest: "sha256:new", Name: "app", Tag: "2",
+		}},
+		ResourceRefs: []string{"image/registry.example/tenant-a/app:2"},
+	}}
+	lifecycle := &fakeLifecycleExecutor{}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{}, store, NewLocalInstanceOpsGuard(),
+		WithInstanceLifecycleExecutor(lifecycle),
+		WithInstanceResourceResolver(resolver),
+	)
+
+	record, err := service.ApplyLifecycle(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey: "update-image-resolved", TenantID: "tenant-a", InstanceID: "container-a",
+		Action: ports.WorkloadLifecycleUpdateImage, ImageID: "image-new",
+		UserID: "user-a", PermissionProof: "rbac:update:workload",
+	})
+	if err != nil {
+		t.Fatalf("ApplyLifecycle() error = %v", err)
+	}
+	if lifecycle.action != ports.WorkloadLifecycleUpdateImage {
+		t.Fatalf("executor action = %s, want update_image", lifecycle.action)
+	}
+	if lifecycle.lastRequest.ImageRef != "registry.example/tenant-a/app:2" {
+		t.Fatalf("executor image ref = %q, want resolved ref", lifecycle.lastRequest.ImageRef)
+	}
+	want := ports.InstanceImageSummary{ID: "image-new", Ref: "registry.example/tenant-a/app:2", Digest: "sha256:new", Name: "app", Tag: "2"}
+	if record.Image != want {
+		t.Fatalf("image = %+v, want %+v", record.Image, want)
+	}
+	if record.Container == nil || record.Container.RolloutStatus != "progressing" {
+		t.Fatalf("rollout status = %+v, want progressing", record.Container)
 	}
 }
 
@@ -2126,6 +2256,61 @@ func TestLocalInstanceServiceAllowsFileSecretMountPath(t *testing.T) {
 	}
 }
 
+func TestApplyApprovedLifecycleSummarySecretBindings(t *testing.T) {
+	record := ports.WorkloadInstanceRecord{
+		Kind: ports.WorkloadKindContainer,
+		Container: &ports.ContainerInstanceStatus{
+			SecretBindings: []ports.WorkloadSecretBinding{{SecretID: "secret-create", EnvPrefix: "DB_"}},
+		},
+	}
+
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleBindSecret, SecretID: "secret-env",
+		BindingType: "env", EnvName: "DATABASE_URL",
+	})
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleBindSecret, SecretID: "secret-file",
+		BindingType: "file", MountPath: "/run/secrets/app",
+	})
+	if len(record.Container.SecretBindings) != 3 {
+		t.Fatalf("bindings = %#v, want 3 entries", record.Container.SecretBindings)
+	}
+	if record.Container.RolloutStatus != "progressing" {
+		t.Fatalf("rollout status = %q, want progressing", record.Container.RolloutStatus)
+	}
+
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleUnbindSecret, SecretID: "secret-env",
+	})
+	if len(record.Container.SecretBindings) != 2 {
+		t.Fatalf("bindings after unbind = %#v, want 2 entries", record.Container.SecretBindings)
+	}
+	for _, binding := range record.Container.SecretBindings {
+		if binding.SecretID == "secret-env" {
+			t.Fatalf("unbound secret still present: %#v", record.Container.SecretBindings)
+		}
+	}
+}
+
+func TestContainerStatusInfoClonesSecretBindings(t *testing.T) {
+	spec := ports.WorkloadSpec{
+		Kind: ports.WorkloadKindContainer,
+		SecretBindings: []ports.WorkloadSecretBinding{
+			{SecretID: "secret-a", EnvPrefix: "DB_"},
+			{SecretID: "secret-b", MountPath: "/run/secrets/app"},
+		},
+	}
+	status := containerStatusInfo(spec, ports.WorkloadStatus{State: ports.WorkloadStateRunning}, time.Unix(1000, 0))
+	if status == nil || len(status.SecretBindings) != 2 {
+		t.Fatalf("container status = %#v, want 2 cloned secret bindings", status)
+	}
+	// Mutating the clone must not touch the spec.
+	status.SecretBindings[0].SecretID = "mutated"
+	if spec.SecretBindings[0].SecretID != "secret-a" {
+		t.Fatalf("spec secret bindings were mutated: %#v", spec.SecretBindings)
+	}
+}
+
 func TestValidateInstanceEnvVarAcceptsExplicitEmptyValue(t *testing.T) {
 	empty := ""
 	if err := validateInstanceEnvVar(ports.InstanceEnvVar{Name: "OPTIONAL_FLAG", Value: &empty}); err != nil {
@@ -2321,6 +2506,15 @@ type fakeInstanceStorageBinder struct {
 	lastFilesystemID string
 	lastInstanceID   string
 	err              error
+	createdVolumes   []ports.StorageVolumeCreateRequest
+}
+
+func (f *fakeInstanceStorageBinder) CreateVolume(_ context.Context, request ports.StorageVolumeCreateRequest) (ports.StorageVolumeRecord, error) {
+	if f.err != nil {
+		return ports.StorageVolumeRecord{}, f.err
+	}
+	f.createdVolumes = append(f.createdVolumes, request)
+	return ports.StorageVolumeRecord{TenantID: request.TenantID, VolumeID: "vol-provisioned-1", Name: request.Name, SizeGiB: request.SizeGiB}, nil
 }
 
 func (f *fakeInstanceStorageBinder) MountVolume(_ context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error) {
@@ -2344,13 +2538,15 @@ func (f *fakeInstanceStorageBinder) MountFilesystem(_ context.Context, request p
 }
 
 type fakeLifecycleExecutor struct {
-	calls  int
-	action ports.WorkloadLifecycleAction
+	calls       int
+	action      ports.WorkloadLifecycleAction
+	lastRequest ports.WorkloadInstanceLifecycleRequest
 }
 
 func (e *fakeLifecycleExecutor) Apply(_ context.Context, request ports.WorkloadInstanceLifecycleRequest, _ ports.WorkloadInstanceRecord) (ports.WorkloadInstanceLifecycleResult, error) {
 	e.calls++
 	e.action = request.Action
+	e.lastRequest = request
 	return ports.WorkloadInstanceLifecycleResult{
 		Action:   request.Action,
 		Accepted: true,

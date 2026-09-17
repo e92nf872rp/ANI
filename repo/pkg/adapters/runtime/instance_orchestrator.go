@@ -636,7 +636,7 @@ func containerStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus, c
 		readyReplicas = replicas
 	}
 	revision := containerRevision(spec)
-	return &ports.ContainerInstanceStatus{
+	containerStatus := &ports.ContainerInstanceStatus{
 		Replicas:      replicas,
 		ReadyReplicas: readyReplicas,
 		Revision:      revision,
@@ -649,6 +649,13 @@ func containerStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus, c
 			},
 		},
 	}
+	if spec.Container != nil && len(spec.Container.Env) > 0 {
+		containerStatus.Env = append([]ports.InstanceEnvVar(nil), spec.Container.Env...)
+	}
+	if len(spec.SecretBindings) > 0 {
+		containerStatus.SecretBindings = append([]ports.WorkloadSecretBinding(nil), spec.SecretBindings...)
+	}
+	return containerStatus
 }
 
 func containerRolloutStatus(state ports.WorkloadState) string {

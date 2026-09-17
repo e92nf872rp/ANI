@@ -910,6 +910,18 @@ func TestLocalStorageServiceVolumeOperations(t *testing.T) {
 	if volume.VolumeType != "high_performance_ssd" || volume.IOPS != 20000 || volume.OSInitStatus != "pending" || len(volume.MountHistory) != 1 {
 		t.Fatalf("volume defaults = %#v, want console fields", volume)
 	}
+	defaulted, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "volume-ops-default-sc",
+		Name:           "data-default-sc",
+		SizeGiB:        10,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume(default) error = %v", err)
+	}
+	if defaulted.StorageClass != defaultVolumeStorageClassName {
+		t.Fatalf("default storage class = %q, want %q", defaulted.StorageClass, defaultVolumeStorageClassName)
+	}
 	expanded, err := service.ExpandVolume(context.Background(), ports.StorageVolumeExpandRequest{
 		TenantID:       "tenant-a",
 		VolumeID:       volume.VolumeID,

@@ -503,7 +503,14 @@ type instanceContainerResponse struct {
 	ReadyReplicas int32                             `json:"ready_replicas"`
 	Revision      string                            `json:"revision,omitempty"`
 	RolloutStatus string                            `json:"rollout_status,omitempty"`
+	Env           []instanceEnvResponse             `json:"env,omitempty"`
 	History       []instanceContainerChangeResponse `json:"history,omitempty"`
+}
+
+type instanceEnvResponse struct {
+	Name      string  `json:"name"`
+	Value     *string `json:"value,omitempty"`
+	SecretRef string  `json:"secret_ref,omitempty"`
 }
 
 type instanceContainerChangeResponse struct {
@@ -3716,11 +3723,20 @@ func containerResponseFromRecord(record ports.WorkloadInstanceRecord) *instanceC
 			CreatedAt: item.CreatedAt.Format(time.RFC3339),
 		})
 	}
+	env := make([]instanceEnvResponse, 0, len(record.Container.Env))
+	for _, item := range record.Container.Env {
+		env = append(env, instanceEnvResponse{
+			Name:      item.Name,
+			Value:     item.Value,
+			SecretRef: item.SecretRef,
+		})
+	}
 	return &instanceContainerResponse{
 		Replicas:      record.Container.Replicas,
 		ReadyReplicas: record.Container.ReadyReplicas,
 		Revision:      record.Container.Revision,
 		RolloutStatus: record.Container.RolloutStatus,
+		Env:           env,
 		History:       history,
 	}
 }

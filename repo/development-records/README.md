@@ -13,6 +13,35 @@
 
 ## 已完成批次（按完成时间排列）
 
+### VM 生命周期真实底座修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-VM-LIFECYCLE-HOTFIX-A | VM 真实底座（KubeVirt）生命周期五项能力修复，来源测试异常记录 VM 系列（PR #168）：① VM-02/03 数据盘新建盘真实建卷（`provisionVMDataDisks` 幂等建卷 + `vmVolumeClaimName` 映射修正 + 默认 StorageClass `ani-block`）；② VM-09 重启改 stop-等待停稳-start 确定性流程（原生 restart 子资源对 legacy `spec.running` 只停不启）；③ VM-07 快照回滚接入 `VirtualMachineSnapshot/Restore`（CR 名 DNS-1123 `snap-` 前缀、运行中回滚 stop-restore-start、按 `status.complete` 判完成、restore 15min 超时、RBAC 补 snapshot/restore 权限）；④ VM-10 重建落地（`applyKubeVirtRebuild`：停机-捕获 spec-删 CR-重建-开机，containerDisk 无状态语义即重装系统，数据盘 PVC 保留重挂）；⑤ VM-06 NFS 挂载 virtiofs（`applyKubeVirtFilesystem` 停机-改 spec(filesystems[].virtiofs+PVC 卷)-开机，virtiofs tag 限 36 字节 `kubeVirtFilesystemVolumeName` 去分隔符截断，`waitKubeVirtVMStopped` 严格等待 `printableStatus=="Stopped"` 防卡停机态，失败路径 best-effort 恢复开机）。环境侧：KubeVirt featureGates 需 `Snapshot`+`EnableVirtioFsStorageVolumes`。**live 验证 PASS（2026-09-15，ani-test2 隔离环境，镜像 `test2-20260915-b/c/i/k/n`）**：五项操作（数据盘创建/重启/快照回滚/重建/NFS 挂载卸载）逐项通过——PVC Bound + VMI Running、快照 Succeeded→restore complete=true→回 running、rebuild 后 VM CR uid 变更、virtiofs 设备写入 spec 且 detach 后移除 | instance-vm-lifecycle-hotfix-a.md |
+
+### 容器/GPU 容器 update_image 生命周期修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-CONTAINER-UPDATE-IMAGE-A | 容器与 GPU 容器实例「更新镜像」能力落地（PR #168，提交 d16d43e）：`KubernetesLifecycleExecutor` 新增 `update_image` 分支（此前落入 default 返回 unsupported——前端按钮实际已接通请求，缺口在后端 provider apply 层），对现有 Deployment 做 strategic-merge patch `spec.template.spec.containers[*].image`（容器名=workload 名，env/ports/volumes 不动）触发滚动更新而非重建；服务层 `resolveLifecycleImage` 复用 create 解析路径（租户 project/purpose/漏洞扫描门禁一致，解析在 `lifecycleIntentFingerprint` 之前保证重放稳定）；ports 请求新增内部 `ImageRef` 字段（API 契约不变，仍为 `image_id`+`strategy`）；apply 后完整 `InstanceImageSummary`（ID/Ref/Digest/Name/Tag）写入 record（此前仅写 image_id 清空 ref/digest），RolloutStatus 置 progressing 由 reconciler 观测收敛（与 scale 同机制）。单测 4 用例。**live 验证 PASS（2026-09-15/16，ani-test2 隔离环境，镜像 `test2-20260915-o`）**：container nginx→fedora→nginx 双向（10s 内 Deployment gen/observedGeneration/updated/ready 全收敛、record 含完整 digest）；gpu_container base→runtime（用户新上传镜像，Deployment gen 5→6 镜像变更、purpose 门禁正确放行 gpu 镜像）——RWO 块卷实例滚动 surge Pod 跨节点 Multi-Attach 卡住属容器-3 平台约束，实测缩 0 扩 1 Recreate 路径可收敛 | instance-container-update-image-a.md |
+
+### 容器/GPU 容器环境变量回显修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-CONTAINER-ENV-ECHO-A | 容器与 GPU 容器实例环境变量"写入但不回读"修复（PR #168，GPU-5）：创建链路本就完整（env 经 `containerEnv` 渲染进 Deployment 集群侧真实生效），缺口在回读三层——record `ContainerInstanceStatus` 不持久化 Env、gateway 响应无 env 字段、契约 `InstanceRecord.container` 无 env 定义。按 API-first 修复：v1.yaml 契约新增 `container.env`（复用创建请求 `InstanceEnvVar` schema）；`ContainerInstanceStatus.Env` 随 `container_status` JSON 列持久化（无 DB 迁移），`containerStatusInfo` 创建时克隆写入；gateway `instanceContainerResponse.env` 回显（secret_ref 型不带 value，secret 内容永不返回）；逐路径核验 reconciler/scale/update_image/rollback 原地更新不丢 env。一处修复覆盖 container 与 gpu_container。单测 2 用例。**live 验证 PASS（2026-09-16，ani-test2 隔离环境，镜像 `test2-20260916-gpu5env`）**：GPU 容器带 2 个环境变量创建 → 创建响应即时回显 → 详情 t+15s（reconciler 已跑）回显一致。遗留：修复前历史实例 record 无 env 不回显，需从 Deployment 反读回填 | instance-container-env-echo-a.md |
+
+### 容器/GPU 容器 NFS 文件系统挂载修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-CONTAINER-FS-MOUNT-A | 容器与 GPU 容器实例挂载 NFS"不支持"修复（PR #168，容器-5/GPU-4）：`KubernetesLifecycleExecutor.Apply` 此前把 attach/detach_filesystem 无条件路由进 `applyKubeVirtFilesystem`（VM 专属 virtiofs 通道，按 `record.Kind != VM` 硬拒绝），Deployment 通道从未实现。修复：新增 `applyFilesystem` 按 kind 分流（VM 走既有 virtiofs 路径；container/gpu_container 走新增 `applyKubernetesFilesystem` 定向 strategic-merge patch——fs PVC 卷（claim=`storageProviderName("fs", filesystemID)`，卷名沿用 `kubeVirtFilesystemVolumeName` 确定性推导）+ workload 容器 volumeMount（mount_path/read_only），滚动更新生效；detach 用 `$patch: delete` 按卷名删 volumes、按挂载路径删 volumeMounts（其 merge key 是 mountPath，mount path 优先从 record 附件读取、缺失回退 live Deployment 反查）；NFS PVC RWX 多副本可并发挂载；服务层/契约/生成物零改动。单测 3 用例。**live 验证 PASS（2026-09-16，ani-test2 隔离环境，镜像 `test2-20260916-fsmount`）**：container（nginx）与 gpu_container（rtx4090-12g-4）attach/detach 各一轮——Deployment 卷+volumeMount 出现/移除、ready=1、record storage_attachments 增删一致、实例回 running | instance-container-fs-mount-a.md |
+
+### 容器/GPU 容器密钥绑定解绑修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-CONTAINER-SECRET-BIND-A | 容器与 GPU 容器实例「绑定/解绑密钥」"不支持"修复（PR #168，容器-6/GPU-6）：lifecycle 契约/路由/服务层校验/幂等本就就绪，缺口在 `KubernetesLifecycleExecutor.Apply` 无 `bind_secret`/`unbind_secret` case 落入 default 返回 unsupported。修复：executor 新增 `applyKubernetesSecretBind` 分支——bind env 带 `env_name` 走 per-key `valueFrom.secretKeyRef` 条目、不带走 `envFrom` 整 secret（原子列表 GET live 全量回写，已绑定幂等 no-op）；bind file 写 secret volume + readOnly volumeMount（卷名按 secret_id+mount_path 确定性派生）；unbind 不依赖 record、GET live Deployment 反查该 secret 全部注入形态（env/envFrom/volume/volumeMount）用 `$patch: delete` 定向移除，四类均空返回 404；record `ContainerInstanceStatus.SecretBindings` 随 container_status JSONB 持久化（无迁移，GPU-5 同模式），bind/unbind 后 RolloutStatus=progressing 由 reconciler 观测收敛；ports `WorkloadSecretBinding` 新增 EnvName。一处修复覆盖 container 与 gpu_container。单测 10 用例。**live 验证 PASS（2026-09-17，ani-test2 隔离环境，镜像 `test2-20260917-secretbind`）**：container bind env（DATABASE_URL secretKeyRef）/bind file（volume+readOnly mount）/record 2 条 SecretBindings（psql container_status 直查）/unbind 全形态移除+record 清空+回 running；gpu_container 复用实例 bind env+unbind 全过。环境配套：租户 Secret K8s apply 需 gateway `SECRET_PROVIDER_MODE=kubernetes_rest`（本环境此前未配置，验证期间已补配） | instance-container-secret-bind-a.md |
 ### 模型配置动态切换 M3（2026-09-11）
 
 | 批次 | 内容摘要 | 文件 |
