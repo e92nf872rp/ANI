@@ -37,6 +37,12 @@
 |---|---|---|
 | INSTANCE-CONTAINER-FS-MOUNT-A | 容器与 GPU 容器实例挂载 NFS"不支持"修复（PR #168，容器-5/GPU-4）：`KubernetesLifecycleExecutor.Apply` 此前把 attach/detach_filesystem 无条件路由进 `applyKubeVirtFilesystem`（VM 专属 virtiofs 通道，按 `record.Kind != VM` 硬拒绝），Deployment 通道从未实现。修复：新增 `applyFilesystem` 按 kind 分流（VM 走既有 virtiofs 路径；container/gpu_container 走新增 `applyKubernetesFilesystem` 定向 strategic-merge patch——fs PVC 卷（claim=`storageProviderName("fs", filesystemID)`，卷名沿用 `kubeVirtFilesystemVolumeName` 确定性推导）+ workload 容器 volumeMount（mount_path/read_only），滚动更新生效；detach 用 `$patch: delete` 按卷名删 volumes、按挂载路径删 volumeMounts（其 merge key 是 mountPath，mount path 优先从 record 附件读取、缺失回退 live Deployment 反查）；NFS PVC RWX 多副本可并发挂载；服务层/契约/生成物零改动。单测 3 用例。**live 验证 PASS（2026-09-16，ani-test2 隔离环境，镜像 `test2-20260916-fsmount`）**：container（nginx）与 gpu_container（rtx4090-12g-4）attach/detach 各一轮——Deployment 卷+volumeMount 出现/移除、ready=1、record storage_attachments 增删一致、实例回 running | instance-container-fs-mount-a.md |
 
+### 容器/GPU 容器密钥绑定解绑修复（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-CONTAINER-SECRET-BIND-A | 容器与 GPU 容器实例「绑定/解绑密钥」"不支持"修复（PR #168，容器-6/GPU-6）：lifecycle 契约/路由/服务层校验/幂等本就就绪，缺口在 `KubernetesLifecycleExecutor.Apply` 无 `bind_secret`/`unbind_secret` case 落入 default 返回 unsupported。修复：executor 新增 `applyKubernetesSecretBind` 分支——bind env 带 `env_name` 走 per-key `valueFrom.secretKeyRef` 条目、不带走 `envFrom` 整 secret（原子列表 GET live 全量回写，已绑定幂等 no-op）；bind file 写 secret volume + readOnly volumeMount（卷名按 secret_id+mount_path 确定性派生）；unbind 不依赖 record、GET live Deployment 反查该 secret 全部注入形态（env/envFrom/volume/volumeMount）用 `$patch: delete` 定向移除，四类均空返回 404；record `ContainerInstanceStatus.SecretBindings` 随 container_status JSONB 持久化（无迁移，GPU-5 同模式），bind/unbind 后 RolloutStatus=progressing 由 reconciler 观测收敛；ports `WorkloadSecretBinding` 新增 EnvName。一处修复覆盖 container 与 gpu_container。单测 10 用例。**live 验证 PASS（2026-09-17，ani-test2 隔离环境，镜像 `test2-20260917-secretbind`）**：container bind env（DATABASE_URL secretKeyRef）/bind file（volume+readOnly mount）/record 2 条 SecretBindings（psql container_status 直查）/unbind 全形态移除+record 清空+回 running；gpu_container 复用实例 bind env+unbind 全过。环境配套：租户 Secret K8s apply 需 gateway `SECRET_PROVIDER_MODE=kubernetes_rest`（本环境此前未配置，验证期间已补配） | instance-container-secret-bind-a.md |
+
 ### Console 首页概览统计聚合接口（2026-09，分支 feat/console-overview）
 
 | 批次 | 内容摘要 | 文件 |
