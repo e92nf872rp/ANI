@@ -213,6 +213,10 @@ type WorkloadSecretBinding struct {
 	SecretID  string
 	MountPath string
 	EnvPrefix string
+	// EnvName is the per-key env binding produced by the bind_secret lifecycle
+	// action (the secret key equals the env var name); create-time bindings
+	// inject whole secrets via EnvPrefix instead.
+	EnvName string
 }
 
 type InstanceDiskSpec struct {
@@ -319,6 +323,10 @@ type ContainerInstanceStatus struct {
 	// Env 回显创建时设定的环境变量（name/value/secret_ref，语义同创建请求），
 	// 供实例详情 API 返回给租户；不包含 secret_ref 指向的 secret 内容。
 	Env []InstanceEnvVar
+	// SecretBindings 回显实例当前持有的密钥绑定（创建时来自 spec.SecretBindings，
+	// 运行期 bind_secret/unbind_secret 生命周期会同步增删），语义同创建请求的
+	// secret_bindings；不包含 secret 内容。
+	SecretBindings []WorkloadSecretBinding
 }
 
 type GPUInstanceStatus struct {

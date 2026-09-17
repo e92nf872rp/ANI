@@ -447,6 +447,274 @@ func TestKubernetesLifecycleExecutorUpdateImagePatchesDeploymentContainer(t *tes
 	}
 }
 
+// GPU container bind with binding_type=env + env_name adds a per-key env entry
+// (valueFrom.secretKeyRef, secret key = env var name) in a single targeted patch.
+func TestKubernetesLifecycleExecutorBindSecretEnvKeyPatchesDeployment(t *testing.T) {
+	var gotPath, gotBody, gotContentType string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		gotPath = r.URL.Path
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindGPUContainer
+	record.Name = "gpu-app-01"
+	record.ResourceRefs = []string{"kubernetes/Deployment/gpu-app-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "env"
+	req.EnvName = "DATABASE_URL"
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("BindSecret Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	wantPath := "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/gpu-app-01"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	if gotContentType != "application/strategic-merge-patch+json" {
+		t.Fatalf("content type = %q, want strategic-merge patch", gotContentType)
+	}
+	for _, want := range []string{
+		`"name":"gpu-app-01"`,
+		`"env":[{"name":"DATABASE_URL","valueFrom":{"secretKeyRef":{"key":"DATABASE_URL","name":"secret-a"}}}]`,
+	} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body = %s, want %s", gotBody, want)
+		}
+	}
+	if strings.Contains(gotBody, "volumes") {
+		t.Fatalf("env bind must not touch pod volumes: body = %s", gotBody)
+	}
+}
+
+// env bind without env_name extends the container's envFrom with a whole-secret
+// secretRef. envFrom is an atomic list, so the live list is read first and the
+// existing entries (prefix form) are preserved in the patch.
+func TestKubernetesLifecycleExecutorBindSecretEnvFromAppendsWholeSecret(t *testing.T) {
+	var sawGet bool
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			sawGet = true
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"spec":{"template":{"spec":{"containers":[{"name":"app-01",` +
+					`"envFrom":[{"prefix":"DB_","secretRef":{"name":"secret-db"}}]}]}}}}`)),
+			}, nil
+		}
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			b, _ := io.ReadAll(r.Body)
+			patchBody = string(b)
+			return lifecycleResponse(), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "env"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("BindSecret Apply() error = %v", err)
+	}
+	if !sawGet {
+		t.Fatalf("whole-secret env bind should read the live envFrom list first")
+	}
+	for _, want := range []string{
+		`"secretRef":{"name":"secret-a"}`,
+		`"prefix":"DB_"`,
+		`"secretRef":{"name":"secret-db"}`,
+	} {
+		if !strings.Contains(patchBody, want) {
+			t.Fatalf("body = %s, want %s", patchBody, want)
+		}
+	}
+}
+
+// file binding adds a secret volume plus a readOnly volumeMount; the volume
+// name is deterministic on (secret id, mount path).
+func TestKubernetesLifecycleExecutorBindSecretFileAddsVolumeAndMount(t *testing.T) {
+	var gotPath, patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		patchBody = string(b)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "file"
+	req.MountPath = "/run/secrets/app"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("BindSecret Apply() error = %v", err)
+	}
+	wantPath := "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	for _, want := range []string{
+		`"secret":{"secretName":"secret-a"}`,
+		`"name":"secret-secret-a--run-secrets-app"`,
+		`"mountPath":"/run/secrets/app"`,
+		`"readOnly":true`,
+	} {
+		if !strings.Contains(patchBody, want) {
+			t.Fatalf("body = %s, want %s", patchBody, want)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorBindSecretFileRequiresMountPath(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued for file bind without mount_path: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "file"
+
+	_, err := executor.Apply(context.Background(), req, lifecycleRecord())
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestKubernetesLifecycleExecutorBindSecretRejectsUnknownBindingType(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued for unknown binding type: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "sidecar"
+
+	_, err := executor.Apply(context.Background(), req, lifecycleRecord())
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestKubernetesLifecycleExecutorBindSecretRejectsVM(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued for VM secret bind: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "env"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if !errors.Is(err, ports.ErrUnsupported) {
+		t.Fatalf("error = %v, want ErrUnsupported", err)
+	}
+}
+
+// Unbind removes every injection form of the secret from the live Deployment:
+// the per-key env entry and the volume/volumeMount pair via $patch: delete
+// directives, the envFrom entry via the filtered full list (other secrets and
+// prefixes stay intact).
+func TestKubernetesLifecycleExecutorUnbindSecretDeletesAllInjectionForms(t *testing.T) {
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"spec":{"template":{"spec":{` +
+					`"volumes":[{"name":"app-data","emptyDir":{}},{"name":"secret-secret-a--run-secrets-app","secret":{"secretName":"secret-a"}}],` +
+					`"containers":[{"name":"app-01",` +
+					`"env":[{"name":"APP_MODE","value":"prod"},{"name":"DATABASE_URL","valueFrom":{"secretKeyRef":{"name":"secret-a","key":"DATABASE_URL"}}}],` +
+					`"envFrom":[{"prefix":"DB_","secretRef":{"name":"secret-a"}},{"secretRef":{"name":"secret-b"}}],` +
+					`"volumeMounts":[{"name":"app-data","mountPath":"/data"},{"name":"secret-secret-a--run-secrets-app","mountPath":"/run/secrets/app"}]}]}}}}`)),
+			}, nil
+		}
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			b, _ := io.ReadAll(r.Body)
+			patchBody = string(b)
+			return lifecycleResponse(), nil
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleUnbindSecret)
+	req.SecretID = "secret-a"
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("UnbindSecret Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	for _, want := range []string{
+		`"env":[{"$patch":"delete","name":"DATABASE_URL"}]`,
+		`"envFrom":[{"secretRef":{"name":"secret-b"}}]`,
+		`"volumes":[{"$patch":"delete","name":"secret-secret-a--run-secrets-app"}]`,
+		`"volumeMounts":[{"$patch":"delete","mountPath":"/run/secrets/app"}]`,
+	} {
+		if !strings.Contains(patchBody, want) {
+			t.Fatalf("body = %s, want %s", patchBody, want)
+		}
+	}
+	for _, banned := range []string{
+		`"secretName":"secret-a"`,
+		`"secretRef":{"name":"secret-a"}`,
+		`"key":"DATABASE_URL"`,
+	} {
+		if strings.Contains(patchBody, banned) {
+			t.Fatalf("unbind patch must not keep the unbound secret (%s): body = %s", banned, patchBody)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorUnbindSecretNotFoundWhenNotBound(t *testing.T) {
+	var sawPatch bool
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"spec":{"template":{"spec":{"containers":[{"name":"app-01",` +
+					`"envFrom":[{"secretRef":{"name":"secret-b"}}]}]}}}}`)),
+			}, nil
+		}
+		if r.Method == http.MethodPatch {
+			sawPatch = true
+		}
+		return lifecycleResponse(), nil
+	})
+	req := lifecycleRequest(ports.WorkloadLifecycleUnbindSecret)
+	req.SecretID = "secret-a"
+
+	_, err := executor.Apply(context.Background(), req, lifecycleRecord())
+	if !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+	if sawPatch {
+		t.Fatalf("unbind of an unbound secret must not patch the Deployment")
+	}
+}
+
 func TestKubernetesLifecycleExecutorUpdateImageRequiresResolvedRef(t *testing.T) {
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("unexpected request issued without a resolved image ref: %s %s", r.Method, r.URL.Path)

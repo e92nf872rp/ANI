@@ -166,6 +166,18 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		}, nil
 	}
 
+	if request.Action == ports.WorkloadLifecycleBindSecret || request.Action == ports.WorkloadLifecycleUnbindSecret {
+		if err := e.applyKubernetesSecretBind(ctx, request, record); err != nil {
+			return ports.WorkloadInstanceLifecycleResult{}, err
+		}
+		return ports.WorkloadInstanceLifecycleResult{
+			Action:    request.Action,
+			Accepted:  true,
+			Reason:    "secret binding change accepted by Kubernetes lifecycle executor (targeted patch)",
+			CheckedAt: e.now().UTC(),
+		}, nil
+	}
+
 	resource, err := resourceFromRecord(record)
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
@@ -1108,6 +1120,283 @@ func (e *KubernetesLifecycleExecutor) applyKubernetesUpdateImage(ctx context.Con
 	}
 	_, err = e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/strategic-merge-patch+json", patch)
 	return err
+}
+
+// applyKubernetesSecretBind binds/unbinds a secret on a container or
+// gpu_container Deployment via targeted patches on the pod template, mirroring
+// the create-time injection forms in dryrun_renderer.go. binding_type=env with
+// env_name adds a per-key env entry (valueFrom.secretKeyRef, merge key name,
+// secret key = env var name like containerEnv); without env_name it extends
+// envFrom with a whole-secret secretRef (atomic list, so the live list is read
+// and sent back with the entry appended). binding_type=file adds a secret
+// volume (merge key name) plus a readOnly volumeMount (merge key mountPath).
+// Unbind removes every injection form of the secret found on the live
+// Deployment — env entries, envFrom entries, secret volumes and their
+// volumeMounts — so create-time bindings unbind cleanly too. Rollout
+// convergence is observed by the reconciler like scale/update_image.
+func (e *KubernetesLifecycleExecutor) applyKubernetesSecretBind(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {
+	if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
+		return fmt.Errorf("%w: secret binding is only supported for container and gpu_container instances", ports.ErrUnsupported)
+	}
+	resource, err := resourceFromRecord(record)
+	if err != nil {
+		return err
+	}
+	if resource.Kind != "Deployment" {
+		return fmt.Errorf("%w: secret binding is only supported for Deployment workloads, got %q", ports.ErrUnsupported, resource.Kind)
+	}
+	secretID := strings.TrimSpace(request.SecretID)
+	if secretID == "" {
+		return fmt.Errorf("%w: secret_id is required for secret binding", ports.ErrInvalid)
+	}
+	if request.Action == ports.WorkloadLifecycleUnbindSecret {
+		return e.applyKubernetesSecretDetach(ctx, resource, secretID)
+	}
+	return e.applyKubernetesSecretAttach(ctx, resource, secretID, request)
+}
+
+func (e *KubernetesLifecycleExecutor) applyKubernetesSecretAttach(ctx context.Context, resource kubernetesResource, secretID string, request ports.WorkloadInstanceLifecycleRequest) error {
+	bindingType := strings.TrimSpace(request.BindingType)
+	if bindingType != "env" && bindingType != "file" {
+		return fmt.Errorf("%w: binding_type must be env or file", ports.ErrInvalid)
+	}
+	container := map[string]any{"name": resource.Name}
+	podSpec := map[string]any{}
+	switch bindingType {
+	case "env":
+		if envName := strings.TrimSpace(request.EnvName); envName != "" {
+			container["env"] = []any{map[string]any{
+				"name":      envName,
+				"valueFrom": map[string]any{"secretKeyRef": map[string]any{"name": secretID, "key": envName}},
+			}}
+		} else {
+			envFrom, err := e.kubernetesSecretEnvFrom(ctx, resource)
+			if err != nil {
+				return err
+			}
+			for _, entry := range envFrom {
+				mapping, ok := entry.(map[string]any)
+				if !ok {
+					continue
+				}
+				ref, ok := mapping["secretRef"].(map[string]any)
+				if ok && ref["name"] == secretID {
+					// Already bound: the patch would be a no-op anyway.
+					return nil
+				}
+			}
+			container["envFrom"] = append(envFrom, map[string]any{"secretRef": map[string]any{"name": secretID}})
+		}
+	case "file":
+		mountPath := strings.TrimSpace(request.MountPath)
+		if mountPath == "" {
+			return fmt.Errorf("%w: mount_path is required to bind a secret as a file", ports.ErrInvalid)
+		}
+		volumeName := kubernetesSecretVolumeName(secretID, mountPath)
+		podSpec["volumes"] = []any{map[string]any{
+			"name":   volumeName,
+			"secret": map[string]any{"secretName": secretID},
+		}}
+		container["volumeMounts"] = []any{map[string]any{
+			"name":      volumeName,
+			"mountPath": mountPath,
+			"readOnly":  true,
+		}}
+	}
+	podSpec["containers"] = []any{container}
+	return e.patchDeploymentPodSpec(ctx, resource, podSpec)
+}
+
+// applyKubernetesSecretDetach removes every injection form of the secret from
+// the live Deployment. env/volumes/volumeMounts carry merge keys (name, name,
+// mountPath), so deletes ride $patch: delete directives; envFrom is an atomic
+// list, so the filtered full list is sent back. When the Deployment carries no
+// trace of the secret the request fails with ErrNotFound.
+func (e *KubernetesLifecycleExecutor) applyKubernetesSecretDetach(ctx context.Context, resource kubernetesResource, secretID string) error {
+	body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
+	if err != nil {
+		return fmt.Errorf("read Deployment %q for secret unbind: %w", resource.Name, err)
+	}
+	var doc struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Name string `json:"name"`
+						Env  []struct {
+							Name      string `json:"name"`
+							ValueFrom *struct {
+								SecretKeyRef *struct {
+									Name string `json:"name"`
+								} `json:"secretKeyRef"`
+							} `json:"valueFrom"`
+						} `json:"env"`
+						EnvFrom      []json.RawMessage `json:"envFrom"`
+						VolumeMounts []struct {
+							Name      string `json:"name"`
+							MountPath string `json:"mountPath"`
+						} `json:"volumeMounts"`
+					} `json:"containers"`
+					Volumes []struct {
+						Name   string `json:"name"`
+						Secret *struct {
+							SecretName string `json:"secretName"`
+						} `json:"secret"`
+					} `json:"volumes"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	if json.Unmarshal(body, &doc) != nil {
+		return fmt.Errorf("%w: Deployment %q spec is not valid JSON", ports.ErrInvalid, resource.Name)
+	}
+
+	volumeNames := map[string]bool{}
+	var volumeDeletes []any
+	for _, volume := range doc.Spec.Template.Spec.Volumes {
+		if volume.Secret != nil && volume.Secret.SecretName == secretID {
+			volumeNames[volume.Name] = true
+			volumeDeletes = append(volumeDeletes, map[string]any{"name": volume.Name, "$patch": "delete"})
+		}
+	}
+
+	var envDeletes []any
+	var mountDeletes []any
+	var envFromRemaining []any
+	envFromRemoved := false
+	for _, container := range doc.Spec.Template.Spec.Containers {
+		if container.Name != resource.Name {
+			continue
+		}
+		for _, entry := range container.Env {
+			if entry.ValueFrom != nil && entry.ValueFrom.SecretKeyRef != nil && entry.ValueFrom.SecretKeyRef.Name == secretID {
+				envDeletes = append(envDeletes, map[string]any{"name": entry.Name, "$patch": "delete"})
+			}
+		}
+		for _, raw := range container.EnvFrom {
+			var probe struct {
+				SecretRef *struct {
+					Name string `json:"name"`
+				} `json:"secretRef"`
+			}
+			_ = json.Unmarshal(raw, &probe)
+			if probe.SecretRef != nil && probe.SecretRef.Name == secretID {
+				envFromRemoved = true
+				continue
+			}
+			var entry map[string]any
+			if json.Unmarshal(raw, &entry) == nil {
+				envFromRemaining = append(envFromRemaining, entry)
+			}
+		}
+		for _, mount := range container.VolumeMounts {
+			if volumeNames[mount.Name] {
+				mountDeletes = append(mountDeletes, map[string]any{"mountPath": mount.MountPath, "$patch": "delete"})
+			}
+		}
+	}
+
+	if len(envDeletes) == 0 && !envFromRemoved && len(volumeDeletes) == 0 {
+		return fmt.Errorf("%w: secret %q is not bound to instance %q", ports.ErrNotFound, secretID, resource.Name)
+	}
+
+	container := map[string]any{"name": resource.Name}
+	if len(envDeletes) > 0 {
+		container["env"] = envDeletes
+	}
+	if envFromRemoved {
+		container["envFrom"] = envFromRemaining
+	}
+	if len(mountDeletes) > 0 {
+		container["volumeMounts"] = mountDeletes
+	}
+	podSpec := map[string]any{"containers": []any{container}}
+	if len(volumeDeletes) > 0 {
+		podSpec["volumes"] = volumeDeletes
+	}
+	return e.patchDeploymentPodSpec(ctx, resource, podSpec)
+}
+
+// kubernetesSecretEnvFrom reads the workload container's envFrom list from the
+// live Deployment so a whole-secret bind can send the full updated list (envFrom
+// is atomic under strategic merge).
+func (e *KubernetesLifecycleExecutor) kubernetesSecretEnvFrom(ctx context.Context, resource kubernetesResource) ([]any, error) {
+	body, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("read Deployment %q for secret bind: %w", resource.Name, err)
+	}
+	var doc struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Name    string            `json:"name"`
+						EnvFrom []json.RawMessage `json:"envFrom"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	if json.Unmarshal(body, &doc) != nil {
+		return nil, fmt.Errorf("%w: Deployment %q spec is not valid JSON", ports.ErrInvalid, resource.Name)
+	}
+	envFrom := make([]any, 0, 4)
+	for _, container := range doc.Spec.Template.Spec.Containers {
+		if container.Name != resource.Name {
+			continue
+		}
+		for _, raw := range container.EnvFrom {
+			var entry map[string]any
+			if json.Unmarshal(raw, &entry) == nil {
+				envFrom = append(envFrom, entry)
+			}
+		}
+	}
+	return envFrom, nil
+}
+
+// patchDeploymentPodSpec sends a strategic-merge patch for the Deployment pod
+// template; the containers list merges by name so only the workload container
+// is touched (the rendered pod template names its single container after the
+// workload, which equals the Deployment name).
+func (e *KubernetesLifecycleExecutor) patchDeploymentPodSpec(ctx context.Context, resource kubernetesResource, podSpec map[string]any) error {
+	patch, err := json.Marshal(map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": podSpec,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("%w: marshal secret binding patch: %v", ports.ErrInvalid, err)
+	}
+	_, err = e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/strategic-merge-patch+json", patch)
+	return err
+}
+
+// kubernetesSecretVolumeName derives the pod volume name for a runtime secret
+// file binding. It follows the create-time secretVolumeName sanitisation but is
+// deterministic on (secret id, mount path) instead of the create-time list
+// index, so the volume stays locatable across binds.
+func kubernetesSecretVolumeName(secretID, mountPath string) string {
+	seed := strings.ToLower(secretID + "-" + mountPath)
+	var builder strings.Builder
+	for _, r := range seed {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			builder.WriteRune(r)
+			continue
+		}
+		builder.WriteByte('-')
+	}
+	name := strings.Trim(builder.String(), "-")
+	if name == "" {
+		name = "secret"
+	}
+	name = "secret-" + name
+	if len(name) > 63 {
+		name = strings.TrimRight(name[:63], "-")
+	}
+	return name
 }
 
 // GPU resource keys retained for spec-mode switches. Swapping from vGPU to

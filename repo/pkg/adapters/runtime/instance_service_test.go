@@ -2256,6 +2256,61 @@ func TestLocalInstanceServiceAllowsFileSecretMountPath(t *testing.T) {
 	}
 }
 
+func TestApplyApprovedLifecycleSummarySecretBindings(t *testing.T) {
+	record := ports.WorkloadInstanceRecord{
+		Kind: ports.WorkloadKindContainer,
+		Container: &ports.ContainerInstanceStatus{
+			SecretBindings: []ports.WorkloadSecretBinding{{SecretID: "secret-create", EnvPrefix: "DB_"}},
+		},
+	}
+
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleBindSecret, SecretID: "secret-env",
+		BindingType: "env", EnvName: "DATABASE_URL",
+	})
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleBindSecret, SecretID: "secret-file",
+		BindingType: "file", MountPath: "/run/secrets/app",
+	})
+	if len(record.Container.SecretBindings) != 3 {
+		t.Fatalf("bindings = %#v, want 3 entries", record.Container.SecretBindings)
+	}
+	if record.Container.RolloutStatus != "progressing" {
+		t.Fatalf("rollout status = %q, want progressing", record.Container.RolloutStatus)
+	}
+
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleUnbindSecret, SecretID: "secret-env",
+	})
+	if len(record.Container.SecretBindings) != 2 {
+		t.Fatalf("bindings after unbind = %#v, want 2 entries", record.Container.SecretBindings)
+	}
+	for _, binding := range record.Container.SecretBindings {
+		if binding.SecretID == "secret-env" {
+			t.Fatalf("unbound secret still present: %#v", record.Container.SecretBindings)
+		}
+	}
+}
+
+func TestContainerStatusInfoClonesSecretBindings(t *testing.T) {
+	spec := ports.WorkloadSpec{
+		Kind: ports.WorkloadKindContainer,
+		SecretBindings: []ports.WorkloadSecretBinding{
+			{SecretID: "secret-a", EnvPrefix: "DB_"},
+			{SecretID: "secret-b", MountPath: "/run/secrets/app"},
+		},
+	}
+	status := containerStatusInfo(spec, ports.WorkloadStatus{State: ports.WorkloadStateRunning}, time.Unix(1000, 0))
+	if status == nil || len(status.SecretBindings) != 2 {
+		t.Fatalf("container status = %#v, want 2 cloned secret bindings", status)
+	}
+	// Mutating the clone must not touch the spec.
+	status.SecretBindings[0].SecretID = "mutated"
+	if spec.SecretBindings[0].SecretID != "secret-a" {
+		t.Fatalf("spec secret bindings were mutated: %#v", spec.SecretBindings)
+	}
+}
+
 func TestValidateInstanceEnvVarAcceptsExplicitEmptyValue(t *testing.T) {
 	empty := ""
 	if err := validateInstanceEnvVar(ports.InstanceEnvVar{Name: "OPTIONAL_FLAG", Value: &empty}); err != nil {

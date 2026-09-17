@@ -1547,6 +1547,25 @@ func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request
 		}
 	case ports.WorkloadLifecycleUpdateImage:
 		record.Image = ports.InstanceImageSummary{ID: strings.TrimSpace(request.ImageID)}
+	case ports.WorkloadLifecycleBindSecret:
+		if record.Container != nil {
+			binding := ports.WorkloadSecretBinding{SecretID: strings.TrimSpace(request.SecretID)}
+			switch strings.TrimSpace(request.BindingType) {
+			case "env":
+				binding.EnvName = strings.TrimSpace(request.EnvName)
+			case "file":
+				binding.MountPath = strings.TrimSpace(request.MountPath)
+			}
+			record.Container.SecretBindings = append(record.Container.SecretBindings, binding)
+			// Mirror scale/update_image: the reconciler observes the Deployment
+			// rollout and flips this to completed/failed.
+			record.Container.RolloutStatus = "progressing"
+		}
+	case ports.WorkloadLifecycleUnbindSecret:
+		if record.Container != nil {
+			record.Container.SecretBindings = removeSecretBinding(record.Container.SecretBindings, strings.TrimSpace(request.SecretID))
+			record.Container.RolloutStatus = "progressing"
+		}
 	case ports.WorkloadLifecycleAttachFilesystem:
 		attachment := ports.WorkloadStorageAttachment{
 			Name:         strings.TrimSpace(request.FilesystemID),
@@ -1650,6 +1669,22 @@ func specUnavailableForTenant(inventory ports.GPUInventory, ctx context.Context,
 		}
 	}
 	return ""
+}
+
+// removeSecretBinding drops every binding of the given secret from the
+// instance's container status (unbind_secret lifecycle bookkeeping).
+func removeSecretBinding(bindings []ports.WorkloadSecretBinding, secretID string) []ports.WorkloadSecretBinding {
+	if len(bindings) == 0 {
+		return bindings
+	}
+	next := make([]ports.WorkloadSecretBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.SecretID == secretID {
+			continue
+		}
+		next = append(next, binding)
+	}
+	return next
 }
 
 func removeStorageResource(items []ports.WorkloadStorageAttachment, resourceType, resourceID string) []ports.WorkloadStorageAttachment {

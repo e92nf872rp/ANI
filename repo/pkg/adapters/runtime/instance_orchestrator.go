@@ -652,6 +652,9 @@ func containerStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus, c
 	if spec.Container != nil && len(spec.Container.Env) > 0 {
 		containerStatus.Env = append([]ports.InstanceEnvVar(nil), spec.Container.Env...)
 	}
+	if len(spec.SecretBindings) > 0 {
+		containerStatus.SecretBindings = append([]ports.WorkloadSecretBinding(nil), spec.SecretBindings...)
+	}
 	return containerStatus
 }
 
