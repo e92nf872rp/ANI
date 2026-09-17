@@ -163,7 +163,7 @@ func (s *LocalStorageService) CreateVolume(ctx context.Context, request ports.St
 		VolumeID:        "vol_" + uuid.NewString(),
 		Name:            strings.TrimSpace(request.Name),
 		SizeGiB:         request.SizeGiB,
-		StorageClass:    firstNetworkNonEmpty(request.StorageClass, "standard"),
+		StorageClass:    firstNetworkNonEmpty(request.StorageClass, defaultVolumeStorageClassName),
 		Zone:            strings.TrimSpace(request.Zone),
 		VolumeType:      volumeType,
 		IOPS:            storageVolumeIOPS(volumeType),

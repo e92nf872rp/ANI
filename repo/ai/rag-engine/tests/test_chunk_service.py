@@ -98,6 +98,33 @@ def test_split_units_link_not_split_across_boundary():
     assert sum(1 for c in chunks if "[link](http://x)" in c) == 1
 
 
+def test_split_text_oversized_code_fence_truncated():
+    """Regression (embedding context limit): an oversized fenced code block
+    must be force-truncated into child-sized pieces instead of being emitted
+    as one huge child chunk (which blew bge-small-en-v1.5's 512-token limit
+    with HTTP 400 from the embedding endpoint).
+    """
+    big_code = "```json\n" + "x" * (CHILD_CHUNK_SIZE * 2 * 2 + 10) + "\n```"
+    chunks = _split_text_by_sentences(big_code, CHILD_CHUNK_SIZE)
+    assert len(chunks) >= 2
+    for c in chunks:
+        assert _estimate_tokens(c) <= CHILD_CHUNK_SIZE
+    # No content lost: pieces reassemble to the original fence.
+    assert "".join(chunks).replace(" ", "") == big_code.replace(" ", "")
+
+
+def test_split_text_oversized_link_stays_atomic():
+    """Links are NEVER split, even when oversized (explicit product rule:
+    a torn-apart URL is meaningless). The oversized link is emitted as one
+    chunk exceeding the budget.
+    """
+    big_link = "[" + "a" * (CHILD_CHUNK_SIZE * 2 * 2) + "](http://x)"
+    chunks = _split_text_by_sentences(big_link, CHILD_CHUNK_SIZE)
+    assert len(chunks) == 1
+    assert "(http://x)" in chunks[0]
+    assert _estimate_tokens(chunks[0]) > CHILD_CHUNK_SIZE
+
+
 # ── _force_truncate ───────────────────────────────────────────────────────────
 
 

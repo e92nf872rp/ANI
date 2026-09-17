@@ -3,6 +3,7 @@ import datetime
 from common.v1 import common_pb2 as _common_pb2
 from google.protobuf import empty_pb2 as _empty_pb2
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
+from google.protobuf import wrappers_pb2 as _wrappers_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
@@ -12,7 +13,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class CreateKBRequest(_message.Message):
-    __slots__ = ("tenant_id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode")
+    __slots__ = ("tenant_id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode", "default_inference_service")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
@@ -21,6 +22,7 @@ class CreateKBRequest(_message.Message):
     TOP_K_FIELD_NUMBER: _ClassVar[int]
     SCORE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
     RETRIEVAL_MODE_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_INFERENCE_SERVICE_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     name: str
     description: str
@@ -29,7 +31,8 @@ class CreateKBRequest(_message.Message):
     top_k: int
     score_threshold: float
     retrieval_mode: str
-    def __init__(self, tenant_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ...) -> None: ...
+    default_inference_service: str
+    def __init__(self, tenant_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ..., default_inference_service: _Optional[str] = ...) -> None: ...
 
 class GetKBRequest(_message.Message):
     __slots__ = ("tenant_id", "kb_id")
@@ -274,7 +277,7 @@ class RetrieveErrorEvent(_message.Message):
     def __init__(self, message: _Optional[str] = ..., code: _Optional[str] = ...) -> None: ...
 
 class KnowledgeBase(_message.Message):
-    __slots__ = ("tenant_id", "id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode", "status", "doc_count", "created_at", "updated_at")
+    __slots__ = ("tenant_id", "id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode", "status", "doc_count", "created_at", "updated_at", "default_inference_service")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
@@ -288,6 +291,7 @@ class KnowledgeBase(_message.Message):
     DOC_COUNT_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_INFERENCE_SERVICE_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     id: str
     name: str
@@ -301,7 +305,8 @@ class KnowledgeBase(_message.Message):
     doc_count: int
     created_at: _timestamp_pb2.Timestamp
     updated_at: _timestamp_pb2.Timestamp
-    def __init__(self, tenant_id: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ..., status: _Optional[str] = ..., doc_count: _Optional[int] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    default_inference_service: str
+    def __init__(self, tenant_id: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ..., status: _Optional[str] = ..., doc_count: _Optional[int] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., default_inference_service: _Optional[str] = ...) -> None: ...
 
 class KBDocument(_message.Message):
     __slots__ = ("tenant_id", "kb_id", "id", "file_name", "file_type", "file_size_bytes", "parse_status", "chunk_count", "error_message", "custom_metadata", "created_at", "parsed_at")
@@ -428,6 +433,64 @@ class GetKBPermissionsRequest(_message.Message):
     tenant_id: str
     kb_id: str
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ...) -> None: ...
+
+class GetKBConfigRequest(_message.Message):
+    __slots__ = ("tenant_id", "kb_id")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ...) -> None: ...
+
+class UpdateKBConfigRequest(_message.Message):
+    __slots__ = ("tenant_id", "kb_id", "idempotency_key", "embedding_model", "chunk_size", "ocr_enabled", "top_k", "score_threshold", "retrieval_mode")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    CHUNK_SIZE_FIELD_NUMBER: _ClassVar[int]
+    OCR_ENABLED_FIELD_NUMBER: _ClassVar[int]
+    TOP_K_FIELD_NUMBER: _ClassVar[int]
+    SCORE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    RETRIEVAL_MODE_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    idempotency_key: str
+    embedding_model: str
+    chunk_size: int
+    ocr_enabled: _wrappers_pb2.BoolValue
+    top_k: int
+    score_threshold: float
+    retrieval_mode: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., ocr_enabled: _Optional[_Union[_wrappers_pb2.BoolValue, _Mapping]] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ...) -> None: ...
+
+class UpdateKBConfigResponse(_message.Message):
+    __slots__ = ("config", "rebuild_task")
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
+    REBUILD_TASK_FIELD_NUMBER: _ClassVar[int]
+    config: KBConfig
+    rebuild_task: _common_pb2.AsyncTaskRef
+    def __init__(self, config: _Optional[_Union[KBConfig, _Mapping]] = ..., rebuild_task: _Optional[_Union[_common_pb2.AsyncTaskRef, _Mapping]] = ...) -> None: ...
+
+class KBConfig(_message.Message):
+    __slots__ = ("tenant_id", "kb_id", "embedding_model", "chunk_size", "ocr_enabled", "top_k", "score_threshold", "retrieval_mode")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    CHUNK_SIZE_FIELD_NUMBER: _ClassVar[int]
+    OCR_ENABLED_FIELD_NUMBER: _ClassVar[int]
+    TOP_K_FIELD_NUMBER: _ClassVar[int]
+    SCORE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    RETRIEVAL_MODE_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    embedding_model: str
+    chunk_size: int
+    ocr_enabled: bool
+    top_k: int
+    score_threshold: float
+    retrieval_mode: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., ocr_enabled: _Optional[bool] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ...) -> None: ...
 
 class KBPermissions(_message.Message):
     __slots__ = ("kb_id", "public_read", "allowed_user_ids", "updated_at")
@@ -596,3 +659,13 @@ class ReparseDocumentRequest(_message.Message):
     doc_id: str
     idempotency_key: str
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., doc_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
+
+class RebuildKBRequest(_message.Message):
+    __slots__ = ("tenant_id", "kb_id", "idempotency_key")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    idempotency_key: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...

@@ -145,7 +145,7 @@ def write(path: Path, content: str) -> None:
             chr(9) + '"encoding/json"' + chr(10) + chr(9) + '"encoding/hex"',
             chr(9) + '"encoding/hex"' + chr(10) + chr(9) + '"encoding/json"',
         )
-    path.write_text(content, encoding="utf-8")
+    path.write_text(content, encoding="utf-8", newline="\n")
 
 
 def generated_header(comment: str) -> str:

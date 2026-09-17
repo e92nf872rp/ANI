@@ -42,7 +42,7 @@ def test_embed_rpc_service_with_texts(monkeypatch):
         [0.4, 0.5, 0.6],
     ]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda: fake_model
+        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
     )
     svc = EmbedRPCService()
     vectors, dim = svc.embed(["hello", "world"])
@@ -78,7 +78,7 @@ async def test_embed_rpc_returns_flat_vectors(monkeypatch):
         [4.0, 5.0, 6.0],
     ]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda: fake_model
+        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()
@@ -97,7 +97,7 @@ async def test_embed_rpc_single_text(monkeypatch):
     fake_model = MagicMock()
     fake_model.get_text_embedding_batch.return_value = [[0.5, 0.6]]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda: fake_model
+        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()
@@ -110,11 +110,11 @@ async def test_embed_rpc_single_text(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_embed_rpc_error_handling(monkeypatch):
-    """Embed RPC error â†?INTERNAL."""
+    """Embed RPC error → INTERNAL."""
     fake_model = MagicMock()
     fake_model.get_text_embedding_batch.side_effect = RuntimeError("connection failed")
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda: fake_model
+        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()
@@ -122,6 +122,67 @@ async def test_embed_rpc_error_handling(monkeypatch):
     with pytest.raises(Exception):  # noqa: B017
         await servicer.Embed(req, ctx)
     assert ctx.aborted_code is not None
+
+
+# ── M2: per-model Embed RPC (EmbedRequest.model) ────────────────────────────
+
+
+def test_embed_rpc_service_routes_model_param(monkeypatch):
+    """EmbedRPCService.embed passes model through to get_embed_model."""
+    captured = {}
+
+    def _fake_get(model_name=""):
+        captured["model_name"] = model_name
+        return fake_model
+
+    fake_model = MagicMock()
+    fake_model.get_text_embedding_batch.return_value = [[0.1, 0.2]]
+    monkeypatch.setattr(
+        "app.services.embed_rpc_service.get_embed_model", _fake_get
+    )
+    svc = EmbedRPCService()
+    svc.embed(["text"], "bge-m3")
+    assert captured["model_name"] == "bge-m3"
+
+
+@pytest.mark.asyncio
+async def test_embed_rpc_model_field_routed(monkeypatch):
+    """gRPC Embed RPC: EmbedRequest.model → get_embed_model(model)."""
+    fake_model = MagicMock()
+    fake_model.get_text_embedding_batch.return_value = [[1.0, 2.0]]
+    monkeypatch.setattr(
+        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+    )
+    servicer = RagEngineServicer()
+    ctx = FakeContext()
+    req = rag_pb.EmbedRequest(texts=["a"], model="bge-m3")
+    resp = await servicer.Embed(req, ctx)
+    assert ctx.aborted_code is None
+    assert resp.count == 1
+    assert resp.dimension == 2
+
+
+@pytest.mark.asyncio
+async def test_embed_rpc_empty_model_uses_default(monkeypatch):
+    """gRPC Embed RPC: empty model → empty string passed (server default)."""
+    captured = {}
+
+    def _fake_get(model_name=""):
+        captured["model_name"] = model_name
+        return fake_model
+
+    fake_model = MagicMock()
+    fake_model.get_text_embedding_batch.return_value = [[1.0, 2.0]]
+    monkeypatch.setattr(
+        "app.services.embed_rpc_service.get_embed_model", _fake_get
+    )
+    servicer = RagEngineServicer()
+    ctx = FakeContext()
+    req = rag_pb.EmbedRequest(texts=["a"], model="")
+    resp = await servicer.Embed(req, ctx)
+    assert ctx.aborted_code is None
+    assert captured["model_name"] == ""
+    assert resp.count == 1
 
 
 if __name__ == "__main__":

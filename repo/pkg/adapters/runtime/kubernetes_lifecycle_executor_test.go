@@ -3,12 +3,14 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kubercloud/ani/pkg/adapters/resilience"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -346,6 +348,16 @@ func lifecycleResponse() *http.Response {
 	}
 }
 
+// lifecycleVMStoppedResponse reports the terminal "Stopped" printableStatus:
+// the state waitKubeVirtVMStopped requires before the follow-up start.
+func lifecycleVMStoppedResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Stopped"}}`)),
+	}
+}
+
 func TestKubernetesLifecycleExecutorScalesDeploymentReplicas(t *testing.T) {
 	var gotPath, gotBody string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
@@ -391,6 +403,330 @@ func TestKubernetesLifecycleExecutorScaleRejectsNonPositiveReplicas(t *testing.T
 	_, err := executor.Apply(context.Background(), req, record)
 	if err == nil {
 		t.Fatalf("expected error for replicas=0 scale, got nil")
+	}
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestKubernetesLifecycleExecutorUpdateImagePatchesDeploymentContainer(t *testing.T) {
+	var gotPath, gotBody, gotContentType string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		gotPath = r.URL.Path
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleUpdateImage)
+	req.ImageID = "image-new"
+	req.ImageRef = "registry.example/tenant-a/app:2"
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("UpdateImage Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	wantPath := "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	if gotContentType != "application/strategic-merge-patch+json" {
+		t.Fatalf("content type = %q, want strategic-merge patch", gotContentType)
+	}
+	for _, want := range []string{`"name":"app-01"`, `"image":"registry.example/tenant-a/app:2"`} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body = %s, want %s", gotBody, want)
+		}
+	}
+}
+
+// GPU container bind with binding_type=env + env_name adds a per-key env entry
+// (valueFrom.secretKeyRef, secret key = env var name) in a single targeted patch.
+func TestKubernetesLifecycleExecutorBindSecretEnvKeyPatchesDeployment(t *testing.T) {
+	var gotPath, gotBody, gotContentType string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		gotPath = r.URL.Path
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindGPUContainer
+	record.Name = "gpu-app-01"
+	record.ResourceRefs = []string{"kubernetes/Deployment/gpu-app-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "env"
+	req.EnvName = "DATABASE_URL"
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("BindSecret Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	wantPath := "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/gpu-app-01"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	if gotContentType != "application/strategic-merge-patch+json" {
+		t.Fatalf("content type = %q, want strategic-merge patch", gotContentType)
+	}
+	for _, want := range []string{
+		`"name":"gpu-app-01"`,
+		`"env":[{"name":"DATABASE_URL","valueFrom":{"secretKeyRef":{"key":"DATABASE_URL","name":"secret-a"}}}]`,
+	} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body = %s, want %s", gotBody, want)
+		}
+	}
+	if strings.Contains(gotBody, "volumes") {
+		t.Fatalf("env bind must not touch pod volumes: body = %s", gotBody)
+	}
+}
+
+// env bind without env_name extends the container's envFrom with a whole-secret
+// secretRef. envFrom is an atomic list, so the live list is read first and the
+// existing entries (prefix form) are preserved in the patch.
+func TestKubernetesLifecycleExecutorBindSecretEnvFromAppendsWholeSecret(t *testing.T) {
+	var sawGet bool
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			sawGet = true
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"spec":{"template":{"spec":{"containers":[{"name":"app-01",` +
+					`"envFrom":[{"prefix":"DB_","secretRef":{"name":"secret-db"}}]}]}}}}`)),
+			}, nil
+		}
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			b, _ := io.ReadAll(r.Body)
+			patchBody = string(b)
+			return lifecycleResponse(), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "env"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("BindSecret Apply() error = %v", err)
+	}
+	if !sawGet {
+		t.Fatalf("whole-secret env bind should read the live envFrom list first")
+	}
+	for _, want := range []string{
+		`"secretRef":{"name":"secret-a"}`,
+		`"prefix":"DB_"`,
+		`"secretRef":{"name":"secret-db"}`,
+	} {
+		if !strings.Contains(patchBody, want) {
+			t.Fatalf("body = %s, want %s", patchBody, want)
+		}
+	}
+}
+
+// file binding adds a secret volume plus a readOnly volumeMount; the volume
+// name is deterministic on (secret id, mount path).
+func TestKubernetesLifecycleExecutorBindSecretFileAddsVolumeAndMount(t *testing.T) {
+	var gotPath, patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		patchBody = string(b)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "file"
+	req.MountPath = "/run/secrets/app"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("BindSecret Apply() error = %v", err)
+	}
+	wantPath := "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	for _, want := range []string{
+		`"secret":{"secretName":"secret-a"}`,
+		`"name":"secret-secret-a--run-secrets-app"`,
+		`"mountPath":"/run/secrets/app"`,
+		`"readOnly":true`,
+	} {
+		if !strings.Contains(patchBody, want) {
+			t.Fatalf("body = %s, want %s", patchBody, want)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorBindSecretFileRequiresMountPath(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued for file bind without mount_path: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "file"
+
+	_, err := executor.Apply(context.Background(), req, lifecycleRecord())
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestKubernetesLifecycleExecutorBindSecretRejectsUnknownBindingType(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued for unknown binding type: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "sidecar"
+
+	_, err := executor.Apply(context.Background(), req, lifecycleRecord())
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestKubernetesLifecycleExecutorBindSecretRejectsVM(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued for VM secret bind: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleBindSecret)
+	req.SecretID = "secret-a"
+	req.BindingType = "env"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if !errors.Is(err, ports.ErrUnsupported) {
+		t.Fatalf("error = %v, want ErrUnsupported", err)
+	}
+}
+
+// Unbind removes every injection form of the secret from the live Deployment:
+// the per-key env entry and the volume/volumeMount pair via $patch: delete
+// directives, the envFrom entry via the filtered full list (other secrets and
+// prefixes stay intact).
+func TestKubernetesLifecycleExecutorUnbindSecretDeletesAllInjectionForms(t *testing.T) {
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"spec":{"template":{"spec":{` +
+					`"volumes":[{"name":"app-data","emptyDir":{}},{"name":"secret-secret-a--run-secrets-app","secret":{"secretName":"secret-a"}}],` +
+					`"containers":[{"name":"app-01",` +
+					`"env":[{"name":"APP_MODE","value":"prod"},{"name":"DATABASE_URL","valueFrom":{"secretKeyRef":{"name":"secret-a","key":"DATABASE_URL"}}}],` +
+					`"envFrom":[{"prefix":"DB_","secretRef":{"name":"secret-a"}},{"secretRef":{"name":"secret-b"}}],` +
+					`"volumeMounts":[{"name":"app-data","mountPath":"/data"},{"name":"secret-secret-a--run-secrets-app","mountPath":"/run/secrets/app"}]}]}}}}`)),
+			}, nil
+		}
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			b, _ := io.ReadAll(r.Body)
+			patchBody = string(b)
+			return lifecycleResponse(), nil
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleUnbindSecret)
+	req.SecretID = "secret-a"
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("UnbindSecret Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	for _, want := range []string{
+		`"env":[{"$patch":"delete","name":"DATABASE_URL"}]`,
+		`"envFrom":[{"secretRef":{"name":"secret-b"}}]`,
+		`"volumes":[{"$patch":"delete","name":"secret-secret-a--run-secrets-app"}]`,
+		`"volumeMounts":[{"$patch":"delete","mountPath":"/run/secrets/app"}]`,
+	} {
+		if !strings.Contains(patchBody, want) {
+			t.Fatalf("body = %s, want %s", patchBody, want)
+		}
+	}
+	for _, banned := range []string{
+		`"secretName":"secret-a"`,
+		`"secretRef":{"name":"secret-a"}`,
+		`"key":"DATABASE_URL"`,
+	} {
+		if strings.Contains(patchBody, banned) {
+			t.Fatalf("unbind patch must not keep the unbound secret (%s): body = %s", banned, patchBody)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorUnbindSecretNotFoundWhenNotBound(t *testing.T) {
+	var sawPatch bool
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"spec":{"template":{"spec":{"containers":[{"name":"app-01",` +
+					`"envFrom":[{"secretRef":{"name":"secret-b"}}]}]}}}}`)),
+			}, nil
+		}
+		if r.Method == http.MethodPatch {
+			sawPatch = true
+		}
+		return lifecycleResponse(), nil
+	})
+	req := lifecycleRequest(ports.WorkloadLifecycleUnbindSecret)
+	req.SecretID = "secret-a"
+
+	_, err := executor.Apply(context.Background(), req, lifecycleRecord())
+	if !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+	if sawPatch {
+		t.Fatalf("unbind of an unbound secret must not patch the Deployment")
+	}
+}
+
+func TestKubernetesLifecycleExecutorUpdateImageRequiresResolvedRef(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued without a resolved image ref: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleUpdateImage)
+	req.ImageID = "image-new"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if err == nil {
+		t.Fatalf("expected error for missing image ref, got nil")
 	}
 	if !errors.Is(err, ports.ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
@@ -630,7 +966,7 @@ func TestKubernetesLifecycleExecutorResizeVMWithoutSpecIDRestarts(t *testing.T) 
 	var requests []string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
-		return lifecycleResponse(), nil
+		return lifecycleVMStoppedResponse(), nil
 	})
 	record := lifecycleRecord()
 	record.Kind = ports.WorkloadKindVM
@@ -645,10 +981,699 @@ func TestKubernetesLifecycleExecutorResizeVMWithoutSpecIDRestarts(t *testing.T) 
 	}
 	want := []string{
 		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
 		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRestartsKubeVirtVMViaStopWaitStart(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		return lifecycleVMStoppedResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleRestart), record); err != nil {
+		t.Fatalf("Restart Apply() error = %v", err)
+	}
+	want := []string{
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want stop-wait-start sequence %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRestartWaitsForVMToStopBeforeStart(t *testing.T) {
+	var gets int
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			gets++
+			if gets == 1 {
+				// First observation still reports Running: shutdown has not landed yet.
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+				}, nil
+			}
+			// Shutdown landed: report the terminal Stopped status.
+			return lifecycleVMStoppedResponse(), nil
+		}
+		return lifecycleVMStoppedResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleRestart), record); err != nil {
+		t.Fatalf("Restart Apply() error = %v", err)
+	}
+	want := []string{
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want stop-poll-poll-start sequence %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRestartTimesOutWhenVMNeverStops(t *testing.T) {
+	var requests []string
+	now := time.Unix(1000, 0)
+	clock := func() time.Time {
+		now = now.Add(kubeVirtRestartStopTimeout + time.Minute)
+		return now
+	}
+	executor := NewKubernetesLifecycleExecutor(
+		newLifecycleRESTClient(t, func(r *http.Request) (*http.Response, error) {
+			requests = append(requests, r.Method+" "+r.URL.Path)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+			}, nil
+		}),
+		WithKubernetesLifecycleEnabled(true),
+		WithKubernetesLifecycleClock(clock),
+	)
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+
+	_, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleRestart), record)
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+	for _, req := range requests {
+		if strings.HasSuffix(req, "/start") {
+			t.Fatalf("start issued before VM stopped: requests = %#v", requests)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorSnapshotVMCreatesKubeVirtSnapshot(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			return crPhaseResponse("Succeeded"), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleSnapshot)
+	req.IdempotencyKey = "snap-key-01"
+	req.SnapshotName = "before-upgrade"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Snapshot Apply() error = %v", err)
+	}
+	want := []string{
+		"PATCH /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap-key-01",
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap-key-01",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRollbackVMCreatesKubeVirtRestore(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			if strings.Contains(r.URL.Path, "/virtualmachinerestores/") {
+				return crCompleteResponse(), nil
+			}
+			return crPhaseResponse("Succeeded"), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRollback)
+	req.SnapshotID = "snap_1fc44f4a-70ea"
+	req.IdempotencyKey = "rollback-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Rollback Apply() error = %v", err)
+	}
+	want := []string{
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap-1fc44f4a-70ea",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PATCH /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap-1fc44f4a-70ea-rollback-key-01",
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap-1fc44f4a-70ea-rollback-key-01",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+// Running-VM rollback must power the VM off before KubeVirt will restore it,
+// then start it again after the restore completes.
+func TestKubernetesLifecycleExecutorRollbackRunningVMStopsRestoresStarts(t *testing.T) {
+	var requests []string
+	var vmGets int
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			vmGets++
+			if vmGets == 1 {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Stopped"}}`)),
+			}, nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/virtualmachinerestores/"):
+			return crCompleteResponse(), nil
+		case r.Method == http.MethodGet:
+			return crPhaseResponse("Succeeded"), nil
+		default:
+			return lifecycleResponse(), nil
+		}
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRollback)
+	req.SnapshotID = "snap-1fc44f4a-70ea"
+	req.IdempotencyKey = "rollback-key-04"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Rollback Apply() error = %v", err)
+	}
+	want := []string{
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinesnapshots/snap-1fc44f4a-70ea",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PATCH /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap-1fc44f4a-70ea-rollback-key-04",
+		"GET /apis/snapshot.kubevirt.io/v1beta1/namespaces/ani-tenant-tenant-a/virtualmachinerestores/restore-snap-1fc44f4a-70ea-rollback-key-04",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want stop-restore-start sequence %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRollbackVMRejectsMissingProviderSnapshot(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			return nil, &resilience.StatusError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"reason":"NotFound","message":"virtualmachinesnapshots not found"}`,
+			}
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRollback)
+	req.SnapshotID = "snap_metadata_only"
+	req.IdempotencyKey = "rollback-key-02"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+	for _, req := range requests {
+		if strings.Contains(req, "virtualmachinerestores") {
+			t.Fatalf("restore created without provider snapshot: requests = %#v", requests)
+		}
+	}
+}
+
+func TestKubernetesLifecycleExecutorRollbackVMFailsOnFailedSnapshot(t *testing.T) {
+	// VirtualMachineRestore has no status.phase: a restore that never reaches
+	// status.complete=true must surface as a conflict timeout instead of
+	// blocking forever. A fast clock short-circuits the wait.
+	var requests []string
+	now := time.Unix(1000, 0)
+	clock := func() time.Time {
+		now = now.Add(kubeVirtRestoreTimeout + time.Minute)
+		return now
+	}
+	executor := NewKubernetesLifecycleExecutor(
+		newLifecycleRESTClient(t, func(r *http.Request) (*http.Response, error) {
+			requests = append(requests, r.Method+" "+r.URL.Path)
+			if r.Method == http.MethodGet {
+				if strings.Contains(r.URL.Path, "/virtualmachinerestores/") {
+					return crPhaseResponse("InProgress"), nil
+				}
+				return crPhaseResponse("Succeeded"), nil
+			}
+			return lifecycleResponse(), nil
+		}),
+		WithKubernetesLifecycleEnabled(true),
+		WithKubernetesLifecycleClock(clock),
+	)
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRollback)
+	req.SnapshotID = "snap_failed"
+	req.IdempotencyKey = "rollback-key-03"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+	sawRestore := false
+	for _, req := range requests {
+		if strings.Contains(req, "virtualmachinerestores") {
+			sawRestore = true
+		}
+	}
+	if !sawRestore {
+		t.Fatalf("restore was never applied: requests = %#v", requests)
+	}
+}
+
+// Rebuild recreates the VirtualMachine CR: stop (when running) → capture spec
+// → delete → wait gone → re-apply → start. The containerDisk root is
+// image-derived, so the recreated VMI boots a fresh system disk.
+func TestKubernetesLifecycleExecutorRebuildRunningVMStopsDeletesReappliesStarts(t *testing.T) {
+	var requests []string
+	var vmGets int
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			vmGets++
+			switch vmGets {
+			case 1: // running check
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+				}, nil
+			case 2: // wait-stopped poll
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Stopped"}}`)),
+				}, nil
+			case 3: // spec capture
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body: io.NopCloser(strings.NewReader(`{"metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a",` +
+						`"labels":{"ani.dev/instance":"vm-01"},"annotations":{"ani.kubercloud.io/owner":"tenant-a"}},` +
+						`"spec":{"running":false,"template":{"spec":{"domain":{}}}}}`)),
+				}, nil
+			default: // gone poll
+				return nil, &resilience.StatusError{
+					StatusCode: http.StatusNotFound,
+					Body:       `{"reason":"NotFound","message":"virtualmachines not found"}`,
+				}
+			}
+		default:
+			return lifecycleResponse(), nil
+		}
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRebuild)
+	req.IdempotencyKey = "rebuild-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Rebuild Apply() error = %v", err)
+	}
+	want := []string{
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"DELETE /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PATCH /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want stop-capture-delete-reapply-start sequence %#v", requests, want)
+	}
+	// Server-side apply derives the object name from the body: a manifest
+	// without metadata.name fails with HTTP 400 on the real API (VM-10).
+	if !strings.Contains(patchBody, `"name":"vm-01"`) || !strings.Contains(patchBody, `"namespace":"ani-tenant-tenant-a"`) {
+		t.Fatalf("re-apply manifest missing name/namespace: body = %s", patchBody)
+	}
+}
+
+// Filesystem attach rewrites the VM spec with a virtiofs device plus its
+// backing PVC volume; a running VM is stopped first and started again.
+func TestKubernetesLifecycleExecutorAttachFilesystemRunningVMStopsAppliesStarts(t *testing.T) {
+	var requests []string
+	var vmGets int
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/virtualmachines/vm-01"):
+			vmGets++
+			switch vmGets {
+			case 1: // running check
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Running"}}`)),
+				}, nil
+			case 2: // wait-stopped poll
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":{"printableStatus":"Stopped"}}`)),
+				}, nil
+			case 3: // spec capture
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body: io.NopCloser(strings.NewReader(`{"metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a"},` +
+						`"spec":{"running":false,"template":{"spec":{"domain":{"devices":{"disks":[{"name":"containerdisk","disk":{"bus":"virtio"}}]}},` +
+						`"volumes":[{"name":"containerdisk","containerDisk":{"image":"rocky:10"}}]}}}}`)),
+				}, nil
+			default:
+				return lifecycleResponse(), nil
+			}
+		default:
+			return lifecycleResponse(), nil
+		}
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleAttachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.MountPath = "/mnt/nfs"
+	req.IdempotencyKey = "fs-attach-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("AttachFilesystem Apply() error = %v", err)
+	}
+	want := []string{
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"GET /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PATCH /apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want stop-apply-start sequence %#v", requests, want)
+	}
+	if !strings.Contains(patchBody, `"virtiofs":{}`) {
+		t.Fatalf("re-apply manifest missing virtiofs device: body = %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"claimName":"fs-fs-dfe99bff-b68c-4528-88ce-ac8fe62ac734"`) {
+		t.Fatalf("re-apply manifest missing filesystem claim: body = %s", patchBody)
+	}
+	// QEMU rejects virtiofs tags longer than 36 bytes; the volume name doubles
+	// as the tag, so it must be the dash-free truncated form.
+	if !strings.Contains(patchBody, `"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73"`) {
+		t.Fatalf("re-apply manifest missing tag-safe filesystem name: body = %s", patchBody)
+	}
+	if strings.Contains(patchBody, `"name":"fs-dfe99bff-b68c-4528-88ce-ac8fe62ac734"`) {
+		t.Fatalf("re-apply manifest uses over-limit virtiofs tag name: body = %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"containerDisk":{"image":"rocky:10"}`) {
+		t.Fatalf("re-apply manifest dropped existing volumes: body = %s", patchBody)
+	}
+}
+
+func TestKubernetesLifecycleExecutorDetachFilesystemRemovesVirtiofsDevice(t *testing.T) {
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/virtualmachines/vm-01") {
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{"metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a"},` +
+				`"spec":{"running":false,"template":{"spec":{"domain":{"devices":{"filesystems":[{"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73","virtiofs":{}}]}},` +
+				`"volumes":[{"name":"containerdisk","containerDisk":{"image":"rocky:10"}},{"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73","persistentVolumeClaim":{"claimName":"fs-fs-dfe99bff-b68c-4528-88ce-ac8fe62ac734"}}]}}}}`)),
+		}, nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleDetachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.IdempotencyKey = "fs-detach-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("DetachFilesystem Apply() error = %v", err)
+	}
+	if strings.Contains(patchBody, "virtiofs") || strings.Contains(patchBody, "fs-fs-dfe99bff") {
+		t.Fatalf("re-apply manifest still contains filesystem entries: body = %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"containerDisk":{"image":"rocky:10"}`) {
+		t.Fatalf("re-apply manifest dropped existing volumes: body = %s", patchBody)
+	}
+}
+
+func TestKubeVirtFilesystemVolumeNameTagSafe(t *testing.T) {
+	got := kubeVirtFilesystemVolumeName("fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734")
+	if got != "fs-fsdfe99bffb68c452888ceac8fe62ac73" {
+		t.Fatalf("kubeVirtFilesystemVolumeName() = %q", got)
+	}
+	if len(got) > 36 {
+		t.Fatalf("volume name %q exceeds QEMU 36-byte virtiofs tag limit", got)
+	}
+	if again := kubeVirtFilesystemVolumeName("fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"); again != got {
+		t.Fatalf("volume name derivation is not deterministic: %q vs %q", got, again)
+	}
+}
+
+// Container/gpu_container filesystem attach patches the Deployment pod template
+// in place: the fs PVC joins volumes and the workload container gets a
+// matching volumeMount, triggering a rollout like update_image.
+func TestKubernetesLifecycleExecutorAttachFilesystemGPUPatchesDeployment(t *testing.T) {
+	var requests []string
+	var patchBody string
+	var patchContentType string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/gpu-app-01") {
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			patchContentType = r.Header.Get("Content-Type")
+			return lifecycleResponse(), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindGPUContainer
+	record.Name = "gpu-app-01"
+	record.ResourceRefs = []string{"kubernetes/Deployment/gpu-app-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleAttachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.MountPath = "/mnt/nfs"
+	req.IdempotencyKey = "gpu-fs-attach-key-01"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("AttachFilesystem Apply() error = %v", err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("requests = %#v, want a single targeted Deployment patch", requests)
+	}
+	if !strings.HasSuffix(requests[0], "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/gpu-app-01") {
+		t.Fatalf("request = %q, want Deployment patch", requests[0])
+	}
+	if patchContentType != "application/strategic-merge-patch+json" {
+		t.Fatalf("patch content type = %q", patchContentType)
+	}
+	if !strings.Contains(patchBody, `"claimName":"fs-fs-dfe99bff-b68c-4528-88ce-ac8fe62ac734"`) {
+		t.Fatalf("patch missing filesystem claim: body = %s", patchBody)
+	}
+	// The volume name is deterministic so detach can find the entries again.
+	if !strings.Contains(patchBody, `"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73"`) {
+		t.Fatalf("patch missing filesystem volume: body = %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"mountPath":"/mnt/nfs"`) || !strings.Contains(patchBody, `"name":"gpu-app-01"`) {
+		t.Fatalf("patch missing container volumeMount: body = %s", patchBody)
+	}
+}
+
+// Container detach removes both the PVC volume (merge key name) and the
+// container volumeMount (merge key mountPath) via $patch: delete directives.
+func TestKubernetesLifecycleExecutorDetachFilesystemContainerDeletesVolumeAndMount(t *testing.T) {
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.StorageAttachments = []ports.WorkloadStorageAttachment{{
+		Name:         "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734",
+		Kind:         ports.StorageAttachmentSharedPVC,
+		ResourceType: "filesystem",
+		ResourceID:   "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734",
+		MountPath:    "/mnt/nfs",
+		Status:       "mounted",
+	}}
+	req := lifecycleRequest(ports.WorkloadLifecycleDetachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.IdempotencyKey = "fs-detach-key-11"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("DetachFilesystem Apply() error = %v", err)
+	}
+	if !strings.Contains(patchBody, `"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73"`) || !strings.Contains(patchBody, `"$patch":"delete"`) {
+		t.Fatalf("patch missing volume delete directive: body = %s", patchBody)
+	}
+	// volumeMounts merge by mountPath, so the delete directive must carry it
+	// (map key order is sorted in the marshalled patch).
+	if !strings.Contains(patchBody, `"mountPath":"/mnt/nfs"`) || !strings.Contains(patchBody, `"$patch":"delete"`) {
+		t.Fatalf("patch missing volumeMount delete directive: body = %s", patchBody)
+	}
+	if strings.Contains(patchBody, "claimName") {
+		t.Fatalf("detach patch must not add the PVC volume: body = %s", patchBody)
+	}
+}
+
+// When the record does not carry the mount path, detach reads the live
+// Deployment and locates the volumeMount backing the filesystem volume.
+func TestKubernetesLifecycleExecutorDetachFilesystemContainerFallsBackToLiveMountPath(t *testing.T) {
+	var patchBody string
+	var sawGet bool
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			sawGet = true
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"spec":{"template":{"spec":{"containers":[{"name":"app-01",` +
+					`"volumeMounts":[{"name":"app-data","mountPath":"/data"},{"name":"fs-fsdfe99bffb68c452888ceac8fe62ac73","mountPath":"/data/nfs"}]}]}}}}`)),
+			}, nil
+		}
+		if r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/deployments/app-01") {
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			return lifecycleResponse(), nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleDetachFilesystem)
+	req.FilesystemID = "fs_dfe99bff-b68c-4528-88ce-ac8fe62ac734"
+	req.IdempotencyKey = "fs-detach-key-12"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("DetachFilesystem Apply() error = %v", err)
+	}
+	if !sawGet {
+		t.Fatalf("detach should read the live Deployment to resolve the mount path")
+	}
+	if !strings.Contains(patchBody, `"mountPath":"/data/nfs"`) || !strings.Contains(patchBody, `"$patch":"delete"`) {
+		t.Fatalf("patch delete uses mount path from live Deployment: body = %s", patchBody)
+	}
+}
+
+func TestKubernetesLifecycleExecutorRebuildRejectsMissingVM(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		return nil, &resilience.StatusError{
+			StatusCode: http.StatusNotFound,
+			Body:       `{"reason":"NotFound","message":"virtualmachines not found"}`,
+		}
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+	req := lifecycleRequest(ports.WorkloadLifecycleRebuild)
+	req.IdempotencyKey = "rebuild-key-02"
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+
+// crPhaseResponse returns a snapshot.kubevirt.io style object with the given
+// status.phase.
+func crPhaseResponse(phase string) *http.Response {
+	body := fmt.Sprintf(`{"status":{"phase":%q}}`, phase)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+// crCompleteResponse returns a VirtualMachineRestore style object whose
+// status.complete is true (VirtualMachineRestore has no status.phase).
+func crCompleteResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"status":{"complete":true}}`)),
 	}
 }
 

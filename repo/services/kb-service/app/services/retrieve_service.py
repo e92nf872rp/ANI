@@ -52,7 +52,9 @@ class _RagEngineEmbedder(Protocol):
     ``texts``), so callers must pass ``embed(texts=[...])``.
     """
 
-    async def embed(self, *, texts: list[str]) -> tuple[list[list[float]], int]: ...
+    async def embed(
+        self, *, texts: list[str], model: str = ""
+    ) -> tuple[list[list[float]], int]: ...
 
 
 @runtime_checkable
@@ -156,6 +158,7 @@ class RetrieveService:
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         retrieval_mode: str = "hybrid",
         vector_store_id: str | None = None,
+        embedding_model: str = "",
     ) -> tuple[list[dict[str, Any]], float]:
         """Run hybrid retrieval and return (sources, max_score).
 
@@ -182,15 +185,21 @@ class RetrieveService:
 
         # ── Vector leg (hybrid | vector) ──────────────────────────────────
         if retrieval_mode in ("hybrid", "vector"):
-            vectors, _dim = await self._rag_engine.embed(texts=[question])
-            query_vector = vectors[0] if vectors else []
-            core = self._core_client_factory(tenant_id)
-            vector_results = await core.search_vector_store(
-                vector_store_id=vector_store_id,
-                vector=query_vector,
-                top_k=top_k * 2,
-                filter_expr=None,
+            vectors, _dim = await self._rag_engine.embed(
+                texts=[question], model=embedding_model
             )
+            query_vector = vectors[0] if vectors else []
+            # async with ensures the per-call CoreClient's httpx pool is
+            # released even when the factory builds a fresh client (the
+            # production default does); otherwise every retrieval leaks one
+            # AsyncClient connection pool.
+            async with self._core_client_factory(tenant_id) as core:
+                vector_results = await core.search_vector_store(
+                    vector_store_id=vector_store_id,
+                    vector=query_vector,
+                    top_k=top_k * 2,
+                    filter_expr=None,
+                )
             vector_ranked = [
                 (str(r.get("metadata", {}).get("chunk_id", "")), float(r.get("score", 0.0) or 0.0))
                 for r in vector_results

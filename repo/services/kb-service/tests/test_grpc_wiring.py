@@ -45,7 +45,7 @@ P0_RPCS = [
     "GetDocumentUploadURL", "NotifyDocumentUploaded",
     "GetDocument", "ListDocuments", "DeleteDocument", "Query",
 ]
-P1_RPCS = ["ListKBCitations", "ListKBSessions", "UpdateKBPermissions"]
+P1_RPCS = ["ListKBCitations", "ListKBSessions", "UpdateKBPermissions", "RebuildKB"]
 
 
 def test_servicer_still_declares_all_rpcs():
@@ -437,3 +437,225 @@ class _StubContext:
 
     def abort(self, code, message):
         raise RuntimeError(f"aborted: {code} {message}")
+
+
+# ── CreateKB: replay of a soft-deleted KB must re-create (B-fix) ─────────────
+
+
+def test_create_kb_replay_of_deleted_kb_recreates():
+    """Bug: delete → same-name re-create returned the deleted KB's old id
+    and the new KB never appeared in the list. The name-fallback key
+    create_kb:{tenant}:{name} is shared by every same-name create in the
+    tenant, so the replay check finds the deleted KB's completed task row.
+    The guard must skip the stale replay (get_kb hides deleted rows →
+    None) and take the INSERT path: a NEW kb id, not the deleted KB's
+    snapshot. The Core idempotency keys must also be derived per-request
+    (create_vs:{tenant}:{kb_id}), never the shared fallback key."""
+    new_kb_id = uuid.uuid4()
+
+    class _ReplayDeletedConn:
+        """find_by_idempotency_key → a completed task whose result is the
+        DELETED KB's snapshot (id = the OLD kb id); get_kb → None
+        (soft-deleted rows are hidden); the kb INSERT → a fresh row."""
+
+        def __init__(self):
+            self.events: list[str] = []
+
+        def transaction(self):
+            @asynccontextmanager
+            async def _tx():
+                yield self
+            return _tx()
+
+        async def execute(self, sql, *args):
+            return "UPDATE 1"
+
+        async def fetchrow(self, sql, *args):
+            if "FROM async_tasks" in sql and "idempotency_key" in sql:
+                self.events.append("find_idempotency")
+                return {
+                    "id": uuid.uuid4(),
+                    "status": "completed",
+                    # JSONB snapshot of the deleted KB (OLD id).
+                    "result": {
+                        "id": KB_ID,
+                        "tenant_id": TENANT_ID,
+                        "name": "kb-replay",
+                        "status": "deleted",
+                    },
+                }
+            if "INSERT INTO knowledge_bases" in sql:
+                self.events.append("insert_kb")
+                return {
+                    "id": new_kb_id,
+                    "tenant_id": uuid.UUID(TENANT_ID),
+                    "name": "kb-replay",
+                    "description": "",
+                    "embedding_model": "bge-m3",
+                    "chunk_size": 1024,
+                    "top_k": 5,
+                    "score_threshold": 0.0,
+                    "retrieval_mode": "hybrid",
+                    "status": "active",
+                    "doc_count": 0,
+                }
+            if "INSERT INTO kb_audit_log" in sql:
+                self.events.append("insert_audit")
+                return {"id": uuid.uuid4()}
+            if "INSERT INTO async_tasks" in sql:
+                self.events.append("insert_async_tasks")
+                return {"id": uuid.uuid4(), "status": "pending"}
+            if "FROM knowledge_bases" in sql:
+                # get_kb guard: the recorded KB is soft-deleted → hidden.
+                self.events.append("get_kb_deleted")
+                return None
+            return None
+
+        async def fetch(self, sql, *args):
+            return []
+
+        async def fetchval(self, sql, *args):
+            return 0
+
+    conn = _ReplayDeletedConn()
+
+    class _SharedPool:
+        @asynccontextmanager
+        async def acquire(self):
+            yield conn
+
+    @asynccontextmanager
+    async def core_factory(tenant_id):
+        yield core
+
+    core = _MockCoreClient()
+    servicer = KBServiceServicer(
+        pool=_SharedPool(), core_client_factory=core_factory
+    )
+    req = kb_pb.CreateKBRequest(tenant_id=TENANT_ID, name="kb-replay")
+
+    import asyncio
+
+    result = asyncio.new_event_loop().run_until_complete(
+        servicer._create_kb(req, _StubContext())
+    )
+
+    # The re-create took the INSERT path — not the deleted KB's snapshot.
+    assert "insert_kb" in conn.events
+    assert str(result.id) != KB_ID
+    assert str(result.id) == str(new_kb_id)
+    assert result.name == "kb-replay"
+    # Core idempotency keys are derived per-request (never the shared
+    # fallback key, which would replay the deleted KB's vector store).
+    create_calls = [c for c in core.calls if c[0] == "create_vector_store"]
+    assert len(create_calls) == 1
+    assert create_calls[0][1]["idempotency_key"] == (
+        f"create_vs:{TENANT_ID}:{new_kb_id}"
+    )
+    link_calls = [c for c in core.calls if c[0] == "set_knowledge_base_link"]
+    assert len(link_calls) == 1
+    assert link_calls[0][1]["idempotency_key"] == (
+        f"create_vs:{TENANT_ID}:{new_kb_id}:kblink"
+    )
+
+
+# ── DeleteKB: kb.create replay-record cleanup (C-fix) ────────────────────────
+
+
+def test_delete_kb_cleans_create_replay_records():
+    """DeleteKB must drop the deleted KB's kb.create async_tasks replay
+    rows (C-fix): the create fallback key create_kb:{tenant}:{name} is
+    shared by every same-name create, so a surviving row replays the
+    deleted KB's snapshot on the next same-name create. The cleanup runs
+    after the soft-delete, is best-effort, and does not block the Core
+    vector-store cleanup."""
+    class _DeleteConn:
+        def __init__(self):
+            self.execute_calls: list[tuple] = []
+            self._kb_row = {
+                "id": uuid.UUID(KB_ID),
+                "tenant_id": uuid.UUID(TENANT_ID),
+                "name": "kb",
+                "description": "desc",
+                "embedding_model": "bge-m3",
+                "chunk_size": 512,
+                "top_k": 5,
+                "score_threshold": 0.3,
+                "retrieval_mode": "hybrid",
+                "status": "active",
+                "doc_count": 0,
+                "default_inference_service": None,
+                "vector_store_id": "77777777-7777-7777-7777-777777777777",
+            }
+
+        def transaction(self):
+            @asynccontextmanager
+            async def _tx():
+                yield self
+            return _tx()
+
+        async def execute(self, sql, *args):
+            self.execute_calls.append((sql, args))
+            if sql.startswith("SET LOCAL"):
+                return None
+            if "DELETE FROM async_tasks" in sql:
+                return "DELETE 1"
+            return "UPDATE 1"
+
+        async def fetchrow(self, sql, *args):
+            if "INSERT INTO kb_audit_log" in sql:
+                return {"id": uuid.uuid4()}
+            if "FROM knowledge_bases" in sql:
+                return self._kb_row
+            return None
+
+        async def fetch(self, sql, *args):
+            return []
+
+        async def fetchval(self, sql, *args):
+            return 0
+
+    conn = _DeleteConn()
+
+    class _SharedPool:
+        @asynccontextmanager
+        async def acquire(self):
+            yield conn
+
+    @asynccontextmanager
+    async def core_factory(tenant_id):
+        yield core
+
+    core = _MockCoreClient()
+    servicer = KBServiceServicer(
+        pool=_SharedPool(), core_client_factory=core_factory
+    )
+    req = kb_pb.DeleteKBRequest(tenant_id=TENANT_ID, kb_id=KB_ID)
+
+    import asyncio
+
+    result = asyncio.new_event_loop().run_until_complete(
+        servicer._delete_kb(req, _StubContext())
+    )
+    assert result is not None
+
+    # The soft-delete ran…
+    soft_delete = [
+        (s, a) for s, a in conn.execute_calls
+        if "UPDATE knowledge_bases" in s and "status = 'deleted'" in s
+    ]
+    assert len(soft_delete) == 1
+    # …and the kb.create replay rows were deleted afterwards.
+    replay_delete = [
+        (s, a) for s, a in conn.execute_calls
+        if "DELETE FROM async_tasks" in s
+    ]
+    assert len(replay_delete) == 1
+    sql, args = replay_delete[0]
+    assert "task_type = 'kb.create'" in sql
+    assert args == (uuid.UUID(TENANT_ID), uuid.UUID(KB_ID))
+    assert conn.execute_calls.index(soft_delete[0]) < conn.execute_calls.index(
+        replay_delete[0]
+    )
+    # The Core best-effort vector cleanup still runs.
+    assert any(c[0] == "delete_vector_store" for c in core.calls)

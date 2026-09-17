@@ -42,8 +42,31 @@ class Settings(BaseSettings):
     # to ``nats_parse_subject_v2`` (kb-service consumer path).
     kb_parse_consumer_enabled: bool = False
 
+    # P1 #24 full-KB rebuild: dedicated subject for kb.rebuild outbox
+    # events (OutboxDispatcher routes event_type 'kb.rebuild' here via
+    # subject_overrides), consumed by app/consumers/rebuild_consumer.py.
+    # Distinct from the parse subjects: rebuild is a long serial job and
+    # must not interleave with per-document parse traffic.
+    nats_rebuild_subject: str = "ani.tasks.kb.rebuild.v1"
+
+    # P1 #24: kb-service rebuild consumer flag (default OFF, mirrors
+    # kb_parse_consumer_enabled rollout). When False the consumer does
+    # not start; rebuild outbox events stay queued until the flag is
+    # enabled (at-least-once via the outbox, no loss).
+    kb_rebuild_consumer_enabled: bool = False
+
     # Redis (session cache) — maps to env REDIS_URL
     redis_url: str = "redis://localhost:6379/0"
+
+    # Embedding model defaults — maps to the shared env EMBEDDING_MODEL /
+    # EMBEDDING_DIM (same keys rag-engine reads; pydantic-settings is
+    # case-insensitive). Used by CreateKB as the fallback when the request
+    # omits embedding_model, and as the Core vector-store dimension. The
+    # default value mirrors the shared .env EMBEDDING_MODEL (SiliconFlow
+    # requires the full prefixed name "BAAI/bge-m3"; the bare alias is NOT
+    # recognised by the remote endpoint).
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
 
     model_config = SettingsConfigDict(
         env_file=".env",

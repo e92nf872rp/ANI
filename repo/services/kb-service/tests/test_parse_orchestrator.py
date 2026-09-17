@@ -77,7 +77,7 @@ class _FakeRagEngine:
         self._dimension = dimension
         self._summary_answer = summary_answer
         self.parse_calls: list[dict] = []
-        self.embed_calls: list[list[str]] = []
+        self.embed_calls: list[dict] = []
         self.generate_calls: list[dict] = []
 
     async def parse(
@@ -96,8 +96,10 @@ class _FakeRagEngine:
         })
         return [dict(c) for c in self._chunks]
 
-    async def embed(self, *, texts: list[str]) -> tuple[list[list[float]], int]:
-        self.embed_calls.append(list(texts))
+    async def embed(
+        self, *, texts: list[str], model: str = ""
+    ) -> tuple[list[list[float]], int]:
+        self.embed_calls.append({"texts": list(texts), "model": model})
         # Return one vector per text (cycle if fewer pre-built vectors).
         out = []
         for i in range(len(texts)):
@@ -435,7 +437,7 @@ async def test_embed_separates_summary_from_children():
 
     # embed called once with child texts + summary text
     assert len(rag.embed_calls) == 1
-    embedded_texts = rag.embed_calls[0]
+    embedded_texts = rag.embed_calls[0]["texts"]
     # 2 children + 1 summary = 3 texts
     assert len(embedded_texts) == 3
     # First two are child contents
@@ -758,7 +760,7 @@ async def test_no_children_still_generates_summary():
 
     # embed called with just the summary text (0 children + 1 summary)
     assert len(rag.embed_calls) == 1
-    assert len(rag.embed_calls[0]) == 1  # only summary
+    assert len(rag.embed_calls[0]["texts"]) == 1  # only summary
 
     # Core insert called with 1 document (the summary)
     assert len(core.insert_calls) == 1
@@ -793,7 +795,7 @@ async def test_summary_failure_no_summary_in_write_or_embed():
 
     # embed called with only child text (no summary)
     assert len(rag.embed_calls) == 1
-    assert len(rag.embed_calls[0]) == 1  # only 1 child
+    assert len(rag.embed_calls[0]["texts"]) == 1  # only 1 child
 
     # Core insert: 1 document (child only)
     assert len(core.insert_calls) == 1

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 )
 
 type instanceStorageBinder interface {
+	CreateVolume(ctx context.Context, request ports.StorageVolumeCreateRequest) (ports.StorageVolumeRecord, error)
 	MountVolume(ctx context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error)
 	MountFilesystem(ctx context.Context, request ports.StorageFilesystemMountRequest) (ports.StorageFilesystemRecord, error)
 }
@@ -180,6 +182,11 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		resolvedResourceRefs = append([]string(nil), resolved.ResourceRefs...)
 	}
 	if err := validateCreateIntent(request.Spec); err != nil {
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
+	// Provision after validateCreateIntent: a provisioned disk carries both
+	// volume_id and name/size, which only the post-validation state allows.
+	if err := s.provisionVMDataDisks(ctx, &request); err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
 	requestFingerprint, err := createIntentFingerprint(request.Spec)
@@ -942,6 +949,19 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
+	// Resolve the update_image target before fingerprinting: ImageRef is part
+	// of the intent fingerprint, so it must be derived deterministically from
+	// image_id on both the first request and replays. Resolution reuses the
+	// create path (tenant project check, purpose validation, scan gate).
+	var updatedImage *ports.InstanceImageSummary
+	if request.Action == ports.WorkloadLifecycleUpdateImage && s.resources != nil {
+		summary, err := s.resolveLifecycleImage(ctx, record, request)
+		if err != nil {
+			return ports.WorkloadInstanceRecord{}, err
+		}
+		request.ImageRef = summary.Ref
+		updatedImage = &summary
+	}
 	requestFingerprint := ""
 	if s.operations != nil {
 		requestFingerprint, err = lifecycleIntentFingerprint(request)
@@ -972,6 +992,11 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		precheck.details["request_fingerprint"] = requestFingerprint
 	}
 	snapshot := vmSnapshotFor(record, request)
+	if snapshot != nil {
+		// Canonical snapshot ID shared with the provider CR name so rollback
+		// can map the record to its KubeVirt VirtualMachineSnapshot.
+		request.SnapshotID = snapshot.ID
+	}
 	volume := volumeAttachmentFor(record.Kind, request)
 	rollback := containerRollbackFor(record, request)
 	opID := ""
@@ -1105,6 +1130,14 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		record.Container = rollback
 	}
 	applyApprovedLifecycleSummary(&record, request)
+	if updatedImage != nil {
+		record.Image = *updatedImage
+		if record.Container != nil {
+			// Mirror the scale behaviour: the reconciler observes the Deployment
+			// rollout and flips this to completed/failed.
+			record.Container.RolloutStatus = "progressing"
+		}
+	}
 	if resizeGPUSpec != nil {
 		record.Compute.SpecID = resizeGPUSpec.ID
 		record.Compute.GPUType = resizeGPUSpec.GPUType
@@ -1605,6 +1638,25 @@ func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request
 		}
 	case ports.WorkloadLifecycleUpdateImage:
 		record.Image = ports.InstanceImageSummary{ID: strings.TrimSpace(request.ImageID)}
+	case ports.WorkloadLifecycleBindSecret:
+		if record.Container != nil {
+			binding := ports.WorkloadSecretBinding{SecretID: strings.TrimSpace(request.SecretID)}
+			switch strings.TrimSpace(request.BindingType) {
+			case "env":
+				binding.EnvName = strings.TrimSpace(request.EnvName)
+			case "file":
+				binding.MountPath = strings.TrimSpace(request.MountPath)
+			}
+			record.Container.SecretBindings = append(record.Container.SecretBindings, binding)
+			// Mirror scale/update_image: the reconciler observes the Deployment
+			// rollout and flips this to completed/failed.
+			record.Container.RolloutStatus = "progressing"
+		}
+	case ports.WorkloadLifecycleUnbindSecret:
+		if record.Container != nil {
+			record.Container.SecretBindings = removeSecretBinding(record.Container.SecretBindings, strings.TrimSpace(request.SecretID))
+			record.Container.RolloutStatus = "progressing"
+		}
 	case ports.WorkloadLifecycleAttachFilesystem:
 		attachment := ports.WorkloadStorageAttachment{
 			Name:         strings.TrimSpace(request.FilesystemID),
@@ -1632,6 +1684,31 @@ func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request
 	case ports.WorkloadLifecycleSetTerminationProtection:
 		record.Lifecycle.TerminationProtection = *request.Enabled
 	}
+}
+
+// resolveLifecycleImage resolves an update_image target through the create
+// resource resolver so tenant project checks, image purpose validation and the
+// vulnerability scan gate apply exactly as on instance create. The minimal
+// spec only carries Kind + ImageID so no network/storage resolution runs.
+func (s *LocalInstanceService) resolveLifecycleImage(ctx context.Context, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) (ports.InstanceImageSummary, error) {
+	resolved, err := s.resources.ResolveCreate(ctx, ports.WorkloadResourceResolveRequest{
+		TenantID: request.TenantID,
+		UserID:   request.UserID,
+		Spec: ports.WorkloadSpec{
+			TenantID: record.TenantID,
+			Name:     record.Name,
+			Kind:     record.Kind,
+			ImageID:  strings.TrimSpace(request.ImageID),
+		},
+	})
+	if err != nil {
+		return ports.InstanceImageSummary{}, err
+	}
+	summary := resolved.Spec.ImageSummary
+	if strings.TrimSpace(summary.Ref) == "" {
+		return ports.InstanceImageSummary{}, fmt.Errorf("%w: resolved image %q has no registry ref", ports.ErrInvalid, request.ImageID)
+	}
+	return summary, nil
 }
 
 // resolveResizeGPUSpec validates the resize spec_id against the configured GPU
@@ -1685,6 +1762,22 @@ func specUnavailableForTenant(inventory ports.GPUInventory, ctx context.Context,
 	return ""
 }
 
+// removeSecretBinding drops every binding of the given secret from the
+// instance's container status (unbind_secret lifecycle bookkeeping).
+func removeSecretBinding(bindings []ports.WorkloadSecretBinding, secretID string) []ports.WorkloadSecretBinding {
+	if len(bindings) == 0 {
+		return bindings
+	}
+	next := make([]ports.WorkloadSecretBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.SecretID == secretID {
+			continue
+		}
+		next = append(next, binding)
+	}
+	return next
+}
+
 func removeStorageResource(items []ports.WorkloadStorageAttachment, resourceType, resourceID string) []ports.WorkloadStorageAttachment {
 	resourceID = strings.TrimSpace(resourceID)
 	next := make([]ports.WorkloadStorageAttachment, 0, len(items))
@@ -1705,6 +1798,40 @@ func hasStorageResource(items []ports.WorkloadStorageAttachment, resourceType, r
 		}
 	}
 	return false
+}
+
+// provisionVMDataDisks creates Storage volumes for VM data disks declared in
+// "new disk" mode (name+size, no volume_id) so the rendered VM references a
+// real provider PVC instead of a nonexistent claim (ErrorPvcNotFound). Existing
+// volume refs and size-less specs pass through unchanged.
+func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request *ports.WorkloadInstanceCreateRequest) error {
+	if s.storage == nil || request.Spec.VM == nil {
+		return nil
+	}
+	for i := range request.Spec.VM.DataDiskSpecs {
+		disk := &request.Spec.VM.DataDiskSpecs[i]
+		if strings.TrimSpace(disk.VolumeID) != "" || disk.SizeGiB <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(disk.Name)
+		if name == "" {
+			name = request.Spec.Name + "-data-" + strconv.Itoa(i+1)
+		}
+		record, err := s.storage.CreateVolume(ctx, ports.StorageVolumeCreateRequest{
+			TenantID:       request.Spec.TenantID,
+			IdempotencyKey: request.IdempotencyKey + ":vm-data-disk:" + name,
+			Name:           name,
+			SizeGiB:        disk.SizeGiB,
+			StorageClass:   disk.StorageClass,
+			VolumeType:     disk.VolumeType,
+			Encrypted:      disk.Encrypted,
+		})
+		if err != nil {
+			return fmt.Errorf("provision vm data disk %q: %w", name, err)
+		}
+		disk.VolumeID = record.VolumeID
+	}
+	return nil
 }
 
 func (s *LocalInstanceService) bindCreateStorage(ctx context.Context, request ports.WorkloadInstanceCreateRequest, result ports.WorkloadInstanceCreateResult) error {
@@ -2103,9 +2230,12 @@ func terminationProtectedAction(action ports.WorkloadLifecycleAction) bool {
 
 func usesProviderLifecycle(kind ports.WorkloadKind, action ports.WorkloadLifecycleAction) bool {
 	switch action {
-	case ports.WorkloadLifecycleSnapshot,
-		ports.WorkloadLifecycleSetTerminationProtection:
+	case ports.WorkloadLifecycleSetTerminationProtection:
 		return false
+	case ports.WorkloadLifecycleSnapshot:
+		// VM snapshots are backed by a real KubeVirt VirtualMachineSnapshot CR;
+		// non-VM kinds keep metadata-only snapshots.
+		return kind == ports.WorkloadKindVM
 	case ports.WorkloadLifecycleAttachVolume,
 		ports.WorkloadLifecycleDetachVolume:
 		return kind == ports.WorkloadKindVM
@@ -2175,20 +2305,22 @@ func vmSnapshotFor(record ports.WorkloadInstanceRecord, request ports.WorkloadIn
 	name := firstNonEmpty(request.SnapshotName, "snapshot-"+now.Format("20060102150405"))
 	idSeed := firstNonEmpty(request.IdempotencyKey, record.InstanceID+"-"+name+"-"+now.Format("20060102150405"))
 	return &ports.VMInstanceSnapshot{
-		ID:               "snap_" + sanitizeSnapshotID(idSeed),
+		ID:               "snap-" + sanitizeSnapshotID(idSeed),
 		Name:             name,
 		SourceInstanceID: record.InstanceID,
 		State:            "ready",
-		Reason:           "snapshot metadata recorded by local profile; provider snapshot execution is a follow-up capability",
+		Reason:           "snapshot backed by KubeVirt VirtualMachineSnapshot CR",
 		CreatedAt:        now,
 		ReadyAt:          now,
 	}
 }
 
-var snapshotIDPattern = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
+var snapshotIDPattern = regexp.MustCompile(`[^a-zA-Z0-9-]+`)
 
+// sanitizeSnapshotID produces a DNS-1123-safe segment: KubeVirt snapshot CR
+// names double as instance snapshot record IDs, so underscores are not allowed.
 func sanitizeSnapshotID(value string) string {
-	value = strings.Trim(snapshotIDPattern.ReplaceAllString(value, "_"), "_")
+	value = strings.Trim(snapshotIDPattern.ReplaceAllString(value, "-"), "-")
 	if value == "" {
 		return "local"
 	}

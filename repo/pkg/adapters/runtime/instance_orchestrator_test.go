@@ -324,6 +324,52 @@ func TestLocalInstanceOrchestratorBuildsContainerRolloutStatus(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceOrchestratorBuildsContainerEnvEcho(t *testing.T) {
+	store := &fakeInstanceStore{}
+	orchestrator := newTestInstanceOrchestrator(true, store)
+	value := "DEBUG"
+	_, err := orchestrator.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "gpu-env-01",
+			Kind:     ports.WorkloadKindGPUContainer,
+			Image:    "harbor/gpu:1",
+			Resources: ports.WorkloadResourceRequest{
+				GPU: ports.GPUSchedulingRequest{
+					PreferredVendors: []ports.GPUVendor{ports.GPUVendorNVIDIA},
+					RequiredCount:    1,
+				},
+			},
+			Container: &ports.ContainerInstanceSpec{
+				Env: []ports.InstanceEnvVar{
+					{Name: "MODE", Value: &value},
+					{Name: "DB_PASSWORD", SecretRef: "secret/db"},
+				},
+				Replicas: 1,
+			},
+			Lifecycle: ports.InstanceLifecyclePolicy{AutoStart: true},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+		RequestedAt:     time.Unix(712, 0),
+	})
+	if err != nil {
+		t.Fatalf("Create(gpu env) error = %v", err)
+	}
+	if store.last.Container == nil {
+		t.Fatalf("stored Container is nil")
+	}
+	if len(store.last.Container.Env) != 2 {
+		t.Fatalf("container env = %#v, want 2 entries", store.last.Container.Env)
+	}
+	if store.last.Container.Env[0].Name != "MODE" || store.last.Container.Env[0].Value == nil || *store.last.Container.Env[0].Value != "DEBUG" {
+		t.Fatalf("env[0] = %+v, want MODE=DEBUG", store.last.Container.Env[0])
+	}
+	if store.last.Container.Env[1].Name != "DB_PASSWORD" || store.last.Container.Env[1].SecretRef != "secret/db" {
+		t.Fatalf("env[1] = %+v, want DB_PASSWORD->secret/db", store.last.Container.Env[1])
+	}
+}
+
 func TestLocalInstanceOrchestratorBuildsGPUStatus(t *testing.T) {
 	store := &fakeInstanceStore{}
 	orchestrator := newTestInstanceOrchestrator(true, store)

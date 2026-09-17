@@ -135,7 +135,9 @@ class _RagEngineClient(Protocol):
         chunk_size: int = 1024,
     ) -> list[dict[str, Any]]: ...
 
-    async def embed(self, *, texts: list[str]) -> tuple[list[list[float]], int]: ...
+    async def embed(
+        self, *, texts: list[str], model: str = ""
+    ) -> tuple[list[list[float]], int]: ...
 
     async def generate(
         self,
@@ -190,12 +192,19 @@ class ParseOrchestrator:
         file_type: str,
         chunk_size: int,
         vector_store_id: str,
+        embedding_model: str = "",
     ) -> None:
         """Process a single document end-to-end through the parse pipeline.
 
         State machine: pending → parsing → indexing → ready | failed.
         On exception the document is marked ``failed`` with a sanitized
         error_message (mirrors rag-engine parse_worker, Plan §0.1).
+
+        Args:
+            embedding_model: Per-KB embedding model name (from the KB row's
+                ``embedding_model`` column); empty uses the rag-engine
+                server default. Passed through to the Embed RPC so write
+                and read sides of the same KB always use the same model.
         """
         if not tenant_id:
             raise ValueError("tenant_id must not be empty for RLS-scoped write")
@@ -354,7 +363,9 @@ class ParseOrchestrator:
             texts = [c["content"] for c in embed_chunks]
             vectors: list[list[float]] = []
             if texts:
-                vectors, _dim = await self._rag_engine.embed(texts=texts)
+                vectors, _dim = await self._rag_engine.embed(
+                    texts=texts, model=embedding_model
+                )
                 if len(vectors) != len(embed_chunks):
                     raise RuntimeError(
                         f"embed returned {len(vectors)} vectors for "

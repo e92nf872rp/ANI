@@ -16,7 +16,10 @@ produces parent + child chunks:
       (NOT a standalone chunk). The link itself stays atomically intact via
       the sentence splitter's markdown-link rule.
     - Markdown links ``[text](url)`` and fenced code blocks inside text are
-      treated as atomic units by the sentence splitter.
+      treated as atomic units by the sentence splitter. Links are never
+      split; an oversized fenced code block (exceeding the child budget) is
+      force-truncated so it stays within the embedding model's context
+      limit (the parent block still carries the full text).
     - Heading nodes (``sub_type='heading'``) start a new text segment and are
       preferred as parent-block boundaries so a parent stays within one
       section (``section_path`` breadcrumb).
@@ -149,10 +152,10 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def _force_truncate(text: str, chunk_size: int) -> list[str]:
-    """Force-truncate a too-long sentence into char-sized pieces.
+    """Force-truncate a too-long unit into char-sized pieces.
 
-    Links/code fences are never passed here (they are atomic); only plain
-    sentences reach this path.
+    Oversized plain sentences AND oversized fenced code blocks are passed
+    here; links are never passed here (they stay atomic even when oversized).
     """
     max_chars = max(1, chunk_size * CHARS_PER_TOKEN)
     return [text[i : i + max_chars] for i in range(0, len(text), max_chars)]
@@ -162,8 +165,10 @@ def _split_units(text: str) -> list[tuple[str, str]]:
     """Split text into atomic (kind, text) units.
 
     ``kind`` is ``'link'`` for markdown links, ``'code'`` for fenced code
-    blocks, ``'sentence'`` for plain sentences. Links and code blocks are
-    indivisible (SPEC §5.1).
+    blocks, ``'sentence'`` for plain sentences. Links are indivisible
+    (SPEC §5.1); code blocks are indivisible only while they fit the child
+    budget (oversized fences are force-truncated downstream by the
+    splitter to respect embedding context limits).
     """
     units: list[tuple[str, str]] = []
 
@@ -209,9 +214,11 @@ def _split_text_by_sentences(
     Once a chunk reaches ``chunk_min`` tokens, the next sentence boundary is
     preferred as the cut point (rather than filling toward ``chunk_size``),
     so child chunks land in ``[chunk_min, chunk_size]``. ``chunk_size`` is
-    still the hard upper bound. Links and code blocks are indivisible —
-    they are emitted as standalone chunks if they would overflow, never
-    truncated. Oversized plain sentences are force-truncated (SPEC §5.1).
+    still the hard upper bound. Links are indivisible — emitted standalone
+    if they would overflow, never truncated. Oversized plain sentences and
+    oversized fenced code blocks are force-truncated (SPEC §5.1; code fences
+    must respect the embedding model's context limit, e.g. 512 tokens for
+    bge-small-en-v1.5).
 
     Char-based budget is used internally to avoid the rounding drift that
     accumulates when summing floored per-unit token estimates (e.g. a 13-char
@@ -239,10 +246,27 @@ def _split_text_by_sentences(
 
     for kind, unit in units:
         ulen = len(unit)
-        if kind in ("link", "code"):
-            # Indivisible: never split. If it cannot fit in the current
-            # chunk, flush first. The link stays with surrounding text so
-            # images do not become standalone chunks.
+        if kind == "link":
+            # Links are indivisible: never split (even when oversized — a
+            # link torn apart is meaningless). If it cannot fit in the
+            # current chunk, flush first. The link stays with surrounding
+            # text so images do not become standalone chunks.
+            if current and current_chars + ulen > max_chars:
+                flush()
+            current.append(unit)
+            current_chars += ulen
+            continue
+        if kind == "code":
+            # Code fences stay atomic while they fit within the child budget.
+            # An oversized fence (> max_chars) would blow the embedding
+            # model's context limit (e.g. bge-small-en-v1.5 caps at 512
+            # tokens), so it is force-truncated like an oversized sentence.
+            # The parent block still reassembles the full text — no content
+            # is lost for retrieval.
+            if ulen > max_chars:
+                flush()
+                chunks.extend(_force_truncate(unit, chunk_size))
+                continue
             if current and current_chars + ulen > max_chars:
                 flush()
             current.append(unit)

@@ -59,10 +59,10 @@ class _FakeRagEngine:
     def __init__(self, vectors=None, dimension=4):
         self._vectors = vectors or [[0.1, 0.2, 0.3, 0.4]]
         self._dimension = dimension
-        self.embed_calls: list[list[str]] = []
+        self.embed_calls: list[dict] = []
 
-    async def embed(self, *, texts):
-        self.embed_calls.append(list(texts))
+    async def embed(self, *, texts, model: str = ""):
+        self.embed_calls.append({"texts": list(texts), "model": model})
         return list(self._vectors), self._dimension
 
 
@@ -72,6 +72,7 @@ class _FakeCoreClient:
     def __init__(self, vector_results=None):
         self._vector_results = vector_results or []
         self.search_calls: list[dict] = []
+        self.close_count = 0
 
     async def search_vector_store(self, *, vector_store_id, vector, top_k, filter_expr=None):
         self.search_calls.append({
@@ -81,6 +82,14 @@ class _FakeCoreClient:
             "filter_expr": filter_expr,
         })
         return list(self._vector_results)
+
+    # CoreClient is used as `async with factory(tenant_id) as core` in
+    # retrieve_service — mirror the async context manager interface.
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.close_count += 1
 
 
 class _FakeParentLookup:
@@ -250,7 +259,7 @@ async def test_hybrid_invokes_embed_and_vector_search_and_keyword_search():
     )
 
     # embed called once with the question
-    assert rag.embed_calls == [["查询"]]
+    assert rag.embed_calls == [{"texts": ["查询"], "model": ""}]
     # search_vector_store called with the embedded vector, top_k*2
     assert len(core.search_calls) == 1
     assert core.search_calls[0]["vector"] == [0.5, 0.6, 0.7, 0.8]
@@ -382,7 +391,7 @@ async def test_vector_only_mode_skips_keyword_search():
         top_k=5, retrieval_mode="vector",
         vector_store_id=VECTOR_STORE_ID,
     )
-    assert rag.embed_calls == [["查询"]]
+    assert rag.embed_calls == [{"texts": ["查询"], "model": ""}]
     assert len(core.search_calls) == 1
     # No keyword_search
     assert kw_calls == []

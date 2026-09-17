@@ -62,6 +62,15 @@ def generate_sboms(root: Path, output_dir: Path, tool_version: str) -> None:
         output = output_dir / sbom_filename(module_path)
         env = base_env.copy()
         env["GOWORK"] = "off"
+        # cyclonedx-gomod hashes each module's source dir. Modules that only
+        # have .mod metadata in the module cache report an empty Dir, which
+        # crashes dirhash. Materialize the module graph sources first.
+        _run(
+            ["go", "mod", "download", "all"],
+            cwd=root / module_path,
+            env=env,
+            label=f"{module_path} go mod download",
+        )
         _run(
             [
                 "go",

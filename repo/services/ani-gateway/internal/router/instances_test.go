@@ -474,6 +474,54 @@ func TestRefreshOneStoreStatusPreservesStoppedState(t *testing.T) {
 	}
 }
 
+func TestContainerResponseFromRecordEchoesEnv(t *testing.T) {
+	value := "DEBUG"
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "inst_env",
+		TenantID:   "tenant-a",
+		Name:       "env-app",
+		Kind:       "gpu_container",
+		Container: &ports.ContainerInstanceStatus{
+			Replicas: 1,
+			Env: []ports.InstanceEnvVar{
+				{Name: "MODE", Value: &value},
+				{Name: "DB_PASSWORD", SecretRef: "secret/db"},
+			},
+		},
+	}
+	response := containerResponseFromRecord(record)
+	if response == nil || len(response.Env) != 2 {
+		t.Fatalf("container response env = %+v, want 2 entries", response)
+	}
+	if response.Env[0].Name != "MODE" || response.Env[0].Value == nil || *response.Env[0].Value != "DEBUG" || response.Env[0].SecretRef != "" {
+		t.Fatalf("env[0] = %+v, want MODE=DEBUG without secret_ref", response.Env[0])
+	}
+	if response.Env[1].Name != "DB_PASSWORD" || response.Env[1].Value != nil || response.Env[1].SecretRef != "secret/db" {
+		t.Fatalf("env[1] = %+v, want DB_PASSWORD->secret/db without value", response.Env[1])
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("marshal response error = %v", err)
+	}
+	var payload struct {
+		Env []struct {
+			Name      string  `json:"name"`
+			Value     *string `json:"value"`
+			SecretRef string  `json:"secret_ref"`
+		} `json:"env"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("unmarshal response error = %v", err)
+	}
+	if payload.Env[0].Value == nil || *payload.Env[0].Value != "DEBUG" {
+		t.Fatalf("json env[0].value = %v, want DEBUG", payload.Env[0].Value)
+	}
+	if payload.Env[1].Value != nil || payload.Env[1].SecretRef != "secret/db" {
+		t.Fatalf("json env[1] = %+v, want secret_ref only", payload.Env[1])
+	}
+}
+
 func TestInstanceSpecFromRequestMapsSandboxConfig(t *testing.T) {
 	spec, err := instanceSpecFromRequest(createInstanceRequest{
 		Kind: "sandbox",

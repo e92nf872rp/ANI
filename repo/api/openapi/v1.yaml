@@ -1573,6 +1573,10 @@ components:
             ready_replicas: { type: integer, minimum: 0, default: 0 }
             revision:       { type: string, nullable: true }
             rollout_status: { type: string, nullable: true, enum: [pending, progressing, healthy, degraded, rolled_back] }
+            env:
+              type: array
+              description: "创建时设定的环境变量回显（含 value 与 secret_ref，语义同创建请求；历史实例未记录时缺省）"
+              items: { $ref: '#/components/schemas/InstanceEnvVar' }
             history:
               type: array
               items:

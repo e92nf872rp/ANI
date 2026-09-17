@@ -784,6 +784,21 @@ func secretVolumeName(binding ports.WorkloadSecretBinding, index int) string {
 	return name
 }
 
+// vmVolumeClaimName resolves the provider PVC a VM volume attaches to. Storage
+// attachments reference ANI volume IDs, which map to provider PVC claims
+// through storageProviderName; a SourceRef that is already a concrete claim
+// passes through, and only source-less placeholders fall back to the
+// spec-derived name.
+func vmVolumeClaimName(spec ports.WorkloadSpec, attachment ports.WorkloadStorageAttachment) string {
+	if claim := strings.TrimSpace(attachment.SourceRef); claim != "" {
+		return claim
+	}
+	if resourceID := strings.TrimSpace(attachment.ResourceID); resourceID != "" {
+		return storageProviderName("vol", resourceID)
+	}
+	return spec.Name + "-" + attachment.Name
+}
+
 func vmVolumes(spec ports.WorkloadSpec) []any {
 	volumes := []any{
 		map[string]any{
@@ -800,7 +815,7 @@ func vmVolumes(spec ports.WorkloadSpec) []any {
 		volumes = append(volumes, map[string]any{
 			"name": attachment.Name,
 			"persistentVolumeClaim": map[string]any{
-				"claimName": firstNonEmpty(attachment.ResourceID, attachment.SourceRef, spec.Name+"-"+attachment.Name),
+				"claimName": vmVolumeClaimName(spec, attachment),
 			},
 		})
 	}
