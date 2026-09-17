@@ -367,6 +367,11 @@ type NetworkResourceStore interface {
 	ListSubnets(ctx context.Context, tenantID string) ([]NetworkSubnetRecord, error)
 	GetSecurityGroup(ctx context.Context, tenantID string, securityGroupID string) (NetworkSecurityGroupRecord, error)
 	ListSecurityGroups(ctx context.Context, tenantID string) ([]NetworkSecurityGroupRecord, error)
+	UpsertSecurityGroupRule(ctx context.Context, record NetworkSecurityGroupRuleRecord) error
+	GetSecurityGroupRule(ctx context.Context, tenantID string, securityGroupID string, ruleID string) (NetworkSecurityGroupRuleRecord, error)
+	ListSecurityGroupRules(ctx context.Context, tenantID string, securityGroupID string) ([]NetworkSecurityGroupRuleRecord, error)
+	DeleteSecurityGroupRule(ctx context.Context, tenantID string, securityGroupID string, ruleID string) error
+	DeleteSecurityGroupRules(ctx context.Context, tenantID string, securityGroupID string) error
 	ListLoadBalancers(ctx context.Context, tenantID string) ([]NetworkLoadBalancerRecord, error)
 	ListRoutes(ctx context.Context, tenantID string) ([]NetworkRouteRecord, error)
 }

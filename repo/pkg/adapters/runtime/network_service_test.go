@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -1005,5 +1006,191 @@ func TestLocalNetworkServiceDeleteVPCValidatesAssociationsViaStore(t *testing.T)
 	}
 	if got := tx.args[4]; got != string(ports.NetworkResourceDeleted) {
 		t.Fatalf("state arg = %v, want deleted", got)
+	}
+}
+
+func TestLocalNetworkServiceListsSecurityGroupRulesViaStore(t *testing.T) {
+	// 重启后内存 map 为空，规则列表必须走持久层；此前该路径直接 404（安全组规则加载失败）。
+	created := time.Unix(100, 0)
+	tx := &fakeMetadataTx{
+		row: fakeMetadataRow{values: []any{
+			networkStoreTenantID, "sg-rules", "vpc-x", "web-sg", "",
+			[]byte("[]"), string(ports.NetworkResourceAvailable), "", created, created,
+		}},
+		queryRows: map[string]ports.Rows{
+			"FROM network_security_group_rules": &fakeRows{values: [][]any{
+				{networkStoreTenantID, "sgr_1", "sg-rules", 100, "ingress", "tcp", "22", "0.0.0.0/0", "allow", "", created, created},
+				{networkStoreTenantID, "sgr_2", "sg-rules", 200, "ingress", "tcp", "443", "0.0.0.0/0", "allow", "", created, created},
+			}},
+		},
+	}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+
+	items, err := service.ListSecurityGroupRules(context.Background(), ports.NetworkSecurityGroupRuleListRequest{
+		TenantID:        networkStoreTenantID,
+		SecurityGroupID: "sg-rules",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroupRules() error = %v", err)
+	}
+	if len(items) != 2 || items[0].RuleID != "sgr_1" || items[1].RuleID != "sgr_2" {
+		t.Fatalf("rules = %+v, want two persisted rules ordered by priority", items)
+	}
+
+	filtered, err := service.ListSecurityGroupRules(context.Background(), ports.NetworkSecurityGroupRuleListRequest{
+		TenantID:        networkStoreTenantID,
+		SecurityGroupID: "sg-rules",
+		Protocol:        "icmp",
+	})
+	if err != nil {
+		t.Fatalf("ListSecurityGroupRules(protocol filter) error = %v", err)
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("filtered rules = %+v, want empty for icmp filter", filtered)
+	}
+}
+
+func TestLocalNetworkServiceDeletesSecurityGroupRuleViaStore(t *testing.T) {
+	// 删除流程：查规则明细 -> DELETE 明细 -> 从明细重建摘要回写 network_security_groups.rules。
+	created := time.Unix(100, 0)
+	tx := &fakeMetadataTx{
+		rowBySQL: map[string]fakeMetadataRow{
+			"FROM network_security_group_rules": {values: []any{
+				networkStoreTenantID, "sgr_1", "sg-rules", 100, "ingress", "tcp", "22", "0.0.0.0/0", "allow", "", created, created,
+			}},
+			"FROM network_security_groups": {values: []any{
+				networkStoreTenantID, "sg-rules", "vpc-x", "web-sg", "",
+				[]byte(`[{"Priority":100,"Direction":"ingress","Protocol":"tcp","PortRange":"22","CIDR":"0.0.0.0/0","Action":"allow"}]`),
+				string(ports.NetworkResourceAvailable), "", created, created,
+			}},
+		},
+		queryRows: map[string]ports.Rows{
+			"FROM network_security_group_rules": &fakeRows{},
+		},
+	}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+
+	record, err := service.DeleteSecurityGroupRule(context.Background(), ports.NetworkSecurityGroupRuleGetRequest{
+		TenantID:        networkStoreTenantID,
+		SecurityGroupID: "sg-rules",
+		RuleID:          "sgr_1",
+	})
+	if err != nil {
+		t.Fatalf("DeleteSecurityGroupRule() error = %v", err)
+	}
+	if record.RuleID != "sgr_1" {
+		t.Fatalf("deleted rule id = %s, want sgr_1", record.RuleID)
+	}
+	if len(tx.execs) != 2 || !strings.Contains(tx.execs[0], "DELETE FROM network_security_group_rules") {
+		t.Fatalf("execs = %v, want rule delete then summary persistence", tx.execs)
+	}
+	if !strings.Contains(tx.execs[1], "INSERT INTO network_security_groups") {
+		t.Fatalf("second exec = %q, want security group summary upsert", tx.execs[1])
+	}
+}
+
+func TestLocalNetworkServiceCreateSecurityGroupWithRulesPersistsRuleDetails(t *testing.T) {
+	// 创建安全组时携带的预设规则（Console「常用远程端口」模板）在 store 模式下
+	// 必须同步写规则明细表，否则详情页规则列表读明细表时为空。
+	tx := &fakeMetadataTx{}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+
+	record, err := service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{
+		TenantID:       networkStoreTenantID,
+		IdempotencyKey: "sg-create-with-rules",
+		Name:           "preset-sg",
+		Rules: []ports.NetworkSecurityGroupRule{
+			{Direction: "ingress", Protocol: "tcp", PortRange: "22", CIDR: "0.0.0.0/0", Action: "allow"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup() error = %v", err)
+	}
+	ruleUpsertCount := 0
+	var ruleUpsertSQL string
+	for _, sql := range tx.execs {
+		if strings.Contains(sql, "INSERT INTO network_security_group_rules") {
+			ruleUpsertCount++
+			ruleUpsertSQL = sql
+		}
+	}
+	if ruleUpsertCount != 1 {
+		t.Fatalf("network_security_group_rules upsert count = %d, want 1", ruleUpsertCount)
+	}
+	if !strings.Contains(ruleUpsertSQL, "ON CONFLICT (tenant_id, rule_id)") {
+		t.Fatalf("rule upsert sql = %q, want ON CONFLICT (tenant_id, rule_id)", ruleUpsertSQL)
+	}
+	if len(tx.ruleUpsertArgs) != 1 {
+		t.Fatalf("captured %d rule upsert arg sets, want 1", len(tx.ruleUpsertArgs))
+	}
+	if got, want := tx.ruleUpsertArgs[0][3], 1000; got != want {
+		t.Fatalf("rule priority arg = %v, want default %v", got, want)
+	}
+	if got, want := tx.ruleUpsertArgs[0][2], record.SecurityGroupID; got != want {
+		t.Fatalf("rule security_group_id arg = %v, want %s", got, want)
+	}
+}
+
+func TestLocalNetworkServiceDeletesSecurityGroupViaStore(t *testing.T) {
+	// 重启后内存 map 为空，删除历史安全组必须走持久层；此前该路径直接 404。
+	created := time.Unix(100, 0)
+	tx := &fakeMetadataTx{
+		row: fakeMetadataRow{values: []any{
+			networkStoreTenantID, "sg-delete", "vpc-x", "web-sg", "",
+			[]byte(`[{"Priority":100,"Direction":"ingress","Protocol":"tcp","PortRange":"22","CIDR":"0.0.0.0/0","Action":"allow"}]`),
+			string(ports.NetworkResourceAvailable), "", created, created,
+		}},
+	}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+
+	record, err := service.DeleteSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{
+		TenantID:   networkStoreTenantID,
+		ResourceID: "sg-delete",
+	})
+	if err != nil {
+		t.Fatalf("DeleteSecurityGroup() error = %v", err)
+	}
+	if record.State != ports.NetworkResourceDeleted {
+		t.Fatalf("state = %s, want deleted", record.State)
+	}
+	if len(record.Rules) != 0 {
+		t.Fatalf("rules = %+v, want empty summary after cascade clear", record.Rules)
+	}
+	if len(tx.execs) != 2 {
+		t.Fatalf("exec count = %d, want rule cascade delete then security group delete upsert", len(tx.execs))
+	}
+	if !strings.Contains(tx.execs[0], "DELETE FROM network_security_group_rules") {
+		t.Fatalf("first exec = %q, want rule cascade delete", tx.execs[0])
+	}
+	if !strings.Contains(tx.execs[1], "INSERT INTO network_security_groups") {
+		t.Fatalf("second exec = %q, want security group delete upsert", tx.execs[1])
+	}
+	if got, want := tx.args[6], string(ports.NetworkResourceDeleted); got != want {
+		t.Fatalf("persisted state = %v, want deleted", got)
+	}
+}
+
+func TestLocalNetworkServiceDeleteSecurityGroupMissingViaStore(t *testing.T) {
+	// DB 中不存在（或已删除）的安全组：GetSecurityGroup 无行 → 404，且不产生任何写操作。
+	tx := &fakeMetadataTx{row: fakeMetadataRow{err: pgx.ErrNoRows}}
+	service := NewLocalNetworkService(
+		WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})),
+	)
+	if _, err := service.DeleteSecurityGroup(context.Background(), ports.NetworkResourceGetRequest{
+		TenantID:   networkStoreTenantID,
+		ResourceID: "sg-missing",
+	}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("DeleteSecurityGroup() error = %v, want ErrNotFound", err)
+	}
+	if len(tx.execs) != 0 {
+		t.Fatalf("exec count = %d, want no writes for missing security group", len(tx.execs))
 	}
 }

@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 安全组规则明细持久化（2026-09，分支 fix/network-sg-vpc-and-instance-filter）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| IN-NETWORK-SG-RULES-PERSISTENCE-A | 修复用户前端实测发现的安全组详情页「安全组规则加载失败」（`GET /security-groups/{id}/rules` 对 DB 历史安全组一律 404）。根因是规则明细从未持久化：无 `network_security_group_rules` 表，规则 CRUD 五个 service 方法全部只操作内存 map，且存在性校验 memory-only——网关重启（如 VPC-4 修复部署）后内存清空，规则查询/新建对历史安全组全部 404；`network_security_groups.rules` JSONB 仅存不含 rule_id 的摘要。修复与安全组-3/4、VPC-4 同模式 store 化：新迁移建明细表（PK `(tenant_id, rule_id)` + RLS/GRANT 对齐既有 network 表）并从摘要 JSON **回填存量规则明细**（重生成 `sgr_<uuid>`、按安全组粒度 NOT EXISTS 防重，实测 `INSERT 0 35`，指定安全组 3 条与摘要一致）；`NetworkResourceStore` 新增规则四方法 + `MetadataNetworkStore` SQL 实现；service 五方法双分支（store 模式存在性校验复用 `resolveSecurityGroupExists`，Create 修复重启后新建 404）；字段合并逻辑提取 `applySecurityGroupRuleUpdate` 纯函数共用；新增 `syncSecurityGroupRulesStore` 变更后从明细重建摘要回写 SG JSON 并同步内存缓存，保持 Get/List 返回的 `record.Rules` 一致。单测 3 新增 + fake 基建（`rowBySQL` 按 SQL 路由 QueryRow 行、`assignScanValues` 补 `*int`）；无契约/handler 变更。Live 验证（ani-system 镜像 dev-20260917-sgrules）中捕获**二次缺陷**：新表初版 RLS 仅 RESTRICTIVE policy——PostgreSQL 行可见性要求至少一条 PERMISSIVE 放行，仅 RESTRICTIVE 对普通角色全部 deny（表 owner 为 superuser 绕过 RLS 掩盖问题），已补齐 `platform_bypass`/`self` 两条 PERMISSIVE（与族内三段 policy 模式逐字一致）并实测恢复。实测：历史安全组 sg_5a811a20 规则列表 200 返回 3 条回填明细（修复前 404）、protocol 过滤、新建 201+幂等重放同 ID、更新/删除/删除后 404、SG 摘要 JSON 与明细表同步。**同批收口删除安全组 404**（用户前端实测第二处同源缺陷，镜像 `dev-20260917-sgdel`）：`DeleteSecurityGroup` 同为 memory-only（安全组-3/4 批次记录的存量问题，重启后删除 DB 历史安全组一律 404），store 化双分支——`store.GetSecurityGroup` 存在性校验 → 新增 `DeleteSecurityGroupRules` 按安全组级联清理明细表（明细持久化后的数据卫生要求，防孤儿规则行）→ upsert deleted 落库（`rules` 摘要清空）→ 同步内存缓存；单测 2 新增（删除断言级联 DELETE+state=deleted+摘要清空、不存在时零写操作）。实测（目标 sg_0d98ac92）：删除前 GET 200、DELETE 200 返回 deleted 且摘要清空（修复前 404）、删除后单查 200+deleted（软删语义与实例一致）、列表不再显示。**ani-test2 同步部署实测**（镜像 `test2-20260917-a`，`NETWORK_PROVIDER=kubeovn_rest`）：独立 PG 先迁移（补 vpc_id 列 + 建明细表）后换镜像；kubeovn_rest 分支同样走 `NewLocalNetworkService`+store 修复生效；冒烟建 SG/建规则/规则列表/删除/删除后列表全过并清理。**第三处收口（仅部署 test2，镜像 `test2-20260917-b`）**：创建 SG 携带预设规则（Console「常用远程端口」模板）store 模式遗漏明细表写入致详情页规则为空，已修（创建时逐条 `UpsertSecurityGroupRule`，单测累计 6 新增）+ 两库幂等回填补齐存量断层（摘要=明细全对齐）；实测创建带模板规则 SG 后 `GET /rules` 立即 3 条；ani-system 未部署该修复，下次 gateway 部署后需重跑回填。**已知边界**：规则幂等 map 仍为进程内存（与既有内存幂等同 trade-off）；摘要回写非事务（低频接受）；回填 rule_id 为新生成值 | network-sg-rules-persistence.md |
+
 ### VPC 删除保护（2026-09，分支 fix/network-sg-vpc-and-instance-filter）
 
 | 批次 | 内容摘要 | 文件 |

@@ -37,13 +37,22 @@ type fakeMetadataTx struct {
 	queryRowSQL  string
 	queryRowArgs []any
 	row          fakeMetadataRow
-	zeroRows     bool
+	// rowBySQL 按 SQL 关键字路由不同的 QueryRow 行，
+	// 用于一次事务里对多张表做 QueryRow 的场景（如规则删除流程先查规则再查安全组）。
+	rowBySQL map[string]fakeMetadataRow
+	// ruleUpsertArgs 捕获每次命中 network_security_group_rules 的 Exec 参数，
+	// 用于「创建安全组携带预设规则」明细写路径的参数断言。
+	ruleUpsertArgs [][]any
+	zeroRows       bool
 }
 
 func (tx *fakeMetadataTx) Exec(_ context.Context, sql string, args ...any) (ports.CommandTag, error) {
 	tx.sql = sql
 	tx.args = args
 	tx.execs = append(tx.execs, sql)
+	if strings.Contains(sql, "network_security_group_rules") {
+		tx.ruleUpsertArgs = append(tx.ruleUpsertArgs, append([]any(nil), args...))
+	}
 	affected := int64(1)
 	if tx.zeroRows {
 		affected = 0
@@ -67,6 +76,11 @@ func (tx *fakeMetadataTx) Query(_ context.Context, sql string, _ ...any) (ports.
 func (tx *fakeMetadataTx) QueryRow(_ context.Context, sql string, args ...any) ports.Row {
 	tx.queryRowSQL = sql
 	tx.queryRowArgs = args
+	for marker, row := range tx.rowBySQL {
+		if strings.Contains(sql, marker) {
+			return row
+		}
+	}
 	return tx.row
 }
 

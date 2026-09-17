@@ -662,9 +662,10 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 	}
 	s.securityGroup[record.SecurityGroupID] = record
 	s.securityGroupIdem[idemKey] = record.SecurityGroupID
+	ruleRecords := make([]ports.NetworkSecurityGroupRuleRecord, 0, len(record.Rules))
 	for _, rule := range record.Rules {
 		ruleID := "sgr_" + uuid.NewString()
-		s.securityGroupRules[ruleID] = ports.NetworkSecurityGroupRuleRecord{
+		ruleRecord := ports.NetworkSecurityGroupRuleRecord{
 			TenantID:        request.TenantID,
 			RuleID:          ruleID,
 			SecurityGroupID: record.SecurityGroupID,
@@ -677,10 +678,22 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
+		s.securityGroupRules[ruleID] = ruleRecord
+		ruleRecords = append(ruleRecords, ruleRecord)
 	}
 	s.mu.Unlock()
 	if err := s.upsertSecurityGroup(ctx, record); err != nil {
 		return ports.NetworkSecurityGroupRecord{}, err
+	}
+	// 创建时携带的预设规则（如 Console「常用远程端口」模板）在 store 模式下必须
+	// 同步写规则明细表：详情页规则列表读明细表，只写摘要 JSONB 会导致规则不可见
+	// （安全组-7 同源缺陷的最后一块写路径）。
+	if s.store != nil {
+		for _, ruleRecord := range ruleRecords {
+			if err := s.store.UpsertSecurityGroupRule(ctx, ruleRecord); err != nil {
+				return ports.NetworkSecurityGroupRecord{}, err
+			}
+		}
 	}
 	if !providerConfigured {
 		return record, nil
@@ -879,6 +892,39 @@ func (s *LocalNetworkService) GetSecurityGroup(ctx context.Context, request port
 }
 
 func (s *LocalNetworkService) DeleteSecurityGroup(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSecurityGroupRecord, error) {
+	if s.store != nil {
+		// 存在性校验走持久层，避免网关重启后内存 map 为空导致删除历史安全组误报 404；
+		// 明细表已持久化，删除时级联清理规则明细并重建摘要，防孤儿累积。
+		record, err := s.store.GetSecurityGroup(ctx, request.TenantID, strings.TrimSpace(request.ResourceID))
+		if err != nil {
+			return ports.NetworkSecurityGroupRecord{}, ports.ErrNotFound
+		}
+		if err := s.store.DeleteSecurityGroupRules(ctx, request.TenantID, record.SecurityGroupID); err != nil {
+			return ports.NetworkSecurityGroupRecord{}, err
+		}
+		record.Rules = []ports.NetworkSecurityGroupRule{}
+		record.State = ports.NetworkResourceDeleted
+		record.Reason = "deleted by local network profile"
+		record.UpdatedAt = s.now().UTC()
+		if err := s.store.UpsertSecurityGroup(ctx, record); err != nil {
+			return ports.NetworkSecurityGroupRecord{}, err
+		}
+		s.mu.Lock()
+		if mem, ok := s.securityGroup[record.SecurityGroupID]; ok && mem.TenantID == request.TenantID {
+			mem.Rules = record.Rules
+			mem.State = record.State
+			mem.Reason = record.Reason
+			mem.UpdatedAt = record.UpdatedAt
+			s.securityGroup[mem.SecurityGroupID] = mem
+		}
+		for id, rule := range s.securityGroupRules {
+			if rule.TenantID == request.TenantID && rule.SecurityGroupID == record.SecurityGroupID {
+				delete(s.securityGroupRules, id)
+			}
+		}
+		s.mu.Unlock()
+		return record, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.securityGroup[request.ResourceID]
@@ -895,15 +941,42 @@ func (s *LocalNetworkService) DeleteSecurityGroup(ctx context.Context, request p
 	return record, nil
 }
 
-func (s *LocalNetworkService) ListSecurityGroupRules(_ context.Context, request ports.NetworkSecurityGroupRuleListRequest) ([]ports.NetworkSecurityGroupRuleRecord, error) {
+func (s *LocalNetworkService) ListSecurityGroupRules(ctx context.Context, request ports.NetworkSecurityGroupRuleListRequest) ([]ports.NetworkSecurityGroupRuleRecord, error) {
+	securityGroupID := strings.TrimSpace(request.SecurityGroupID)
+	if s.store != nil {
+		// 规则明细已持久化；安全组存在性校验走持久层，避免网关重启后内存 map 为空导致误报 404。
+		if _, ok := s.resolveSecurityGroupExists(ctx, request.TenantID, securityGroupID); !ok {
+			return nil, ports.ErrNotFound
+		}
+		items, err := s.store.ListSecurityGroupRules(ctx, request.TenantID, securityGroupID)
+		if err != nil {
+			return nil, err
+		}
+		direction := strings.TrimSpace(request.Direction)
+		protocol := strings.TrimSpace(request.Protocol)
+		if direction == "" && protocol == "" {
+			return items, nil
+		}
+		filtered := make([]ports.NetworkSecurityGroupRuleRecord, 0, len(items))
+		for _, record := range items {
+			if direction != "" && record.Direction != direction {
+				continue
+			}
+			if protocol != "" && record.Protocol != protocol {
+				continue
+			}
+			filtered = append(filtered, record)
+		}
+		return filtered, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+	if !s.securityGroupExistsLocked(request.TenantID, securityGroupID) {
 		return nil, ports.ErrNotFound
 	}
 	items := make([]ports.NetworkSecurityGroupRuleRecord, 0, len(s.securityGroupRules))
 	for _, record := range s.securityGroupRules {
-		if record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
+		if record.TenantID != request.TenantID || record.SecurityGroupID != securityGroupID {
 			continue
 		}
 		if strings.TrimSpace(request.Direction) != "" && record.Direction != strings.TrimSpace(request.Direction) {
@@ -931,6 +1004,40 @@ func (s *LocalNetworkService) CreateSecurityGroupRule(ctx context.Context, reque
 	if err := validateSecurityGroupRuleFields(request.Priority, request.Direction, request.Protocol, request.PortRange, request.CIDR, request.Action); err != nil {
 		return ports.NetworkSecurityGroupRuleRecord{}, err
 	}
+	securityGroupID := strings.TrimSpace(request.SecurityGroupID)
+	if s.store != nil {
+		// 安全组存在性走持久层（重启后内存 map 为空，历史安全组只在库里）。
+		sg, err := s.store.GetSecurityGroup(ctx, request.TenantID, securityGroupID)
+		if err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+		}
+		now := s.now().UTC()
+		record := ports.NetworkSecurityGroupRuleRecord{
+			TenantID:        request.TenantID,
+			RuleID:          "sgr_" + uuid.NewString(),
+			SecurityGroupID: sg.SecurityGroupID,
+			Priority:        request.Priority,
+			Direction:       strings.TrimSpace(request.Direction),
+			Protocol:        strings.TrimSpace(request.Protocol),
+			PortRange:       strings.TrimSpace(request.PortRange),
+			CIDR:            strings.TrimSpace(request.CIDR),
+			Action:          strings.TrimSpace(request.Action),
+			Description:     strings.TrimSpace(request.Description),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if err := s.store.UpsertSecurityGroupRule(ctx, record); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		s.mu.Lock()
+		s.securityGroupRules[record.RuleID] = record
+		s.securityRuleIdem[idemKey] = record.RuleID
+		s.mu.Unlock()
+		if err := s.syncSecurityGroupRulesStore(ctx, request.TenantID, sg.SecurityGroupID); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		return record, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if id, ok := s.securityRuleIdem[idemKey]; ok {
@@ -938,7 +1045,7 @@ func (s *LocalNetworkService) CreateSecurityGroupRule(ctx context.Context, reque
 			return record, nil
 		}
 	}
-	sg, ok := s.securityGroup[strings.TrimSpace(request.SecurityGroupID)]
+	sg, ok := s.securityGroup[securityGroupID]
 	if !ok || sg.TenantID != request.TenantID || sg.State == ports.NetworkResourceDeleted {
 		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
 	}
@@ -968,7 +1075,13 @@ func (s *LocalNetworkService) CreateSecurityGroupRule(ctx context.Context, reque
 	return record, nil
 }
 
-func (s *LocalNetworkService) GetSecurityGroupRule(_ context.Context, request ports.NetworkSecurityGroupRuleGetRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+func (s *LocalNetworkService) GetSecurityGroupRule(ctx context.Context, request ports.NetworkSecurityGroupRuleGetRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+	if s.store != nil {
+		if _, ok := s.resolveSecurityGroupExists(ctx, request.TenantID, strings.TrimSpace(request.SecurityGroupID)); !ok {
+			return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+		}
+		return s.store.GetSecurityGroupRule(ctx, request.TenantID, strings.TrimSpace(request.SecurityGroupID), strings.TrimSpace(request.RuleID))
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record, ok := s.securityGroupRules[strings.TrimSpace(request.RuleID)]
@@ -981,16 +1094,42 @@ func (s *LocalNetworkService) GetSecurityGroupRule(_ context.Context, request po
 	return record, nil
 }
 
-func (s *LocalNetworkService) UpdateSecurityGroupRule(ctx context.Context, request ports.NetworkSecurityGroupRuleUpdateRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+// syncSecurityGroupRulesStore 在 store 模式下从规则明细重建安全组的规则摘要，
+// 持久化回 network_security_groups.rules 并同步内存缓存（若存在），
+// 保持 Get/ListSecurityGroup 返回的 record.Rules 与明细一致。
+func (s *LocalNetworkService) syncSecurityGroupRulesStore(ctx context.Context, tenantID string, securityGroupID string) error {
+	if s.store == nil {
+		return nil
+	}
+	rules, err := s.store.ListSecurityGroupRules(ctx, tenantID, securityGroupID)
+	if err != nil {
+		return err
+	}
+	summaries := make([]ports.NetworkSecurityGroupRule, 0, len(rules))
+	for _, rule := range rules {
+		summaries = append(summaries, securityGroupRuleSummary(rule))
+	}
+	sg, err := s.store.GetSecurityGroup(ctx, tenantID, securityGroupID)
+	if err != nil {
+		return err
+	}
+	sg.Rules = summaries
+	sg.UpdatedAt = s.now().UTC()
+	if err := s.store.UpsertSecurityGroup(ctx, sg); err != nil {
+		return err
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.securityGroupRules[strings.TrimSpace(request.RuleID)]
-	if !ok || record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
-		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+	if mem, ok := s.securityGroup[sg.SecurityGroupID]; ok && mem.TenantID == tenantID {
+		mem.Rules = summaries
+		mem.UpdatedAt = sg.UpdatedAt
+		s.securityGroup[mem.SecurityGroupID] = mem
 	}
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
-		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
-	}
+	s.mu.Unlock()
+	return nil
+}
+
+// applySecurityGroupRuleUpdate 按请求合并规则字段并校验，内存与 store 分支共用。
+func applySecurityGroupRuleUpdate(record ports.NetworkSecurityGroupRuleRecord, request ports.NetworkSecurityGroupRuleUpdateRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
 	if request.Priority != 0 {
 		if request.Priority < 1 || request.Priority > 32766 {
 			return ports.NetworkSecurityGroupRuleRecord{}, fmt.Errorf("%w: priority must be between 1 and 32766", ports.ErrInvalid)
@@ -1018,6 +1157,44 @@ func (s *LocalNetworkService) UpdateSecurityGroupRule(ctx context.Context, reque
 	if err := validateSecurityGroupRuleFields(record.Priority, record.Direction, record.Protocol, record.PortRange, record.CIDR, record.Action); err != nil {
 		return ports.NetworkSecurityGroupRuleRecord{}, err
 	}
+	return record, nil
+}
+
+func (s *LocalNetworkService) UpdateSecurityGroupRule(ctx context.Context, request ports.NetworkSecurityGroupRuleUpdateRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+	if s.store != nil {
+		record, err := s.store.GetSecurityGroupRule(ctx, request.TenantID, strings.TrimSpace(request.SecurityGroupID), strings.TrimSpace(request.RuleID))
+		if err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+		}
+		record, err = applySecurityGroupRuleUpdate(record, request)
+		if err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		record.UpdatedAt = s.now().UTC()
+		if err := s.store.UpsertSecurityGroupRule(ctx, record); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		s.mu.Lock()
+		s.securityGroupRules[record.RuleID] = record
+		s.mu.Unlock()
+		if err := s.syncSecurityGroupRulesStore(ctx, request.TenantID, record.SecurityGroupID); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		return record, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.securityGroupRules[strings.TrimSpace(request.RuleID)]
+	if !ok || record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
+		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+	}
+	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+	}
+	record, err := applySecurityGroupRuleUpdate(record, request)
+	if err != nil {
+		return ports.NetworkSecurityGroupRuleRecord{}, err
+	}
 	record.UpdatedAt = s.now().UTC()
 	s.securityGroupRules[record.RuleID] = record
 	s.syncSecurityGroupRulesLocked(record.SecurityGroupID)
@@ -1030,6 +1207,22 @@ func (s *LocalNetworkService) UpdateSecurityGroupRule(ctx context.Context, reque
 }
 
 func (s *LocalNetworkService) DeleteSecurityGroupRule(ctx context.Context, request ports.NetworkSecurityGroupRuleGetRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+	if s.store != nil {
+		record, err := s.store.GetSecurityGroupRule(ctx, request.TenantID, strings.TrimSpace(request.SecurityGroupID), strings.TrimSpace(request.RuleID))
+		if err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+		}
+		if err := s.store.DeleteSecurityGroupRule(ctx, request.TenantID, record.SecurityGroupID, record.RuleID); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		s.mu.Lock()
+		delete(s.securityGroupRules, record.RuleID)
+		s.mu.Unlock()
+		if err := s.syncSecurityGroupRulesStore(ctx, request.TenantID, record.SecurityGroupID); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		return record, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.securityGroupRules[strings.TrimSpace(request.RuleID)]

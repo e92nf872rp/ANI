@@ -481,6 +481,136 @@ func (s *MetadataNetworkStore) ListRoutes(ctx context.Context, tenantID string) 
 	return records, err
 }
 
+// UpsertSecurityGroupRule 持久化安全组规则明细（规则此前仅存于网关内存，重启后丢失）。
+func (s *MetadataNetworkStore) UpsertSecurityGroupRule(ctx context.Context, record ports.NetworkSecurityGroupRuleRecord) error {
+	if s.store == nil {
+		return ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(record.TenantID) == "" || strings.TrimSpace(record.RuleID) == "" || strings.TrimSpace(record.SecurityGroupID) == "" {
+		return fmt.Errorf("%w: tenant_id, rule_id and security_group_id are required", ports.ErrInvalid)
+	}
+	createdAt, updatedAt := networkRecordTimes(s.now, record.CreatedAt, record.UpdatedAt)
+	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO network_security_group_rules
+				(tenant_id, rule_id, security_group_id, priority, direction, protocol, port_range, cidr, action, description, created_at, updated_at)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			ON CONFLICT (tenant_id, rule_id) DO UPDATE SET
+				security_group_id = EXCLUDED.security_group_id,
+				priority = EXCLUDED.priority,
+				direction = EXCLUDED.direction,
+				protocol = EXCLUDED.protocol,
+				port_range = EXCLUDED.port_range,
+				cidr = EXCLUDED.cidr,
+				action = EXCLUDED.action,
+				description = EXCLUDED.description,
+				updated_at = EXCLUDED.updated_at
+		`, record.TenantID, record.RuleID, record.SecurityGroupID, record.Priority, record.Direction, record.Protocol, record.PortRange, record.CIDR, record.Action, record.Description, createdAt, updatedAt)
+		if err != nil {
+			return fmt.Errorf("upsert network security group rule: %w", err)
+		}
+		return nil
+	})
+}
+
+func (s *MetadataNetworkStore) GetSecurityGroupRule(ctx context.Context, tenantID string, securityGroupID string, ruleID string) (ports.NetworkSecurityGroupRuleRecord, error) {
+	if s.store == nil {
+		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(securityGroupID) == "" || strings.TrimSpace(ruleID) == "" {
+		return ports.NetworkSecurityGroupRuleRecord{}, fmt.Errorf("%w: tenant_id, security_group_id and rule_id are required", ports.ErrInvalid)
+	}
+	var record ports.NetworkSecurityGroupRuleRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		row := tx.QueryRow(ctx, `
+			SELECT tenant_id::text, rule_id, security_group_id, priority, direction, protocol, port_range, cidr, action, COALESCE(description, ''), created_at, updated_at
+			FROM network_security_group_rules
+			WHERE tenant_id = $1::uuid AND security_group_id = $2 AND rule_id = $3
+		`, tenantID, securityGroupID, ruleID)
+		if err := row.Scan(&record.TenantID, &record.RuleID, &record.SecurityGroupID, &record.Priority, &record.Direction, &record.Protocol, &record.PortRange, &record.CIDR, &record.Action, &record.Description, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) || isNoRows(err) {
+				return ports.ErrNotFound
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.NetworkSecurityGroupRuleRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *MetadataNetworkStore) ListSecurityGroupRules(ctx context.Context, tenantID string, securityGroupID string) ([]ports.NetworkSecurityGroupRuleRecord, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(securityGroupID) == "" {
+		return nil, fmt.Errorf("%w: tenant_id and security_group_id are required", ports.ErrInvalid)
+	}
+	var records []ports.NetworkSecurityGroupRuleRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, rule_id, security_group_id, priority, direction, protocol, port_range, cidr, action, COALESCE(description, ''), created_at, updated_at
+			FROM network_security_group_rules
+			WHERE tenant_id = $1::uuid AND security_group_id = $2
+			ORDER BY priority, created_at
+		`, tenantID, securityGroupID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var record ports.NetworkSecurityGroupRuleRecord
+			if err := rows.Scan(&record.TenantID, &record.RuleID, &record.SecurityGroupID, &record.Priority, &record.Direction, &record.Protocol, &record.PortRange, &record.CIDR, &record.Action, &record.Description, &record.CreatedAt, &record.UpdatedAt); err != nil {
+				return err
+			}
+			records = append(records, record)
+		}
+		return rows.Err()
+	})
+	return records, err
+}
+
+func (s *MetadataNetworkStore) DeleteSecurityGroupRule(ctx context.Context, tenantID string, securityGroupID string, ruleID string) error {
+	if s.store == nil {
+		return ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(securityGroupID) == "" || strings.TrimSpace(ruleID) == "" {
+		return fmt.Errorf("%w: tenant_id, security_group_id and rule_id are required", ports.ErrInvalid)
+	}
+	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		_, err := tx.Exec(ctx, `
+			DELETE FROM network_security_group_rules
+			WHERE tenant_id = $1::uuid AND security_group_id = $2 AND rule_id = $3
+		`, tenantID, securityGroupID, ruleID)
+		if err != nil {
+			return fmt.Errorf("delete network security group rule: %w", err)
+		}
+		return nil
+	})
+}
+
+// DeleteSecurityGroupRules 清理安全组下的全部规则明细（删除安全组时级联，防孤儿累积）。
+func (s *MetadataNetworkStore) DeleteSecurityGroupRules(ctx context.Context, tenantID string, securityGroupID string) error {
+	if s.store == nil {
+		return ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(securityGroupID) == "" {
+		return fmt.Errorf("%w: tenant_id and security_group_id are required", ports.ErrInvalid)
+	}
+	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		_, err := tx.Exec(ctx, `
+			DELETE FROM network_security_group_rules
+			WHERE tenant_id = $1::uuid AND security_group_id = $2
+		`, tenantID, securityGroupID)
+		if err != nil {
+			return fmt.Errorf("delete network security group rules: %w", err)
+		}
+		return nil
+	})
+}
+
 func requireNetworkRecord(tenantID string, resourceID string, name string, state ports.NetworkResourceState) error {
 	if strings.TrimSpace(tenantID) == "" {
 		return fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
