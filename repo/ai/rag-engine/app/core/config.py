@@ -1,6 +1,19 @@
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Embedding model context limits — module-level constants (not Settings
+# fields: they are model-intrinsic hard limits, not deployment knobs).
+# The embedding endpoint (OpenAI-compatible /v1/embeddings) exposes no
+# max_seq_tokens field, so the limit is hard-coded per the current model
+# (bge-small: 512 tokens). When the model changes, update these together.
+# EMBED_MAX_SEQ_TOKENS: hard token limit of the embedding model.
+EMBED_MAX_SEQ_TOKENS = 512
+# EMBED_SAFE_CHARS: single-choke-point char cap applied to every text at the
+# Embed RPC entry (Bug B fix, layer 2). ~2 chars/token with margin below
+# EMBED_MAX_SEQ_TOKENS. Aligned with kb-service SUMMARY_SAFE_CHARS=460 (the
+# summary budget stays under this cap even after generation overshoot).
+EMBED_SAFE_CHARS = 480
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

@@ -185,5 +185,53 @@ async def test_embed_rpc_empty_model_uses_default(monkeypatch):
     assert resp.count == 1
 
 
+# ── Bug B fix, layer 2: Embed RPC clamps texts to EMBED_SAFE_CHARS ──────────
+
+
+@pytest.mark.asyncio
+async def test_embed_rpc_truncates_oversized_text(monkeypatch):
+    """Every text is clamped to EMBED_SAFE_CHARS before embedding."""
+    from app.core.config import EMBED_SAFE_CHARS
+
+    fake_model = MagicMock()
+    fake_model.get_text_embedding_batch.return_value = [
+        [1.0, 2.0],
+        [3.0, 4.0],
+    ]
+    monkeypatch.setattr(
+        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+    )
+    servicer = RagEngineServicer()
+    ctx = FakeContext()
+    long_text = "x" * (EMBED_SAFE_CHARS + 100)
+    req = rag_pb.EmbedRequest(texts=[long_text, "short"])
+    resp = await servicer.Embed(req, ctx)
+    assert ctx.aborted_code is None
+    assert resp.count == 2
+    sent = fake_model.get_text_embedding_batch.call_args[0][0]
+    assert len(sent[0]) == EMBED_SAFE_CHARS
+    assert sent[1] == "short"
+
+
+@pytest.mark.asyncio
+async def test_embed_rpc_short_text_untouched(monkeypatch):
+    """Texts within the cap pass through unmodified."""
+    from app.core.config import EMBED_SAFE_CHARS
+
+    fake_model = MagicMock()
+    fake_model.get_text_embedding_batch.return_value = [[1.0, 2.0]]
+    monkeypatch.setattr(
+        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+    )
+    servicer = RagEngineServicer()
+    ctx = FakeContext()
+    text = "a" * EMBED_SAFE_CHARS  # exactly at the cap — not truncated
+    req = rag_pb.EmbedRequest(texts=[text])
+    resp = await servicer.Embed(req, ctx)
+    assert ctx.aborted_code is None
+    sent = fake_model.get_text_embedding_batch.call_args[0][0]
+    assert sent[0] == text
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
