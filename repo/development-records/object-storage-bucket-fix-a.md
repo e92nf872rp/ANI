@@ -68,6 +68,15 @@
 - `network_security_group_rules` 幂等回填在 ani-system `INSERT 0 0`（无断层）；ani-test2 补齐 3 行后摘要/明细全对齐。
 - 探针脚本自身两处缺陷（非产品缺陷）：`/instances?limit=200` 超上限返回 400（上限 100）；`vpc_id`/`subnet_id` 嵌套在 `network` 对象下而非顶层字段。
 
+### ani-test2 同版本部署复测（2026-09-17，镜像 `test2-20260917-objstore`）
+
+代码树与 ani-system 相同，按既有约定 **不重新构建**：`docker tag dev-20260917-objstore2 test2-20260917-objstore` + `push`。镜像 image ID 与 digest 均与 ani-system 一致（ID `sha256:11493be709e2…3c99`，digest `sha256:b0886c7e…69d7`），从产物侧证明两环境同一份代码。
+
+- 部署前检查：ani-test2 PG 迁移已落地（`network_security_groups.vpc_id` 列 1、`network_security_group_rules` 表 1、RLS 策略 3）；对象存储已配置（`OBJECT_STORE_PROVIDER=minio`，`public_endpoint=http://10.10.1.66:30900`，与 ani-system 同一 MinIO）。
+- 部署：`kubectl set image -n ani-test2`（未改 env）→ rollout 成功 → healthz 200；部署后确认 ani-system 镜像仍为 `dev-20260917-objstore2`（未被波及）。
+- 本批次 28 项断言 **28 PASS / 0 FAIL**；网络存储系列回归 **19 PASS / 0 FAIL**（历史安全组规则列表 200/3 条、创建带 3 条预设规则安全组明细立即落库、删除级联清零、有存活子网时删 VPC 409、清理后 200、实例 `vpc_id`/`subnet_id` 过滤精确一致、未知值 0）。
+- 遗留：探针桶在 MinIO 中无法经 API 删除（无 `DELETE /buckets/{id}` 端点），两环境共享同一 MinIO，测试桶残留属已知项（见 `kjs-study/修复bug/对象存储后端Bug详细分析.md` §8）。
+
 ## 备注
 
 - **并集构建（已不再需要）**：ani-system 原运行 `dev-20260917-multival`（网络存储分支构建），本批次分支基于 merge-base，首次构建曾保留原分支代码只覆盖本批次文件（两个重叠文件用并集版本）。2026-09-17 merge `origin/main 143c4fe` 后代码树统一，已改为整体覆盖构建机源码树后构建，并集方式废弃。
