@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/kubercloud/ani/pkg/bootstrap"
 	modelv1 "github.com/kubercloud/ani/pkg/generated/pb/model/v1"
@@ -29,6 +31,10 @@ func main() {
 
 	modelRepo := repo.NewPostgresModelRepo()
 	svc := service.NewModelServiceWithObjectStore(deps.DB, modelRepo, bootstrap.NewModelObjectStore(deps.Ports.ObjectStore))
+	redrive := config.LoadImportRedrive()
+	redriveCtx, stopRedrive := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopRedrive()
+	go service.NewImportRedriveSweeper(deps.DB, redrive.Interval, redrive.After, deps.Logger).Run(redriveCtx)
 	if port, err := fetcherMTLSPort(); err == nil && port > 0 {
 		if err := serveFetcherMTLS(port, svc, deps); err != nil {
 			deps.Logger.Error("model-fetcher mTLS listener failed", "err", err)

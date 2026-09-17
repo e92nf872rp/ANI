@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 模型导入卡住重投补偿（2026-09，分支 hotfix/network-store-read）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| MODEL-IMPORT-REDRIVE-A | 模型仓库-1「导入后一直 pending」的业务侧兜底（Services / model-service）：根因是 outbox `published=true` 但消息从未投递到 import worker（`attempt_count=0`、`lease_owner` 空为"从未认领"证据），而 `ANI_TASKS` 为 WorkQueue + `MaxAge=24h`，未投递/未 ack 的消息 24h 后静默清除、DB 无痕迹，model-service 侧又不存在卡住任务的 reconciler，任务可永久停在 `pending`。修复：model-service 进程内新增 `ImportRedriveSweeper`（goroutine + ticker，`Run`/`Sweep`，随 SIGINT/SIGTERM 退出）；筛选取"从未认领"信号——`model_import_tasks.status='pending'` 且 `created_at < now()-MODEL_IMPORT_REDRIVE_AFTER`，关联 `async_tasks.status='pending' AND attempt_count=0 AND lease_owner IS NULL`；动作是取该任务**原始 outbox payload** 新插一条 outbox 事件（`event_type`/`aggregate_type` 与创建期一致），交由既有 task-service outbox relay 发布，复用事务性 outbox 纪律，幂等由 worker 的 `terminalTaskStatus` 提前 ack + `AcquireLease` 保证；同一任务已存在 `published=false` 的重投事件则跳过（自我节流）；**不做强制失败**（不把合法排队判为失败）。两段式扫描是 RLS 决定的：`async_tasks` 只有宽松策略（平台事务可跨租户扫"从未认领"信号），`model_import_tasks` 有严格租户隔离（必须在 `SetDBTenant` 租户事务内读并 `FOR UPDATE OF it SKIP LOCKED` 选择，多副本安全）。配置 `MODEL_IMPORT_REDRIVE_INTERVAL`（默认 60s）/`MODEL_IMPORT_REDRIVE_AFTER`（默认 2m）。未改 OpenAPI 契约与生成物、worker 状态机、DB schema。新增 5 个静态契约单测。**live 验证 PASS（2026-09-17，ani-test2 隔离环境，镜像 `test2-20260917-redrive`，sweeper `INTERVAL=30s`/`AFTER=60s`）**：① 正常导入 ModelScope 小模型端到端 `completed`（models=1）；② 缩容 relay+worker 后建导入并把原始 outbox 置 `published=true` 模拟"已发布未投递" → 日志 `model import redrive queued count:1` + 新增 `published=false` 重投事件 → 恢复组件后收敛 `completed`（`GET /api/v1/tasks/{id}` 亦 completed，models=2/versions=2）；③ 将重投事件置回 `published=false` 让 relay 重发同一 payload → models/versions/async_tasks/model_import_tasks 状态全等、`model import started` 计数仍为 1、`published_at` 前移证明重投确实发生。环境备注：ani-test2 此前无 model 组件，本批次部署 model-service + model-import-worker + task-service（outbox relay）并应用 `20260904000100_model_import_resolved_revision.sql`。遗留：`ANI_TASKS` MaxAge/未消费积压可见性、kb.rebuild 无消费者、导入入口源可达性预检 | model-import-redrive-a.md |
+
 ### VM 生命周期真实底座修复（2026-09，分支 hotfix/network-store-read）
 
 | 批次 | 内容摘要 | 文件 |

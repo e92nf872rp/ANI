@@ -110,6 +110,16 @@ allowed:
     imports:
       - github.com/jackc/pgx/v5/pgxpool
     reason: remote model-import worker transaction boundary is a bounded persistence orchestration adapter; pgxpool is retained only for explicit lease/finalization wiring
+  - path: services/model-service/internal/repo/import_redrive.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+    reason: stalled model-import redrive queries are a bounded PostgreSQL persistence adapter; direct pgx keeps tenant RLS scoping and the row locks that make multi-replica sweep safe explicit
+  - path: services/model-service/internal/service/import_redrive.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: stalled model-import redrive sweeper owns the two-phase transaction boundary (platform candidate scan then per-tenant selection/insert); pgxpool is retained only for that explicit transaction wiring
   - path: services/inference-service/internal/repository/postgres.go
     coupling_level: bounded_direct
     imports:

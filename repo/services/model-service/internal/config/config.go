@@ -3,9 +3,26 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/kubercloud/ani/pkg/bootstrap"
 )
+
+// ImportRedrive bounds the stalled model-import compensation sweep.
+type ImportRedrive struct {
+	Interval time.Duration // MODEL_IMPORT_REDRIVE_INTERVAL: scan period
+	After    time.Duration // MODEL_IMPORT_REDRIVE_AFTER: how long an unclaimed import may wait
+}
+
+// LoadImportRedrive reads the redrive sweep settings. A zero value means the
+// variable is unset or unusable; the sweeper then applies its own defaults.
+func LoadImportRedrive() ImportRedrive {
+	return ImportRedrive{
+		Interval: envDuration("MODEL_IMPORT_REDRIVE_INTERVAL"),
+		After:    envDuration("MODEL_IMPORT_REDRIVE_AFTER"),
+	}
+}
 
 // Load reads model-service configuration from environment variables.
 func Load() bootstrap.Config {
@@ -36,4 +53,12 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func envDuration(key string) time.Duration {
+	d, err := time.ParseDuration(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }
