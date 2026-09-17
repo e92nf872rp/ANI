@@ -574,7 +574,19 @@ func TestLocalVectorStoreServiceSharedStoreIsReadAuthority(t *testing.T) {
 func TestLocalStorageServiceCompleteObjectPersistsToSharedStore(t *testing.T) {
 	store := newSharedMemoryStorageStore()
 	clock := func() time.Time { return time.Unix(300, 0).UTC() }
-	service := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock))
+	service := NewLocalStorageService(
+		WithStorageResourceStore(store),
+		WithStorageServiceClock(clock),
+		WithStorageObjectStore(&fakeObjectStore{
+			uploadURL:   "https://objects.local/upload/complete-store",
+			downloadURL: "https://objects.local/download/complete-store",
+			statOK:      true,
+			statMetadata: ports.ObjectMetadata{
+				SizeBytes:   1024,
+				ContentType: "text/csv",
+			},
+		}),
+	)
 
 	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
 		TenantID:       storageStoreTenantID,

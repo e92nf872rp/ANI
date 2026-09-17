@@ -1,11 +1,13 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -62,6 +64,7 @@ type MinIOObjectStore struct {
 
 var _ ports.ObjectStore = (*MinIOObjectStore)(nil)
 var _ ports.ObjectStoreContentVerifier = (*MinIOObjectStore)(nil)
+var _ ports.ObjectStorePolicyApplier = (*MinIOObjectStore)(nil)
 
 func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, error) {
 	endpoints, err := parseMinIOEndpoints(config.Endpoint, config.Endpoints, config.Secure)
@@ -162,6 +165,111 @@ func (s *MinIOObjectStore) EnsureBucket(ctx context.Context, class ports.BucketC
 		return nil
 	}
 	return minIOHTTPError(putResp.StatusCode, "create bucket")
+}
+
+// ApplyBucketPolicy applies (or clears) the bucket access policy so a console
+// ACL change reaches the object store authority instead of only the
+// control-plane record.
+//
+// A tenant_read policy grants anonymous GetObject on the tenant prefix only
+// (bucket/<tenant_id>/*), because console buckets are addressed by name and two
+// tenants can share one physical bucket. Granting an unscoped public-read
+// policy would expose every tenant's objects in that bucket.
+func (s *MinIOObjectStore) ApplyBucketPolicy(ctx context.Context, class ports.BucketClass, tenantID string, policy ports.BucketACLPolicy) error {
+	bucket, err := s.bucketName(class)
+	if err != nil {
+		return err
+	}
+	switch policy {
+	case ports.BucketACLPolicyPrivate:
+		return s.deleteBucketPolicy(ctx, bucket)
+	case ports.BucketACLPolicyTenantRead:
+		tenantID = strings.Trim(strings.TrimSpace(tenantID), "/")
+		if tenantID == "" {
+			return fmt.Errorf("%w: tenant_id is required for a bucket read policy", ports.ErrInvalid)
+		}
+		document, err := bucketTenantReadPolicyDocument(bucket, tenantID)
+		if err != nil {
+			return err
+		}
+		return s.putBucketPolicy(ctx, bucket, document)
+	default:
+		return fmt.Errorf("%w: unsupported bucket policy %q", ports.ErrUnsupported, policy)
+	}
+}
+
+func (s *MinIOObjectStore) putBucketPolicy(ctx context.Context, bucket string, document []byte) error {
+	target := s.bucketURL(bucket)
+	query := url.Values{}
+	query.Set("policy", "")
+	target.RawQuery = canonicalQuery(query)
+	req, err := s.newSignedRequestWithHeaders(ctx, http.MethodPut, target, bytes.NewReader(document), sha256Hex(document), map[string]string{"Content-Type": "application/json"})
+	if err != nil {
+		return err
+	}
+	resp, err := s.doRequest(req)
+	if err != nil {
+		return err
+	}
+	defer closeBody(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return minIOHTTPError(resp.StatusCode, "put bucket policy")
+	}
+	return nil
+}
+
+func (s *MinIOObjectStore) deleteBucketPolicy(ctx context.Context, bucket string) error {
+	target := s.bucketURL(bucket)
+	query := url.Values{}
+	query.Set("policy", "")
+	target.RawQuery = canonicalQuery(query)
+	req, err := s.newSignedRequest(ctx, http.MethodDelete, target, nil, "")
+	if err != nil {
+		return err
+	}
+	resp, err := s.doRequest(req)
+	if err != nil {
+		return err
+	}
+	defer closeBody(resp.Body)
+	// 404 means the bucket already has no policy, which is the desired state.
+	if resp.StatusCode == http.StatusNotFound || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
+		return nil
+	}
+	return minIOHTTPError(resp.StatusCode, "delete bucket policy")
+}
+
+// bucketTenantReadPolicyDocument renders the S3 bucket policy that allows
+// anonymous reads of one tenant's object prefix inside a shared bucket.
+func bucketTenantReadPolicyDocument(bucket string, tenantID string) ([]byte, error) {
+	document := bucketPolicyDocument{
+		Version: "2012-10-17",
+		Statement: []bucketPolicyStatement{{
+			Sid:       "ani-console-tenant-read",
+			Effect:    "Allow",
+			Principal: map[string][]string{"AWS": {"*"}},
+			Action:    []string{"s3:GetObject"},
+			Resource:  []string{"arn:aws:s3:::" + bucket + "/" + tenantID + "/*"},
+		}},
+	}
+	rendered, err := json.Marshal(document)
+	if err != nil {
+		return nil, fmt.Errorf("encode bucket policy: %w", err)
+	}
+	return rendered, nil
+}
+
+type bucketPolicyDocument struct {
+	Version   string                  `json:"Version"`
+	Statement []bucketPolicyStatement `json:"Statement"`
+}
+
+type bucketPolicyStatement struct {
+	Sid       string              `json:"Sid"`
+	Effect    string              `json:"Effect"`
+	Principal map[string][]string `json:"Principal"`
+	Action    []string            `json:"Action"`
+	Resource  []string            `json:"Resource"`
 }
 
 // BucketUsage aggregates live object count and size from the S3-compatible
@@ -526,7 +634,11 @@ func (s *MinIOObjectStore) SignedUploadURLWithHeaders(ctx context.Context, ref p
 }
 
 func (s *MinIOObjectStore) SignedDownloadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
-	return s.presignWithEndpoint(ctx, http.MethodGet, ref, ttl, s.endpoint)
+	// Download links are opened by the end user's browser, so they must be signed
+	// against the browser-reachable endpoint exactly like uploads. Signing with
+	// the internal service address produced links that only resolve inside the
+	// cluster (and fail DNS outside it).
+	return s.presignWithEndpoint(ctx, http.MethodGet, ref, ttl, s.publicEndpoint)
 }
 
 func (s *MinIOObjectStore) presignWithEndpoint(ctx context.Context, method string, ref ports.ObjectRef, ttl time.Duration, endpoint *url.URL) (ports.SignedURL, error) {

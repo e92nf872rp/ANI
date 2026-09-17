@@ -352,6 +352,7 @@ type StorageBucketCreateRequest struct {
 	Name           string
 	Region         string
 	AccessMode     string
+	StorageClass   string
 }
 
 type StorageObjectUploadRequest struct {

@@ -131,7 +131,18 @@ func TestLocalStorageServicePersistsCreateAndDelete(t *testing.T) {
 
 func TestLocalStorageServiceBucketObjectOperationsAfterRestart(t *testing.T) {
 	store := newSharedMemoryStorageStore()
-	service := NewLocalStorageService(WithStorageResourceStore(store))
+	service := NewLocalStorageService(
+		WithStorageResourceStore(store),
+		WithStorageObjectStore(&fakeObjectStore{
+			uploadURL:   "https://objects.local/upload/persisted",
+			downloadURL: "https://objects.local/download/persisted",
+			statOK:      true,
+			statMetadata: ports.ObjectMetadata{
+				SizeBytes:   2048,
+				ContentType: "text/csv",
+			},
+		}),
+	)
 
 	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
 		TenantID:       storageStoreTenantID,
