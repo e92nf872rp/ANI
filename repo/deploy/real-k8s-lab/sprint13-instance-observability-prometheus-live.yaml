@@ -67,14 +67,33 @@ data:
           insecure_skip_verify: true
         kubernetes_sd_configs:
           - role: node
-      # DCGM exporter for GPU 指标（PRD US-002 / FR-2）
-      # static_config 直接 HTTP 访问 ani-system namespace 中的 Service，
-      # 不需要跨 namespace RBAC，也不修改 Prometheus ClusterRole。
+      # DCGM exporter for GPU 指标（PRD US-002 / FR-2；GPU-8 vGPU 归属修复）
+      # DaemonSet 多副本不能走 ClusterIP svc 单 target：每次 scrape 随机命中一个
+      # 节点的 exporter，其余节点 series 被 stale，per-node GPU 数据随机丢失。
+      # pod 级发现，每个 exporter pod 一个独立 target。
+      # honor_labels 保留 exporter 上报的租户 namespace/pod/container 标签（GPU-8）；
+      # 默认 false 时冲突标签会被改名为 exported_*，adapter 按 namespace/pod 查询查不到。
       - job_name: 'dcgm-exporter'
+        honor_labels: true
         metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+                names: ['ani-system']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+            regex: dcgm-exporter
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_phase]
+            regex: Running
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            regex: "9400"
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
         static_configs:
-          - targets: ['ani-dcgm-exporter.ani-system:9400']
-            labels:
+          - labels:
               component: 'dcgm-exporter'
       # KubeVirt virt-handler for VM 指标（PRD US-008 / FR-14）
       # kubernetes_sd_configs（role: pod）发现 kubevirt namespace 的 virt-handler pod，
