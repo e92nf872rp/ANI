@@ -29,7 +29,7 @@ func NewTenantSvcClient() ports.TenantSvcClient {
 func (c *TenantSvcClient) GetTenant(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s", tenantID.String())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return ports.Tenant{}, mapSDKError(err)
 	}
@@ -40,7 +40,7 @@ func (c *TenantSvcClient) GetTenant(ctx context.Context, tenantID uuid.UUID) (po
 func (c *TenantSvcClient) ListAvailableTenants(ctx context.Context) ([]ports.BoundTenant, error) {
 	_ = ctx
 	// 步骤 1：调用 Core GET /admin/tenant-admins/available-tenants
-	raw, err := c.sdk.Request("GET", "/admin/tenant-admins/available-tenants", anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", "/admin/tenant-admins/available-tenants", anisdk.RequestOptions{})
 	if err != nil {
 		return nil, mapSDKError(err)
 	}
@@ -88,7 +88,7 @@ func (c *TenantSvcClient) CreateTenant(ctx context.Context, in ports.CreateTenan
 		},
 		Headers: corePropagateHeaders(ctx),
 	}
-	raw, err := c.sdk.Request("POST", "/admin/tenants", opts)
+	raw, err := coreRequest(ctx, c.sdk, "POST", "/admin/tenants", opts)
 	if err != nil {
 		// 步骤 2：SDK 错误映射（含 TENANT_NAME_CONFLICT）
 		return ports.Tenant{}, mapSDKError(err)
@@ -116,7 +116,7 @@ func (c *TenantSvcClient) ListTenants(ctx context.Context, filter ports.ListTena
 	if encoded := q.Encode(); encoded != "" {
 		path += "?" + encoded
 	}
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return ports.TenantListResult{}, mapSDKError(err)
 	}
@@ -165,7 +165,7 @@ func (c *TenantSvcClient) UpdateTenant(ctx context.Context, tenantID uuid.UUID, 
 		body["contact_email"] = *in.ContactEmail
 	}
 	path := fmt.Sprintf("/admin/tenants/%s", tenantID.String())
-	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{Body: body})
+	raw, err := coreRequest(ctx, c.sdk, "PUT", path, anisdk.RequestOptions{Body: body})
 	if err != nil {
 		return ports.Tenant{}, mapSDKError(err)
 	}
@@ -174,7 +174,7 @@ func (c *TenantSvcClient) UpdateTenant(ctx context.Context, tenantID uuid.UUID, 
 
 func (c *TenantSvcClient) FreezeTenant(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
 	path := fmt.Sprintf("/admin/tenants/%s/freeze", tenantID.String())
-	raw, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+	raw, err := coreRequest(ctx, c.sdk, "POST", path, anisdk.RequestOptions{
 		Headers: corePropagateHeaders(ctx),
 	})
 	if err != nil {
@@ -185,7 +185,7 @@ func (c *TenantSvcClient) FreezeTenant(ctx context.Context, tenantID uuid.UUID) 
 
 func (c *TenantSvcClient) UnfreezeTenant(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
 	path := fmt.Sprintf("/admin/tenants/%s/unfreeze", tenantID.String())
-	raw, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+	raw, err := coreRequest(ctx, c.sdk, "POST", path, anisdk.RequestOptions{
 		Headers: corePropagateHeaders(ctx),
 	})
 	if err != nil {
@@ -196,7 +196,7 @@ func (c *TenantSvcClient) UnfreezeTenant(ctx context.Context, tenantID uuid.UUID
 
 func (c *TenantSvcClient) DisableTenant(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
 	path := fmt.Sprintf("/admin/tenants/%s/disable", tenantID.String())
-	raw, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+	raw, err := coreRequest(ctx, c.sdk, "POST", path, anisdk.RequestOptions{
 		Headers: corePropagateHeaders(ctx),
 	})
 	if err != nil {
@@ -207,7 +207,7 @@ func (c *TenantSvcClient) DisableTenant(ctx context.Context, tenantID uuid.UUID)
 
 func (c *TenantSvcClient) GetTenantAuth(ctx context.Context, tenantID uuid.UUID) (ports.TenantAuth, error) {
 	path := fmt.Sprintf("/admin/tenants/%s/auth", tenantID.String())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return ports.TenantAuth{}, mapSDKError(err)
 	}
@@ -227,7 +227,7 @@ func (c *TenantSvcClient) UpdateTenantAuth(ctx context.Context, tenantID uuid.UU
 		body["mfa_required"] = *patch.MfaRequired
 	}
 	path := fmt.Sprintf("/admin/tenants/%s/auth", tenantID.String())
-	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{Body: body})
+	raw, err := coreRequest(ctx, c.sdk, "PUT", path, anisdk.RequestOptions{Body: body})
 	if err != nil {
 		return ports.TenantAuth{}, mapSDKError(err)
 	}
@@ -275,7 +275,7 @@ func (c *TenantSvcClient) ListTenantLifecycle(ctx context.Context, tenantID uuid
 		path += "?" + encoded
 	}
 	// 步骤 2：发 GET；404 TENANT_NOT_FOUND 等经 mapSDKError
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return ports.TenantLifecycleListResult{}, mapSDKError(err)
 	}

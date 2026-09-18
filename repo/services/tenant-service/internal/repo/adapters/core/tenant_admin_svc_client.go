@@ -32,7 +32,7 @@ func (c *TenantAdminSvcClient) MatchUser(ctx context.Context, tenantID uuid.UUID
 	q.Set("email", strings.TrimSpace(email))
 	q.Set("username", strings.TrimSpace(username))
 	path := fmt.Sprintf("/admin/tenants/%s/user-lookup?%s", tenantID.String(), q.Encode())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return uuid.Nil, mapSDKError(err)
 	}
@@ -56,7 +56,7 @@ func (c *TenantAdminSvcClient) IsAlreadyAdmin(ctx context.Context, tenantID, use
 func (c *TenantAdminSvcClient) GetUser(ctx context.Context, tenantID, userID uuid.UUID) (ports.AdminWithTenant, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s", tenantID.String(), userID.String())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return ports.AdminWithTenant{}, mapSDKError(err)
 	}
@@ -76,7 +76,7 @@ func (c *TenantAdminSvcClient) BatchGetUsers(ctx context.Context, tenantID uuid.
 	q := url.Values{}
 	q.Set("user_ids", strings.Join(ids, ","))
 	path := fmt.Sprintf("/admin/tenants/%s/users/batch?%s", tenantID.String(), q.Encode())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return nil, mapSDKError(err)
 	}
@@ -128,7 +128,7 @@ func (c *TenantAdminSvcClient) ListTenantAdmins(ctx context.Context, filter port
 	if encoded := q.Encode(); encoded != "" {
 		path += "?" + encoded
 	}
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return ports.ListResult{}, mapSDKError(err)
 	}
@@ -159,7 +159,7 @@ func (c *TenantAdminSvcClient) ChangeRole(ctx context.Context, tenantID, userID,
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s/role", tenantID.String(), userID.String())
 	body := map[string]any{"role_id": roleID.String()}
-	_, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
+	_, err := coreRequest(ctx, c.sdk, "PUT", path, anisdk.RequestOptions{
 		Body: body,
 	})
 	if err != nil {
@@ -172,7 +172,7 @@ func (c *TenantAdminSvcClient) ChangeRole(ctx context.Context, tenantID, userID,
 func (c *TenantAdminSvcClient) GetRolePermissions(ctx context.Context, tenantID, userID uuid.UUID) (ports.UserPermissions, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s/role", tenantID.String(), userID.String())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return ports.UserPermissions{}, mapSDKError(err)
 	}
@@ -217,7 +217,7 @@ func (c *TenantAdminSvcClient) GetRolePermissions(ctx context.Context, tenantID,
 func (c *TenantAdminSvcClient) ListAssignableRoles(ctx context.Context, tenantID uuid.UUID) ([]ports.AssignableRole, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/roles", tenantID.String())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return nil, mapSDKError(err)
 	}
@@ -283,7 +283,7 @@ func decodePermissionsAny(raw any) ([]any, error) {
 func (c *TenantAdminSvcClient) SetStatus(ctx context.Context, tenantID, userID uuid.UUID, status string) error {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s/status", tenantID.String(), userID.String())
-	_, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+	_, err := coreRequest(ctx, c.sdk, "POST", path, anisdk.RequestOptions{
 		Body: map[string]any{"status": status},
 	})
 	if err != nil {
@@ -296,7 +296,7 @@ func (c *TenantAdminSvcClient) SetStatus(ctx context.Context, tenantID, userID u
 func (c *TenantAdminSvcClient) SoftDelete(ctx context.Context, tenantID, userID uuid.UUID) error {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s", tenantID.String(), userID.String())
-	_, err := c.sdk.Request("DELETE", path, anisdk.RequestOptions{})
+	_, err := coreRequest(ctx, c.sdk, "DELETE", path, anisdk.RequestOptions{})
 	if err != nil {
 		return mapSDKError(err)
 	}
@@ -307,7 +307,7 @@ func (c *TenantAdminSvcClient) SoftDelete(ctx context.Context, tenantID, userID 
 func (c *TenantAdminSvcClient) ResetPassword(ctx context.Context, tenantID, userID uuid.UUID, newPassword string) error {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s/reset-password", tenantID.String(), userID.String())
-	_, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+	_, err := coreRequest(ctx, c.sdk, "POST", path, anisdk.RequestOptions{
 		Body: map[string]any{"new_password": newPassword},
 	})
 	if err != nil {

@@ -424,13 +424,13 @@ func (s *AuthService) IssueServiceToken(_ context.Context, req *authv1.IssueServ
 	if !s.mintAllowed(req.GetCallerService(), req.GetCallerSecret()) {
 		return nil, status.Error(codes.PermissionDenied, "forbidden")
 	}
-	// V2 签发映射：scope/permissions/credential_domain 统一解析为规范 claims，
-	// 同时写入 V2 字段与 deprecated legacy projection。
+	// platformAdminMintCallers 的调用面是 /admin/*（全部 V2 policy + PrincipalUser），
+	// service 主体会被拒；按服务扮演签 platform user 形态（见 resolveIssueServiceTokenClaims）。
+	ttl := time.Duration(req.GetTtlSeconds()) * time.Second
 	payload, err := resolveIssueServiceTokenClaims(req)
 	if err != nil {
 		return nil, err
 	}
-	ttl := time.Duration(req.GetTtlSeconds()) * time.Second
 	token, err := s.issuer.IssueServiceTokenPayload(payload, ttl)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to issue service token")
@@ -544,18 +544,41 @@ func uuidString(id uuid.UUID) string {
 
 const (
 	defaultAccessTokenTTL = time.Hour
-	allowedMintCaller     = "inference-service"
+	// allowedMintCallers 是 IssueServiceToken 允许的内部调用方集合。
+	allowedMintCallers = "inference-service,tenant-service,platform-settings-service"
+	// platformAdminMintCallers 中的调用方访问 /admin/*（V2 policy 仅允许 PrincipalUser），
+	// 签发的是服务扮演的 platform user 形态 token，而非 service 主体形态。
+	platformAdminMintCallers = "tenant-service,platform-settings-service"
 )
 
 func (s *AuthService) mintAllowed(name, secret string) bool {
-	if strings.TrimSpace(name) != allowedMintCaller {
+	name = strings.TrimSpace(name)
+	if !mintCallerAllowed(name) {
 		return false
 	}
-	want := s.mintSecrets[allowedMintCaller]
+	want := s.mintSecrets[name]
 	if want == "" || secret == "" {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(want), []byte(secret)) == 1
+}
+
+func mintCallerAllowed(name string) bool {
+	for _, caller := range strings.Split(allowedMintCallers, ",") {
+		if strings.TrimSpace(caller) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isPlatformAdminMintCaller(name string) bool {
+	for _, caller := range strings.Split(platformAdminMintCallers, ",") {
+		if strings.TrimSpace(caller) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func parseMintCredentials(raw string) map[string]string {

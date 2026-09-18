@@ -27,7 +27,7 @@ func NewTenantPlanSvcClient() ports.TenantPlanSvcClient {
 func (c *TenantPlanSvcClient) UpdateTenantPlan(ctx context.Context, tenantID uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {
 	_ = ctx
 	path := fmt.Sprintf("/admin/tenants/%s/plan", tenantID.String())
-	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
+	raw, err := coreRequest(ctx, c.sdk, "PUT", path, anisdk.RequestOptions{
 		Body: map[string]any{"plan_id": planID.String()},
 	})
 	if err != nil {
@@ -48,7 +48,7 @@ func (c *TenantPlanSvcClient) CountBoundTenants(ctx context.Context, planIDs []u
 		out[id] = 0
 		q.Add("plan_id", id.String())
 	}
-	raw, err := c.sdk.Request("GET", "/admin/plans/bound-tenant-counts?"+q.Encode(), anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", "/admin/plans/bound-tenant-counts?"+q.Encode(), anisdk.RequestOptions{})
 	if err != nil {
 		return nil, mapSDKError(err)
 	}
@@ -85,7 +85,7 @@ func (c *TenantPlanSvcClient) ListBindableTenants(ctx context.Context, planID uu
 
 func (c *TenantPlanSvcClient) listTenantSummaries(ctx context.Context, path string) ([]ports.BoundTenant, error) {
 	_ = ctx
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	raw, err := coreRequest(ctx, c.sdk, "GET", path, anisdk.RequestOptions{})
 	if err != nil {
 		return nil, mapSDKError(err)
 	}
