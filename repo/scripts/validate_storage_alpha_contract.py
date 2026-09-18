@@ -65,6 +65,9 @@ EXPECTED_PATHS = {
     "/filesystems/{filesystem_id}/mount-command": {
         "get": ("getFilesystemMountCommand", "scope:filesystems:read", {"200", "401", "403", "404"}),
     },
+    "/buckets/{bucket_id}": {
+        "delete": ("deleteStorageBucket", "scope:objects:delete", {"200", "401", "403", "404", "409"}),
+    },
     "/buckets/{bucket_id}/objects": {
         "get": ("listBucketObjects", "scope:objects:read", {"200", "401", "403", "404"}),
         "delete": ("deleteBucketObject", "scope:objects:delete", {"200", "400", "401", "403", "404"}),
@@ -279,7 +282,11 @@ def validate_gateway(root: Path, errors: list[str]) -> None:
     for route in EXPECTED_ROUTES:
         if route not in routes_go:
             errors.append(f"storage_resources.go missing route token {route}")
-    if "registerStorageResources(v1)" not in router_go and "registerStorageResourcesWithService(v1, options.StorageService)" not in router_go:
+    # 门禁只断言 router.go 确实注册了存储路由；注册函数存在多个演进变体
+    # （registerStorageResources / registerStorageResourcesWithService /
+    # ...WithServiceAndTasks / ...WithServiceAndTasksAndStore），
+    # 因此按共同前缀匹配，避免每次扩展注册签名都要同步改门禁。
+    if "registerStorageResources(" not in router_go and "registerStorageResourcesWithService" not in router_go:
         errors.append("router.go must register storage resources")
     for token in ("StorageService interface", "StorageResourceStore interface", "StorageProviderRenderer interface", "StorageProviderDryRun interface", "StorageProviderApply interface", "StorageProviderStatusReader interface", "StorageStatusReconciler interface", "StorageResourceState", "StorageVolumeRecord", "StorageFilesystemRecord", "StorageObjectRecord", "VolumeSnapshotRecord", "VolumeSnapshotCreateRequest", "VolumeSnapshotListRequest", "FilesystemMountTargetRecord", "FilesystemMountTargetListRequest"):
         if token not in ports_go:

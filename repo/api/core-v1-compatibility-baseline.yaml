@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-09-10'
+generated_at: '2026-09-18'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -1344,6 +1344,16 @@ paths:
         required: false
         schema:
           type: string
+      - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
       request_body_required: false
       request_schema: '{}'
       responses:
@@ -1367,6 +1377,29 @@ paths:
         '401':
           schema: '{}'
         '403':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /buckets/{bucket_id}:
+    delete:
+      operation_id: deleteStorageBucket
+      rbac_scope: scope:objects:delete
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: StorageBucketRecord
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
           schema: '{}'
         '409':
           schema: '{}'
@@ -1791,6 +1824,21 @@ paths:
         required: false
         schema:
           type: boolean
+      - in: query
+        name: state
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
       request_body_required: false
       request_schema: '{}'
       responses:
@@ -2057,6 +2105,43 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+  /gpu-inventory/events:
+    get:
+      operation_id: listGPUDeviceEvents
+      rbac_scope: scope:gpu-inventory:read
+      parameters:
+      - in: query
+        name: device_id
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: event_type
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: GPUDeviceEventListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /gpu-inventory/gpu-partitions:
     post:
       operation_id: createGPUPartition
@@ -2121,6 +2206,8 @@ paths:
       responses:
         '200':
           schema: GPUInventoryRecord
+        '400':
+          schema: '{}'
         '401':
           schema: '{}'
         '403':
@@ -2417,6 +2504,11 @@ paths:
         schema:
           type: string
       - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
         name: created_after
         required: false
         schema:
@@ -2470,6 +2562,16 @@ paths:
           type: string
       - in: query
         name: session_state
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: vpc_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: subnet_id
         required: false
         schema:
           type: string
@@ -3810,6 +3912,16 @@ paths:
       rbac_scope: scope:networks:read
       parameters:
       - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
+      - in: query
         name: name
         required: false
         schema:
@@ -4160,6 +4272,21 @@ paths:
         schema:
           type: string
       - in: query
+        name: name
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
+      - in: query
         name: state
         required: false
         schema:
@@ -4301,6 +4428,16 @@ paths:
         schema:
           type: string
       - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
+      - in: query
         name: state
         required: false
         schema:
@@ -4400,6 +4537,21 @@ paths:
           maximum: 100
       - in: query
         name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: state
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
         required: false
         schema:
           type: string
@@ -4761,6 +4913,20 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+  /overview:
+    get:
+      operation_id: getConsoleOverview
+      rbac_scope: scope:instances:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ConsoleOverviewResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /platform-workload-capabilities:
     get:
       operation_id: getPlatformWorkloadCapabilities
@@ -4953,6 +5119,72 @@ paths:
         '403':
           schema: '{}'
         '404':
+          schema: '{}'
+        '503':
+          schema: '{}'
+  /platform/audit-logs:
+    get:
+      operation_id: getPlatformAuditLogs
+      rbac_scope: scope:audit-log:read
+      parameters:
+      - in: query
+        name: time_from
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: time_to
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: user
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: verb
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: resource_type
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: namespace
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: after
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: page_size
+        required: false
+        schema:
+          type: integer
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformAuditLogResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
           schema: '{}'
         '503':
           schema: '{}'
@@ -5192,6 +5424,11 @@ paths:
           type: string
       - in: query
         name: scan_status
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
         required: false
         schema:
           type: string
@@ -5733,6 +5970,21 @@ paths:
         required: false
         schema:
           type: string
+      - in: query
+        name: state
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
       request_body_required: false
       request_schema: '{}'
       responses:
@@ -5992,6 +6244,21 @@ paths:
         required: false
         schema:
           type: boolean
+      - in: query
+        name: state
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: search_field
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
       request_body_required: false
       request_schema: '{}'
       responses:
@@ -6669,6 +6936,250 @@ schemas:
       state:
         signature:
           type: string
+        enum: []
+  ConsoleInferenceServiceOverview:
+    type: object
+    required:
+    - by_status
+    - total
+    properties:
+      by_status:
+        signature:
+          $ref: '#/components/schemas/ConsoleInferenceServiceStatusDistribution'
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  ConsoleInferenceServiceStatusDistribution:
+    type: object
+    required:
+    - deploying
+    - failed
+    - pending
+    - running
+    - stopped
+    - stopping
+    properties:
+      deploying:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      failed:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      pending:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      running:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      stopped:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      stopping:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  ConsoleInstanceOverview:
+    type: object
+    required:
+    - by_state
+    - total
+    properties:
+      by_state:
+        signature:
+          $ref: '#/components/schemas/ConsoleInstanceStateDistribution'
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  ConsoleInstanceStateDistribution:
+    type: object
+    required:
+    - deleting
+    - failed
+    - pending
+    - provisioning
+    - running
+    - starting
+    - stopped
+    - stopping
+    properties:
+      deleting:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      failed:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      pending:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      provisioning:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      running:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      starting:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      stopped:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      stopping:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  ConsoleKnowledgeBaseOverview:
+    type: object
+    required:
+    - by_status
+    - total
+    properties:
+      by_status:
+        signature:
+          $ref: '#/components/schemas/ConsoleKnowledgeBaseStatusDistribution'
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  ConsoleKnowledgeBaseStatusDistribution:
+    type: object
+    required:
+    - active
+    - rebuilding
+    properties:
+      active:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      rebuilding:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  ConsoleModelOverview:
+    type: object
+    required:
+    - by_status
+    - total
+    properties:
+      by_status:
+        signature:
+          $ref: '#/components/schemas/ConsoleModelStatusDistribution'
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  ConsoleModelStatusDistribution:
+    type: object
+    required:
+    - downloading
+    - error
+    - pending
+    - ready
+    properties:
+      downloading:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      error:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      pending:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      ready:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  ConsoleOverviewResponse:
+    type: object
+    required:
+    - inference_services
+    - instances
+    - knowledge_bases
+    - models
+    properties:
+      inference_services:
+        signature:
+          $ref: '#/components/schemas/ConsoleInferenceServiceOverview'
+        enum: []
+      instances:
+        signature:
+          $ref: '#/components/schemas/ConsoleInstanceOverview'
+        enum: []
+      knowledge_bases:
+        signature:
+          $ref: '#/components/schemas/ConsoleKnowledgeBaseOverview'
+        enum: []
+      models:
+        signature:
+          $ref: '#/components/schemas/ConsoleModelOverview'
         enum: []
   CoreDevProfileInfo:
     type: object
@@ -7525,6 +8036,12 @@ schemas:
         signature:
           type: string
         enum: []
+      storage_class:
+        signature:
+          type: string
+        enum:
+        - standard
+        - infrequent_access
   CreateStorageFilesystemRequest:
     type: object
     required:
@@ -8238,17 +8755,98 @@ schemas:
         signature:
           type: integer
         enum: []
+  GPUDeviceEvent:
+    type: object
+    required:
+    - created_at
+    - event_type
+    - id
+    properties:
+      actor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      device_id:
+        signature:
+          type: string
+          format: uuid
+          nullable: true
+        enum: []
+      event_type:
+        signature:
+          type: string
+        enum:
+        - status_changed
+        - partition_applied
+      gpu_type:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      node_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      reason:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  GPUDeviceEventListResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - total
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPUDeviceEvent'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
   GPUDeviceStatusUpdateRequest:
     type: object
     required:
     - status
     properties:
+      reason:
+        signature:
+          type: string
+          maxLength: 512
+        enum: []
       status:
         signature:
           type: string
         enum:
         - maintenance
         - idle
+        - unavailable
   GPUInventoryListResponse:
     type: object
     required:
@@ -8343,6 +8941,11 @@ schemas:
         signature:
           type: string
         enum: []
+      reason:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       shares:
         signature:
           type: integer
@@ -8356,6 +8959,7 @@ schemas:
         - in_use
         - fault
         - maintenance
+        - unavailable
       tenant_id:
         signature:
           type: string
@@ -8393,9 +8997,34 @@ schemas:
         signature:
           type: integer
         enum: []
+      logical_card_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      maintenance_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      physical_card_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      tenant_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
       total:
         signature:
           type: integer
+        enum: []
+      unavailable_count:
+        signature:
+          type: integer
+          minimum: 0
         enum: []
       vgpu_count:
         signature:
@@ -11708,6 +12337,128 @@ schemas:
           type: array
           items:
             $ref: '#/components/schemas/PlanBoundTenantCount'
+        enum: []
+  PlatformAuditLogDetail:
+    type: object
+    required:
+    - request_uri
+    - user_agent
+    properties:
+      request_uri:
+        signature:
+          type: string
+        enum: []
+      user_agent:
+        signature:
+          type: string
+        enum: []
+  PlatformAuditLogItem:
+    type: object
+    required:
+    - audit_id
+    - detail
+    - resource
+    - response_code
+    - timestamp
+    - user
+    - verb
+    properties:
+      audit_id:
+        signature:
+          type: string
+        enum: []
+      detail:
+        signature:
+          $ref: '#/components/schemas/PlatformAuditLogDetail'
+        enum: []
+      resource:
+        signature:
+          $ref: '#/components/schemas/PlatformAuditResource'
+        enum: []
+      response_code:
+        signature:
+          type: integer
+        enum: []
+      timestamp:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      user:
+        signature:
+          $ref: '#/components/schemas/PlatformAuditUser'
+        enum: []
+      verb:
+        signature:
+          type: string
+        enum:
+        - create
+        - update
+        - patch
+        - delete
+  PlatformAuditLogResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - next_after
+    - total_approx
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformAuditLogItem'
+        enum: []
+      next_after:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total_approx:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  PlatformAuditResource:
+    type: object
+    required:
+    - name
+    - namespace
+    - resource
+    properties:
+      name:
+        signature:
+          type: string
+        enum: []
+      namespace:
+        signature:
+          type: string
+        enum: []
+      resource:
+        signature:
+          type: string
+        enum: []
+  PlatformAuditUser:
+    type: object
+    required:
+    - groups
+    - username
+    properties:
+      groups:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      username:
+        signature:
+          type: string
         enum: []
   PlatformCapacityResponse:
     type: object

@@ -18,6 +18,9 @@ live_checks:
   - id: core-buckets-list
     command: GET {gateway_url}/buckets
     pass_condition: http_200_response_has_items_total_next_cursor
+  - id: core-bucket-delete
+    command: DELETE {gateway_url}/buckets/{bucket_id}
+    pass_condition: http_200_response_has_storage_bucket_record
   - id: core-object-upload-presign
     command: POST {gateway_url}/objects/upload idempotency_key={idempotency_key} bucket_id={bucket_id} key={object_key}
     pass_condition: http_200_response_has_object_id_upload_url_expires_at

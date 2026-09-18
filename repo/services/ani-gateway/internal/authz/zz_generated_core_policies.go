@@ -431,6 +431,13 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/buckets",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
+	"DELETE /api/v1/buckets/{bucket_id}": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "deleteStorageBucket",
+		Method:               "DELETE",
+		PathTemplate:         "/api/v1/buckets/{bucket_id}",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
 	"PUT /api/v1/buckets/{bucket_id}/acl": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "setStorageBucketACL",

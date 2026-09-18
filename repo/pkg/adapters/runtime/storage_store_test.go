@@ -80,6 +80,57 @@ func TestMetadataStorageStoreUpsertsFilesystemAndObject(t *testing.T) {
 	}
 }
 
+// TestMetadataStorageStoreUpsertTombstones 覆盖删桶链路依赖的两个墓碑落盘分支：
+// state=deleted 且未显式给 deleted_at 时，必须落 updated_at 作为墓碑时间
+// （对象墓碑决定网关重启后桶能否通过非空判定删除）。
+func TestMetadataStorageStoreUpsertTombstones(t *testing.T) {
+	tx := &fakeMetadataTx{}
+	store := NewMetadataStorageStore(fakeMetadataStore{tx: tx}, WithStorageStoreClock(func() time.Time {
+		return time.Unix(700, 0).UTC()
+	}))
+
+	if err := store.UpsertBucket(context.Background(), ports.StorageBucketRecord{
+		TenantID:  storageStoreTenantID,
+		BucketID:  "bucket-tombstone",
+		Name:      "tombstone",
+		State:     ports.StorageResourceDeleted,
+		CreatedAt: time.Unix(690, 0).UTC(),
+		UpdatedAt: time.Unix(700, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertBucket() error = %v", err)
+	}
+	if !strings.Contains(tx.execs[0], "INSERT INTO storage_buckets") {
+		t.Fatalf("execs[0] = %q, want storage_buckets insert", tx.execs[0])
+	}
+	bucketDeletedAt, ok := tx.execArgs[0][15].(time.Time)
+	if !ok || !bucketDeletedAt.Equal(time.Unix(700, 0).UTC()) {
+		t.Fatalf("bucket deleted_at arg = %#v, want updated_at when state=deleted", tx.execArgs[0][15])
+	}
+
+	objectTx := &fakeMetadataTx{}
+	objectStore := NewMetadataStorageStore(fakeMetadataStore{tx: objectTx}, WithStorageStoreClock(func() time.Time {
+		return time.Unix(700, 0).UTC()
+	}))
+	if err := objectStore.UpsertObject(context.Background(), ports.StorageObjectRecord{
+		TenantID:  storageStoreTenantID,
+		ObjectID:  "object-tombstone",
+		Bucket:    "tombstone",
+		Key:       "raw/report.csv",
+		State:     ports.StorageResourceDeleted,
+		CreatedAt: time.Unix(690, 0).UTC(),
+		UpdatedAt: time.Unix(700, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertObject() error = %v", err)
+	}
+	if !strings.Contains(objectTx.execs[0], "INSERT INTO storage_objects") {
+		t.Fatalf("execs[0] = %q, want storage_objects insert", objectTx.execs[0])
+	}
+	objectDeletedAt, ok := objectTx.execArgs[0][8].(time.Time)
+	if !ok || !objectDeletedAt.Equal(time.Unix(700, 0).UTC()) {
+		t.Fatalf("object deleted_at arg = %#v, want updated_at when state=deleted", objectTx.execArgs[0][8])
+	}
+}
+
 func TestLocalStorageServicePersistsCreateAndDelete(t *testing.T) {
 	store := newSharedMemoryStorageStore()
 	service := NewLocalStorageService(WithStorageResourceStore(store))

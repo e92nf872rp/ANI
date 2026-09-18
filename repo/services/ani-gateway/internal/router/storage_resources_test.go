@@ -834,3 +834,57 @@ func TestStorageHTTPBucketListFiltersBySearchField(t *testing.T) {
 		t.Fatalf("search_field=id&keyword=no-such-id count = %d, want 0", got)
 	}
 }
+
+func TestStorageHTTPDeleteBucketLifecycle(t *testing.T) {
+	api := newStorageAPI()
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), api.service)
+
+	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets", `{"idempotency_key":"http-delete-bucket","name":"http-delete","region":"cn-east-1","access_mode":"private"}`, http.StatusCreated)
+	var createdBucket map[string]any
+	if err := json.Unmarshal(created, &createdBucket); err != nil {
+		t.Fatalf("decode create bucket: %v", err)
+	}
+	bucketID, _ := createdBucket["id"].(string)
+	if bucketID == "" {
+		t.Fatalf("created bucket = %s, want id", created)
+	}
+
+	// 桶内仍有对象时必须 409。
+	if _, err := api.service.CreateObject(context.Background(), ports.StorageObjectCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "http-delete-object",
+		Bucket:         "http-delete",
+		Key:            "raw/report.csv",
+		SizeBytes:      1024,
+	}); err != nil {
+		t.Fatalf("CreateObject error = %v", err)
+	}
+	performJSONRequest(t, h, http.MethodDelete, "/api/v1/buckets/"+bucketID, "", http.StatusConflict)
+
+	// 清空对象后删除成功，并返回被删桶。
+	if _, err := api.service.DeleteBucketObject(context.Background(), ports.StorageBucketObjectDeleteRequest{
+		TenantID: "tenant-a",
+		BucketID: bucketID,
+		Key:      "raw/report.csv",
+	}); err != nil {
+		t.Fatalf("DeleteBucketObject error = %v", err)
+	}
+	deleted := performJSONRequest(t, h, http.MethodDelete, "/api/v1/buckets/"+bucketID, "", http.StatusOK)
+	var deletedBucket map[string]any
+	if err := json.Unmarshal(deleted, &deletedBucket); err != nil {
+		t.Fatalf("decode delete bucket: %v", err)
+	}
+	if deletedBucket["id"] != bucketID {
+		t.Fatalf("deleted bucket id = %v, want %s", deletedBucket["id"], bucketID)
+	}
+
+	// 删除后桶级子操作为 404，重复删除与不存在的桶同为 404。
+	performJSONRequest(t, h, http.MethodGet, "/api/v1/buckets/"+bucketID+"/objects", "", http.StatusNotFound)
+	performJSONRequest(t, h, http.MethodDelete, "/api/v1/buckets/"+bucketID, "", http.StatusNotFound)
+	performJSONRequest(t, h, http.MethodDelete, "/api/v1/buckets/no-such-bucket", "", http.StatusNotFound)
+}
