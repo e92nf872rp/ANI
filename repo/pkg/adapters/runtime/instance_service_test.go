@@ -1317,6 +1317,161 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceDetachVolumeAcceptsVolumeSideMount(t *testing.T) {
+	// Regression (block storage bug 4): the Console renders "attached" from the
+	// volume record's mount_instance_id, while detach precheck only looked at
+	// instance-side storage_attachments. A volume mounted on the volume side but
+	// missing from the instance record must still be detachable.
+	store := &fakeInstanceStore{
+		last: ports.WorkloadInstanceRecord{
+			TenantID:   "tenant-a",
+			InstanceID: "container-a",
+			Name:       "app-01",
+			Kind:       ports.WorkloadKindContainer,
+			Status: ports.WorkloadStatus{
+				State:   ports.WorkloadStateRunning,
+				Storage: []ports.WorkloadStorageAttachment{},
+			},
+		},
+	}
+	storage := &fakeInstanceStorageBinder{
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-data-a": {
+				TenantID:        "tenant-a",
+				VolumeID:        "vol-data-a",
+				MountInstanceID: "container-a",
+				MountRoute:      "instances/container-a",
+				MountName:       "volume-vol-data-a",
+			},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceStorageService(storage),
+	)
+
+	detached, err := service.DetachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "detach-volume-side-a",
+		TenantID:        "tenant-a",
+		InstanceID:      "container-a",
+		VolumeID:        "vol-data-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1620, 0),
+	})
+	if err != nil {
+		t.Fatalf("DetachVolume() error = %v, want the volume-side mount to be accepted", err)
+	}
+	if detached.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", detached.Status.State)
+	}
+	if storage.volumeUnmounts != 1 || len(storage.unmountedVolumes) != 1 || storage.unmountedVolumes[0] != "vol-data-a" {
+		t.Fatalf("unmounts = %d %#v, want the volume side rolled back for vol-data-a", storage.volumeUnmounts, storage.unmountedVolumes)
+	}
+}
+
+func TestLocalInstanceServiceDetachVolumeRejectsVolumeMountedElsewhere(t *testing.T) {
+	store := &fakeInstanceStore{
+		last: ports.WorkloadInstanceRecord{
+			TenantID:   "tenant-a",
+			InstanceID: "container-a",
+			Name:       "app-01",
+			Kind:       ports.WorkloadKindContainer,
+			Status: ports.WorkloadStatus{
+				State:   ports.WorkloadStateRunning,
+				Storage: []ports.WorkloadStorageAttachment{},
+			},
+		},
+	}
+	storage := &fakeInstanceStorageBinder{
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-data-a": {
+				TenantID:        "tenant-a",
+				VolumeID:        "vol-data-a",
+				MountInstanceID: "container-b",
+			},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceStorageService(storage),
+	)
+
+	_, err := service.DetachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "detach-volume-side-b",
+		TenantID:        "tenant-a",
+		InstanceID:      "container-a",
+		VolumeID:        "vol-data-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1630, 0),
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DetachVolume() error = %v, want conflict for a volume mounted on another instance", err)
+	}
+	if storage.volumeUnmounts != 0 {
+		t.Fatalf("unmounts = %d, want no volume-side rollback", storage.volumeUnmounts)
+	}
+}
+
+func TestLocalInstanceServiceDetachVolumeRollsBackBothFactSources(t *testing.T) {
+	store := &fakeInstanceStore{
+		last: ports.WorkloadInstanceRecord{
+			TenantID:   "tenant-a",
+			InstanceID: "container-a",
+			Name:       "app-01",
+			Kind:       ports.WorkloadKindContainer,
+			Status: ports.WorkloadStatus{
+				State: ports.WorkloadStateRunning,
+				Storage: []ports.WorkloadStorageAttachment{
+					{Name: "vol-data-a", Kind: ports.StorageAttachmentDataDisk, ResourceType: "volume", ResourceID: "vol-data-a"},
+				},
+			},
+		},
+	}
+	storage := &fakeInstanceStorageBinder{
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-data-a": {
+				TenantID:        "tenant-a",
+				VolumeID:        "vol-data-a",
+				MountInstanceID: "container-a",
+			},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceStorageService(storage),
+	)
+
+	detached, err := service.DetachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "detach-both-sides-a",
+		TenantID:        "tenant-a",
+		InstanceID:      "container-a",
+		VolumeID:        "vol-data-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1640, 0),
+	})
+	if err != nil {
+		t.Fatalf("DetachVolume() error = %v", err)
+	}
+	if len(detached.Status.Storage) != 0 {
+		t.Fatalf("instance-side storage = %#v, want the attachment removed", detached.Status.Storage)
+	}
+	if storage.volumeUnmounts != 1 {
+		t.Fatalf("unmounts = %d, want the volume side rolled back as well", storage.volumeUnmounts)
+	}
+}
+
 func TestLocalInstanceServiceContainerRollbackLocalProfile(t *testing.T) {
 	store := &fakeInstanceStore{
 		last: ports.WorkloadInstanceRecord{
@@ -2509,11 +2664,16 @@ var _ ports.WorkloadInstanceResourceResolver = (*capturingInstanceResourceResolv
 type fakeInstanceStorageBinder struct {
 	volumeMounts     int
 	filesystemMounts int
+	volumeUnmounts   int
 	lastVolumeID     string
 	lastFilesystemID string
 	lastInstanceID   string
 	err              error
 	createdVolumes   []ports.StorageVolumeCreateRequest
+	unmountedVolumes []string
+	// storedVolumes backs GetVolume, which the detach precheck consults for the
+	// volume-side mount_instance_id.
+	storedVolumes map[string]ports.StorageVolumeRecord
 }
 
 func (f *fakeInstanceStorageBinder) CreateVolume(_ context.Context, request ports.StorageVolumeCreateRequest) (ports.StorageVolumeRecord, error) {
@@ -2542,6 +2702,23 @@ func (f *fakeInstanceStorageBinder) MountFilesystem(_ context.Context, request p
 	f.lastFilesystemID = request.FilesystemID
 	f.lastInstanceID = request.InstanceID
 	return ports.StorageFilesystemRecord{FilesystemID: request.FilesystemID}, nil
+}
+
+func (f *fakeInstanceStorageBinder) GetVolume(_ context.Context, request ports.StorageResourceGetRequest) (ports.StorageVolumeRecord, error) {
+	if f.err != nil {
+		return ports.StorageVolumeRecord{}, f.err
+	}
+	if record, ok := f.storedVolumes[request.ResourceID]; ok {
+		return record, nil
+	}
+	return ports.StorageVolumeRecord{}, ports.ErrNotFound
+}
+
+func (f *fakeInstanceStorageBinder) UnmountVolume(_ context.Context, request ports.StorageVolumeUnmountRequest) (ports.StorageVolumeRecord, error) {
+	f.volumeUnmounts++
+	f.unmountedVolumes = append(f.unmountedVolumes, request.VolumeID)
+	delete(f.storedVolumes, request.VolumeID)
+	return ports.StorageVolumeRecord{VolumeID: request.VolumeID}, nil
 }
 
 type fakeLifecycleExecutor struct {

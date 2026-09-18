@@ -18,7 +18,9 @@ import (
 
 type instanceStorageBinder interface {
 	CreateVolume(ctx context.Context, request ports.StorageVolumeCreateRequest) (ports.StorageVolumeRecord, error)
+	GetVolume(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageVolumeRecord, error)
 	MountVolume(ctx context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error)
+	UnmountVolume(ctx context.Context, request ports.StorageVolumeUnmountRequest) (ports.StorageVolumeRecord, error)
 	MountFilesystem(ctx context.Context, request ports.StorageFilesystemMountRequest) (ports.StorageFilesystemRecord, error)
 }
 
@@ -987,7 +989,8 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		return ports.WorkloadInstanceRecord{}, err
 	}
 	previousState := record.Status.State
-	precheck := lifecyclePrecheck(record, request, next, s.volumeOccupancyConflict(ctx, record, request))
+	volumeSideAttached := s.volumeMountedToInstance(ctx, request)
+	precheck := lifecyclePrecheck(record, request, next, s.volumeOccupancyConflict(ctx, record, request), volumeSideAttached)
 	if requestFingerprint != "" {
 		precheck.details["request_fingerprint"] = requestFingerprint
 	}
@@ -1126,6 +1129,28 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	}
 	record.Status.Storage = applyVolumeBinding(record.Status.Storage, request.Action, volume, request.VolumeID)
 	record.StorageAttachments = applyVolumeBinding(record.StorageAttachments, request.Action, volume, request.VolumeID)
+	if request.Action == ports.WorkloadLifecycleDetachVolume && volumeSideAttached {
+		// The volume-side mount fields are the Console's "attached" fact source:
+		// clear them together with the instance-side attachment so both views
+		// roll back consistently (block storage bug 4).
+		if err := s.unmountVolumeSide(ctx, request); err != nil {
+			if opID != "" {
+				_, _ = s.operations.AddOperationStep(ctx, opID, ports.WorkloadOperationStep{
+					StepName: "detach_volume",
+					Status:   ports.WorkloadOperationStepFailed,
+					Message:  err.Error(),
+				})
+				_, _ = s.operations.UpdateOperation(ctx, opID, ports.WorkloadOperationUpdate{
+					Status:         ports.WorkloadOperationFailed,
+					FailureReason:  classifiedLifecycleFailureReason("volume_unmount_failed", err),
+					FailureMessage: err.Error(),
+					RetryEligible:  true,
+					UpdatedAt:      request.RequestedAt,
+				})
+			}
+			return ports.WorkloadInstanceRecord{}, err
+		}
+	}
 	if rollback != nil {
 		record.Container = rollback
 	}
@@ -2035,7 +2060,7 @@ type lifecyclePrecheckResult struct {
 	details       map[string]any
 }
 
-func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest, next ports.WorkloadState, occupancy *volumeOccupancy) lifecyclePrecheckResult {
+func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest, next ports.WorkloadState, occupancy *volumeOccupancy, volumeSideAttached bool) lifecyclePrecheckResult {
 	details := map[string]any{
 		"allowed":                true,
 		"action":                 string(request.Action),
@@ -2068,6 +2093,7 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 			return blockedLifecyclePrecheck(details, "volume_id_required", "volume_id is required for volume binding")
 		}
 		attached := hasVolume(record.Status.Storage, volumeID)
+		details["volume_side_attached"] = volumeSideAttached
 		if request.Action == ports.WorkloadLifecycleAttachVolume && attached {
 			return blockedLifecyclePrecheck(details, "volume_already_attached", "volume is already attached")
 		}
@@ -2075,7 +2101,12 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 			if isRootVolume(record.Status.Storage, volumeID) {
 				return blockedLifecyclePrecheck(details, "root_volume_detach_forbidden", "root disk cannot be detached")
 			}
-			if !attached {
+			// A volume whose control-plane record still points at this instance
+			// counts as attached even when instance-side storage_attachments
+			// lost the entry: the Console renders "attached" from the volume
+			// record, so refusing here would leave the volume permanently
+			// stuck on 卸载 (block storage bug 4).
+			if !attached && !volumeSideAttached {
 				return blockedLifecyclePrecheck(details, "volume_not_attached", "volume is not attached")
 			}
 		}
@@ -2193,6 +2224,50 @@ func (s *LocalInstanceService) volumeOccupancyConflict(ctx context.Context, reco
 		}
 	}
 	return nil
+}
+
+// volumeMountedToInstance reports whether the volume-side control-plane record
+// still points at this instance. The Console derives "attached" from a non-empty
+// mount_instance_id on the volume, while instance-side storage_attachments can
+// lose the entry independently (status recompute, gateway restart, legacy data),
+// so detach must accept either fact source. Errors fail closed: an unreadable
+// volume keeps the previous "not attached" rejection.
+func (s *LocalInstanceService) volumeMountedToInstance(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest) bool {
+	if s.storage == nil || request.Action != ports.WorkloadLifecycleDetachVolume {
+		return false
+	}
+	volumeID := strings.TrimSpace(request.VolumeID)
+	instanceID := strings.TrimSpace(request.InstanceID)
+	if volumeID == "" || instanceID == "" {
+		return false
+	}
+	volume, err := s.storage.GetVolume(ctx, ports.StorageResourceGetRequest{
+		TenantID:   request.TenantID,
+		ResourceID: volumeID,
+	})
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(volume.MountInstanceID) == instanceID
+}
+
+// unmountVolumeSide clears the volume-side mount fields after a successful
+// instance detach. A volume that no longer exists is not an error: the instance
+// side is already detached and there is nothing left to roll back.
+func (s *LocalInstanceService) unmountVolumeSide(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest) error {
+	if s.storage == nil {
+		return nil
+	}
+	volumeID := strings.TrimSpace(request.VolumeID)
+	_, err := s.storage.UnmountVolume(ctx, ports.StorageVolumeUnmountRequest{
+		TenantID:       request.TenantID,
+		VolumeID:       volumeID,
+		IdempotencyKey: request.IdempotencyKey + ":unmount-volume:" + volumeID,
+	})
+	if errors.Is(err, ports.ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 // recordVolumeIDs collects the distinct block-volume IDs referenced by the
