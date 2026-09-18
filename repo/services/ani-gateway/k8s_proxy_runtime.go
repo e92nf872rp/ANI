@@ -37,6 +37,7 @@ type gatewayK8sClusterRuntimeConfig struct {
 	VClusterBinary                          string
 	VClusterChartName                       string
 	VClusterChartRepo                       string
+	VClusterChartVersion                    string
 	VClusterHelmSetValues                   []string
 	VClusterProxyServerTemplate             string
 	VClusterProxyBearerToken                string
@@ -74,6 +75,7 @@ func gatewayK8sClusterRuntimeConfigFromEnv() gatewayK8sClusterRuntimeConfig {
 		VClusterBinary:                          os.Getenv("VCLUSTER_BINARY"),
 		VClusterChartName:                       os.Getenv("VCLUSTER_CHART_NAME"),
 		VClusterChartRepo:                       os.Getenv("VCLUSTER_CHART_REPO"),
+		VClusterChartVersion:                    os.Getenv("VCLUSTER_CHART_VERSION"),
 		VClusterHelmSetValues:                   splitGatewayCSVEnv(os.Getenv("VCLUSTER_HELM_SET_VALUES")),
 		VClusterProxyServerTemplate:             os.Getenv("VCLUSTER_PROXY_SERVER_TEMPLATE"),
 		VClusterProxyBearerToken:                os.Getenv("VCLUSTER_PROXY_BEARER_TOKEN"),
@@ -193,13 +195,19 @@ func newGatewayK8sClusterBaseService(cfg gatewayK8sClusterRuntimeConfig, targetS
 			VClusterBinary:           cfg.VClusterBinary,
 			ChartName:                cfg.VClusterChartName,
 			ChartRepo:                cfg.VClusterChartRepo,
+			ChartVersion:             cfg.VClusterChartVersion,
 			HelmSetValues:            cfg.VClusterHelmSetValues,
 			Runner:                   cfg.VClusterHelmRunner,
 			ProxyServerTemplate:      cfg.VClusterProxyServerTemplate,
 			ProxyBearerToken:         cfg.VClusterProxyBearerToken,
 			KubeconfigServerTemplate: cfg.VClusterKubeconfigServerTemplate,
 		})
-		options = append(options, runtimeadapter.WithK8sClusterProviderApply(provider), runtimeadapter.WithK8sClusterProviderUpgrade(provider), runtimeadapter.WithK8sClusterKubeconfigProvider(provider))
+		options = append(options,
+			runtimeadapter.WithK8sClusterProviderApply(provider),
+			runtimeadapter.WithK8sClusterProviderUpgrade(provider),
+			runtimeadapter.WithK8sClusterProviderDelete(provider),
+			runtimeadapter.WithK8sClusterKubeconfigProvider(provider),
+		)
 		return runtimeadapter.NewLocalK8sClusterService(options...), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported K8S_CLUSTER_PROVIDER_MODE %q", ports.ErrUnsupported, providerMode)

@@ -232,6 +232,20 @@ type K8sClusterProviderUpgradeResult struct {
 	AppliedAt    time.Time
 }
 
+type K8sClusterProviderDeleteRequest struct {
+	TenantID  string
+	ClusterID string
+	Name      string
+}
+
+type K8sClusterProviderDeleteResult struct {
+	Deleted      bool
+	Provider     string
+	ResourceRefs []string
+	Reason       string
+	DeletedAt    time.Time
+}
+
 type K8sClusterNodePoolProviderRequest struct {
 	Operation    string
 	TenantID     string
@@ -266,6 +280,10 @@ type K8sClusterProviderApply interface {
 
 type K8sClusterProviderUpgrade interface {
 	UpgradeK8sCluster(ctx context.Context, req K8sClusterProviderUpgradeRequest) (K8sClusterProviderUpgradeResult, error)
+}
+
+type K8sClusterProviderDelete interface {
+	DeleteK8sCluster(ctx context.Context, req K8sClusterProviderDeleteRequest) (K8sClusterProviderDeleteResult, error)
 }
 
 type K8sClusterNodePoolProvider interface {

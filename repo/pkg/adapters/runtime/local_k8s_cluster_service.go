@@ -23,6 +23,7 @@ type localK8sClusterService struct {
 	nodePoolUpdateIdem map[string]ports.K8sClusterNodePoolRecord
 	providerApply      ports.K8sClusterProviderApply
 	providerUpgrade    ports.K8sClusterProviderUpgrade
+	providerDelete     ports.K8sClusterProviderDelete
 	nodePoolProvider   ports.K8sClusterNodePoolProvider
 	kubeconfigProvider ports.K8sClusterKubeconfigProvider
 	targetStore        ports.K8sClusterProxyTargetStore
@@ -39,6 +40,12 @@ func WithK8sClusterProviderApply(provider ports.K8sClusterProviderApply) K8sClus
 func WithK8sClusterProviderUpgrade(provider ports.K8sClusterProviderUpgrade) K8sClusterServiceOption {
 	return func(service *localK8sClusterService) {
 		service.providerUpgrade = provider
+	}
+}
+
+func WithK8sClusterProviderDelete(provider ports.K8sClusterProviderDelete) K8sClusterServiceOption {
+	return func(service *localK8sClusterService) {
+		service.providerDelete = provider
 	}
 }
 
@@ -80,55 +87,72 @@ func (s *localK8sClusterService) Health(context.Context) error {
 }
 
 func (s *localK8sClusterService) CreateCluster(ctx context.Context, req ports.K8sClusterCreateRequest) (ports.K8sClusterRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if req.TenantID == "" || req.Name == "" || req.IdempotencyKey == "" {
 		return ports.K8sClusterRecord{}, fmt.Errorf("%w: tenant_id/name/idempotency_key required", ports.ErrInvalid)
 	}
 	key := req.TenantID + ":" + req.IdempotencyKey
-	if id, ok := s.idem[key]; ok {
-		return s.byID[id], nil
+	state := ports.K8sClusterStateRunning
+	if s.providerApply != nil {
+		state = ports.K8sClusterStateProvisioning
 	}
 	now := time.Now().Unix()
-	rec := ports.K8sClusterRecord{ClusterID: "k8sclu-" + uuid.NewString(), TenantID: req.TenantID, Name: req.Name, Version: req.Version, State: ports.K8sClusterStateRunning, Reason: "local vcluster profile", Provider: "local", CreatedAt: now, UpdatedAt: now}
+	rec := ports.K8sClusterRecord{ClusterID: "k8sclu-" + uuid.NewString(), TenantID: req.TenantID, Name: req.Name, Version: req.Version, State: state, Reason: "local vcluster profile", Provider: "local", CreatedAt: now, UpdatedAt: now}
+	s.mu.Lock()
+	if id, ok := s.idem[key]; ok {
+		if existing, ok := s.byID[id]; ok {
+			s.mu.Unlock()
+			return existing, nil
+		}
+	}
 	s.byID[rec.ClusterID] = rec
 	s.idem[key] = rec.ClusterID
-	if s.providerApply != nil {
-		result, err := s.providerApply.ApplyK8sCluster(ctx, ports.K8sClusterProviderApplyRequest{
-			TenantID:  rec.TenantID,
-			ClusterID: rec.ClusterID,
-			Name:      rec.Name,
-			Version:   rec.Version,
-		})
-		if err != nil {
-			delete(s.byID, rec.ClusterID)
-			delete(s.idem, key)
+	s.mu.Unlock()
+
+	if s.providerApply == nil {
+		return rec, nil
+	}
+	result, err := s.providerApply.ApplyK8sCluster(ctx, ports.K8sClusterProviderApplyRequest{
+		TenantID:  rec.TenantID,
+		ClusterID: rec.ClusterID,
+		Name:      rec.Name,
+		Version:   rec.Version,
+	})
+	if err != nil {
+		s.discardClusterRecord(rec.ClusterID, key)
+		return ports.K8sClusterRecord{}, err
+	}
+	if !result.Applied {
+		s.discardClusterRecord(rec.ClusterID, key)
+		return ports.K8sClusterRecord{}, fmt.Errorf("%w: k8s cluster provider did not apply cluster", ports.ErrNotConfigured)
+	}
+	rec.Provider = result.Provider
+	rec.RealProvider = true
+	rec.ProviderRefs = append([]string(nil), result.ResourceRefs...)
+	rec.Reason = firstNonEmpty(result.Reason, "vCluster provider applied")
+	rec.State = ports.K8sClusterStateRunning
+	rec.UpdatedAt = time.Now().Unix()
+	if s.targetStore != nil && result.ProxyTarget.Server != "" {
+		target := result.ProxyTarget
+		target.TenantID = rec.TenantID
+		target.ClusterID = rec.ClusterID
+		if err := s.targetStore.UpsertK8sClusterProxyTarget(ctx, target); err != nil {
+			s.discardClusterRecord(rec.ClusterID, key)
 			return ports.K8sClusterRecord{}, err
 		}
-		if !result.Applied {
-			delete(s.byID, rec.ClusterID)
-			delete(s.idem, key)
-			return ports.K8sClusterRecord{}, fmt.Errorf("%w: k8s cluster provider did not apply cluster", ports.ErrNotConfigured)
-		}
-		rec.Provider = result.Provider
-		rec.RealProvider = true
-		rec.ProviderRefs = append([]string(nil), result.ResourceRefs...)
-		rec.Reason = firstNonEmpty(result.Reason, "vCluster provider applied")
-		rec.State = ports.K8sClusterStateRunning
-		rec.UpdatedAt = time.Now().Unix()
-		if s.targetStore != nil && result.ProxyTarget.Server != "" {
-			target := result.ProxyTarget
-			target.TenantID = rec.TenantID
-			target.ClusterID = rec.ClusterID
-			if err := s.targetStore.UpsertK8sClusterProxyTarget(ctx, target); err != nil {
-				delete(s.byID, rec.ClusterID)
-				delete(s.idem, key)
-				return ports.K8sClusterRecord{}, err
-			}
-		}
-		s.byID[rec.ClusterID] = rec
 	}
+	s.mu.Lock()
+	s.byID[rec.ClusterID] = rec
+	s.mu.Unlock()
 	return rec, nil
+}
+
+func (s *localK8sClusterService) discardClusterRecord(clusterID string, idemKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.byID, clusterID)
+	if s.idem[idemKey] == clusterID {
+		delete(s.idem, idemKey)
+	}
 }
 
 func (s *localK8sClusterService) GetCluster(_ context.Context, req ports.K8sClusterGetRequest) (ports.K8sClusterRecord, error) {
@@ -154,20 +178,70 @@ func (s *localK8sClusterService) ListClusters(_ context.Context, req ports.K8sCl
 }
 func (s *localK8sClusterService) DeleteCluster(ctx context.Context, req ports.K8sClusterGetRequest) (ports.K8sClusterRecord, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	rec, ok := s.byID[req.ClusterID]
 	if !ok || rec.TenantID != req.TenantID {
+		s.mu.Unlock()
 		return ports.K8sClusterRecord{}, ports.ErrNotFound
 	}
 	rec.State = ports.K8sClusterStateDeleting
 	rec.UpdatedAt = time.Now().Unix()
 	s.byID[req.ClusterID] = rec
+	providerDelete := s.providerDelete
+	s.mu.Unlock()
+
+	if rec.RealProvider && providerDelete != nil {
+		result, err := providerDelete.DeleteK8sCluster(ctx, ports.K8sClusterProviderDeleteRequest{
+			TenantID:  rec.TenantID,
+			ClusterID: rec.ClusterID,
+			Name:      rec.Name,
+		})
+		if err != nil {
+			s.restoreClusterAfterFailedDelete(rec.ClusterID)
+			return ports.K8sClusterRecord{}, err
+		}
+		if !result.Deleted {
+			s.restoreClusterAfterFailedDelete(rec.ClusterID)
+			return ports.K8sClusterRecord{}, fmt.Errorf("%w: k8s cluster provider did not uninstall cluster", ports.ErrNotConfigured)
+		}
+		rec.Provider = firstNonEmpty(result.Provider, rec.Provider)
+		rec.ProviderRefs = append([]string(nil), result.ResourceRefs...)
+		rec.Reason = firstNonEmpty(result.Reason, "vCluster provider uninstalled")
+	}
 	if s.targetStore != nil {
 		if err := s.targetStore.DeleteK8sClusterProxyTarget(ctx, req); err != nil && err != ports.ErrNotFound {
 			return ports.K8sClusterRecord{}, err
 		}
 	}
+	s.purgeClusterIndexes(rec.ClusterID)
 	return rec, nil
+}
+
+func (s *localK8sClusterService) restoreClusterAfterFailedDelete(clusterID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byID[clusterID]
+	if !ok {
+		return
+	}
+	rec.State = ports.K8sClusterStateRunning
+	rec.UpdatedAt = time.Now().Unix()
+	s.byID[clusterID] = rec
+}
+
+func (s *localK8sClusterService) purgeClusterIndexes(clusterID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.byID, clusterID)
+	for key, id := range s.idem {
+		if id == clusterID {
+			delete(s.idem, key)
+		}
+	}
+	for key, rec := range s.upgradeIdem {
+		if rec.ClusterID == clusterID {
+			delete(s.upgradeIdem, key)
+		}
+	}
 }
 
 func (s *localK8sClusterService) UpgradeCluster(ctx context.Context, req ports.K8sClusterUpgradeRequest) (ports.K8sClusterRecord, error) {

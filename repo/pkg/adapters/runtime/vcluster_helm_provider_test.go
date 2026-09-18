@@ -179,6 +179,45 @@ func TestVClusterHelmProviderAdapterSupportsLocalChartArchive(t *testing.T) {
 	}
 }
 
+func TestVClusterHelmProviderAdapterPinsChartVersionForOCIRepository(t *testing.T) {
+	runner := &fakeVClusterHelmRunner{}
+	adapter := NewVClusterHelmProviderAdapter(VClusterHelmProviderConfig{
+		Runner:              runner,
+		ChartName:           "oci://docker.changqingyun.cn/ani/charts/vcluster",
+		ChartRepo:           "none",
+		ChartVersion:        "0.34.1",
+		ProxyServerTemplate: "https://{cluster_id}.{namespace}:443",
+		ProxyBearerToken:    "tenant-token",
+	})
+
+	_, err := adapter.ApplyK8sCluster(context.Background(), ports.K8sClusterProviderApplyRequest{
+		TenantID:  "tenant-a",
+		ClusterID: "k8sclu-provider",
+		Name:      "vc-a",
+	})
+	if err != nil {
+		t.Fatalf("ApplyK8sCluster() error = %v", err)
+	}
+
+	wantArgs := []string{
+		"upgrade",
+		"--install",
+		"k8sclu-provider",
+		"oci://docker.changqingyun.cn/ani/charts/vcluster",
+		"--namespace",
+		"ani-tenant-tenant-a",
+		"--create-namespace",
+		"--repository-config=",
+		"--set",
+		"sync.toHost.services.enabled=true",
+		"--version",
+		"0.34.1",
+	}
+	if runner.binary != "helm" || !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("helm call = %s %#v, want helm %#v", runner.binary, runner.args, wantArgs)
+	}
+}
+
 func TestVClusterHelmProviderAdapterPrintsKubeconfig(t *testing.T) {
 	runner := &fakeVClusterHelmRunner{
 		output: []byte(`apiVersion: v1
@@ -312,6 +351,37 @@ func TestVClusterHelmProviderAdapterRunsHelmUpgradeForClusterVersion(t *testing.
 	}
 	if !result.Applied || result.Provider != "vcluster" || result.Reason != "vCluster Helm release upgraded" {
 		t.Fatalf("result = %+v, want upgraded vcluster provider", result)
+	}
+}
+
+func TestVClusterHelmProviderAdapterUninstallsHelmRelease(t *testing.T) {
+	runner := &fakeVClusterHelmRunner{}
+	adapter := NewVClusterHelmProviderAdapter(VClusterHelmProviderConfig{Runner: runner})
+
+	result, err := adapter.DeleteK8sCluster(context.Background(), ports.K8sClusterProviderDeleteRequest{
+		TenantID:  "tenant-a",
+		ClusterID: "k8sclu-provider",
+		Name:      "vc-a",
+	})
+	if err != nil {
+		t.Fatalf("DeleteK8sCluster() error = %v", err)
+	}
+
+	wantArgs := []string{
+		"uninstall",
+		"k8sclu-provider",
+		"--namespace",
+		"ani-tenant-tenant-a",
+		"--ignore-not-found",
+	}
+	if runner.binary != "helm" || !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("helm call = %s %#v, want helm %#v", runner.binary, runner.args, wantArgs)
+	}
+	if !result.Deleted || result.Provider != "vcluster" || result.Reason != "vCluster Helm release uninstalled" {
+		t.Fatalf("result = %+v, want uninstalled vcluster provider", result)
+	}
+	if len(result.ResourceRefs) != 1 || result.ResourceRefs[0] != "vcluster/HelmRelease/k8sclu-provider" {
+		t.Fatalf("resource refs = %#v", result.ResourceRefs)
 	}
 }
 
