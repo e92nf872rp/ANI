@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 块存储卸载双事实源一致化（2026-09-18，分支 fix/routing-loadbalancer-bugs）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| STORAGE-VOLUME-DETACH-FACT-SOURCE-A | 块存储卸载 `POST /instances/{instance_id}/lifecycle`（`action=detach_volume`）对"卷侧已挂载、实例侧无 attachment"的卷一律 `409 capability resource conflict: volume is not attached` 收口（来源 `kjs-study/修复bug/块存储卸载问题分析与修复记录.md`，用例 块存储-4）。根因："是否已挂载"存在两个互不交叉的事实源——Console 按**卷侧** `mount_instance_id` 渲染"已挂载"并提供「卸载」，而卸载请求走**实例级** `detach_volume`，预检只认**实例侧** `record.Status.Storage`；实例维度 attach 会回调卷级 `MountVolume` 写卷侧，但实例维度 detach（`applyVolumeBinding`）只移除实例侧、不回退卷侧，两者漂移（状态重算/网关重启/历史数据）后卸载必然 409、界面卡死在卸载按钮且关联资源永不解除。修法（不新增实体、无契约/迁移）：`instanceStorageBinder` 接口新增 `GetVolume`/`UnmountVolume`；新增 `volumeMountedToInstance`（按 `tenant_id+volume_id` 反查卷侧 `mount_instance_id` 是否指向本实例，读失败 fail-closed）与 `unmountVolumeSide`（清卷侧 mount 三字段，`ErrNotFound` 容忍）；`lifecyclePrecheck` 增 `volumeSideAttached` 入参，detach 由 `!attached` 改为 `!attached && !volumeSideAttached` 并在 `details` 增 `volume_side_attached`；`applyLifecycle` 在 detach 成功路径（移除实例侧 attachment 后、落库前）调用卷侧回退，失败写 operation 时间线（`detach_volume` failed / `volume_unmount_failed`）并返回错误。语义边界：attach 的 `volume_already_attached` 仍只看实例侧；`root_volume_detach_forbidden` 保留；只有卷侧指向**本实例**才接受并可回退，指向别的实例仍 409 且不动他人卷。单测：新增 3 用例（核心回归：实例侧无 attachment+卷侧指向本实例 → 成功且卷侧 unmount 一次；反向：卷侧指向别的实例 → 仍 `ErrConflict` 且零回退；两侧一致 → instance 侧移除+卷侧同步回退）+ fake binder 基建扩展。验证：相关 `go test` 全通过、`gofmt -l` 改动文件无输出；镜像 `fix-20260918-blockdetach`（digest `sha256:907f8be0…59cb0`）部署 ani-system（只 set image 未改 env、rollout 成功、healthz 200）**实测 5 项断言全 PASS / 0 FAIL**——目标为 bug 文档记录的精确现场 `test-ly-vol`（`vol_58d620be…`，卷侧 `mount_instance_id=inst_5d1cebef…`、实例侧只有文件系统）：detach **409→200**（实例仍 running）、卷侧 `mount_instance_id`/`mount_route`/`mount_name` 全消失且 `mount_history` 追加 `unmount success`、再次 detach 409、从未挂载的卷 409、指向其它实例因实例不存在先 400（非 200）。实测即数据清扫（存量卷已收敛，无迁移）。只读探针确认另外两个卷侧挂载卷在实例侧均有 attachment 且实例已 deleted，非本 bug 场景未触碰。遗留：卷侧/实例侧双事实源的接口语义合并（长期收敛）留独立批次；前端「挂载实例」列仍渲染 `mount_name`、失败后不刷新属 Console 改造点；ani-test2 未部署 | storage-volume-detach-fact-source.md |
+
 ### 文件存储扩容 store 化与 capacity 过渡别名（2026-09-18，分支 fix/routing-loadbalancer-bugs）
 
 | 批次 | 内容摘要 | 文件 |
