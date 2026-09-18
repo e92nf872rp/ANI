@@ -25,6 +25,7 @@ REQUIRED_CHECKS = {
     "minio-health-ready",
     "core-bucket-create",
     "core-buckets-list",
+    "core-bucket-delete",
     "core-object-upload-presign",
     "core-object-download-presign",
 }
@@ -286,6 +287,7 @@ def validate_live(
     cleanup_api_key_status = 0
     cleanup_api_key_revoke_status = 0
     cleanup_status = 0
+    bucket_delete_status = 0
     if args.cleanup:
         expires_at = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=10)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         cleanup_api_key_status, cleanup_key = json_requester(
@@ -303,9 +305,12 @@ def validate_live(
         cleanup_token = require_non_empty_string(cleanup_key, "key_value", "Core cleanup API key create response")
         cleanup_key_id = require_non_empty_string(cleanup_key, "key_id", "Core cleanup API key create response")
         cleanup_status, _ = json_requester("DELETE", f"{base_url}/objects/{object_id}", cleanup_token, None)
+        # 清理闭环：对象删完后必须删桶控制面记录，否则每次 live gate 都残留一个桶。
+        bucket_delete_status, _ = json_requester("DELETE", f"{base_url}/buckets/{bucket_id}", cleanup_token, None)
         cleanup_api_key_revoke_status, _ = json_requester("DELETE", f"{base_url}/auth/api-keys/{cleanup_key_id}", cleanup_token, None)
         require_status(cleanup_api_key_revoke_status, 200, "Core cleanup API key revoke")
         require_status(cleanup_status, 200, "Core object cleanup delete")
+        require_status(bucket_delete_status, 200, "Core bucket cleanup delete")
 
     evidence: dict[str, Any] = {
         "id": "object-store-live-gate",
@@ -324,6 +329,7 @@ def validate_live(
         "cleanup_api_key_status": cleanup_api_key_status,
         "cleanup_api_key_revoke_status": cleanup_api_key_revoke_status,
         "cleanup_status": cleanup_status,
+        "bucket_delete_status": bucket_delete_status,
         "upload_presign_url_present": True,
         "download_presign_url_present": True,
     }

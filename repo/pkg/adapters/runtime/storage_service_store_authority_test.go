@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -659,5 +660,166 @@ func TestLocalStorageServiceCompleteObjectPersistsToSharedStore(t *testing.T) {
 	}
 	if lateRecord.State != ports.StorageResourceAvailable || lateRecord.Key != "raw/late.csv" {
 		t.Fatalf("restarted CompleteStorageObject() = %#v, want completed late upload", lateRecord)
+	}
+}
+
+// TestLocalStorageServiceDeleteBucketLifecycle 覆盖删桶主流程：非空拒绝且不改记录、
+// 重启实例经 store 解析后删除、墓碑落盘、列表与重复删除语义、同名重建与跨租户隔离。
+func TestLocalStorageServiceDeleteBucketLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store := newSharedMemoryStorageStore()
+	clock := func() time.Time { return time.Unix(500, 0).UTC() }
+	service := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock))
+
+	bucket, err := service.CreateStorageBucket(ctx, ports.StorageBucketCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "delete-bucket",
+		Name:           "delete-me",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	// 桶内仍有活跃对象时必须拒绝删除，且桶记录保持可用状态。
+	if _, err := service.CreateObject(ctx, ports.StorageObjectCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "delete-bucket-object",
+		Bucket:         bucket.Name,
+		Key:            "raw/report.csv",
+		SizeBytes:      1024,
+	}); err != nil {
+		t.Fatalf("CreateObject() error = %v", err)
+	}
+	if _, err := service.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: bucket.BucketID,
+	}); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DeleteStorageBucket() non-empty error = %v, want ErrConflict", err)
+	}
+	kept, err := service.GetStorageBucket(ctx, ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: bucket.BucketID,
+	})
+	if err != nil || kept.State == ports.StorageResourceDeleted {
+		t.Fatalf("bucket after rejected delete = %#v err = %v, want untouched record", kept, err)
+	}
+
+	// 清空对象后，重启后的实例必须能经 store 解析并删除该桶。
+	if _, err := service.DeleteBucketObject(ctx, ports.StorageBucketObjectDeleteRequest{
+		TenantID: storageStoreTenantID,
+		BucketID: bucket.BucketID,
+		Key:      "raw/report.csv",
+	}); err != nil {
+		t.Fatalf("DeleteBucketObject() error = %v", err)
+	}
+	restarted := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock))
+	deleted, err := restarted.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: bucket.BucketID,
+	})
+	if err != nil {
+		t.Fatalf("restarted DeleteStorageBucket() error = %v", err)
+	}
+	if deleted.State != ports.StorageResourceDeleted || deleted.DeletedAt.IsZero() {
+		t.Fatalf("deleted bucket = %#v, want deleted tombstone", deleted)
+	}
+
+	// 墓碑必须落盘，并让列表不再返回该桶。
+	store.mu.Lock()
+	persisted := store.buckets[store.key(storageStoreTenantID, bucket.BucketID)]
+	store.mu.Unlock()
+	if persisted.State != ports.StorageResourceDeleted || persisted.DeletedAt.IsZero() {
+		t.Fatalf("persisted bucket = %#v, want deleted tombstone in store", persisted)
+	}
+	listed, err := service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{TenantID: storageStoreTenantID})
+	if err != nil {
+		t.Fatalf("ListStorageBuckets() error = %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("listed buckets = %#v, want deleted bucket hidden", listed)
+	}
+
+	// 重复删除与不存在的桶都返回 NOT_FOUND（在同一实例上，内存已无该桶）。
+	if _, err := restarted.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: storageStoreTenantID, ResourceID: bucket.BucketID}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("repeat DeleteStorageBucket() error = %v, want ErrNotFound", err)
+	}
+	if _, err := restarted.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: storageStoreTenantID, ResourceID: "missing-bucket"}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("missing DeleteStorageBucket() error = %v, want ErrNotFound", err)
+	}
+
+	// 软删后同名可重建，且得到新的 bucket_id。
+	rebuilt, err := restarted.CreateStorageBucket(ctx, ports.StorageBucketCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "delete-bucket-rebuild",
+		Name:           "delete-me",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("rebuilt CreateStorageBucket() error = %v", err)
+	}
+	if rebuilt.BucketID == bucket.BucketID {
+		t.Fatalf("rebuilt bucket id = %s, want a new id", rebuilt.BucketID)
+	}
+
+	// 跨租户删除同一 bucket_id 必须返回 NOT_FOUND，且原记录不被修改。
+	otherTenant := "5dbb1d01-0000-4000-8000-000000000099"
+	if _, err := service.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: otherTenant, ResourceID: rebuilt.BucketID}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("cross-tenant DeleteStorageBucket() error = %v, want ErrNotFound", err)
+	}
+	if still, err := service.GetStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: storageStoreTenantID, ResourceID: rebuilt.BucketID}); err != nil || still.BucketID != rebuilt.BucketID {
+		t.Fatalf("bucket after cross-tenant delete = %#v err = %v, want untouched record", still, err)
+	}
+}
+
+// TestLocalStorageServiceDeleteBucketHonorsObjectStoreUsage 证明非空判定以对象存储
+// 底座用量为准：底座报告仍有对象时，即使控制面无对象记录也必须拒绝删除。
+func TestLocalStorageServiceDeleteBucketHonorsObjectStoreUsage(t *testing.T) {
+	ctx := context.Background()
+	objectStore := &fakeObjectStore{statOK: true, usage: ports.BucketUsage{ObjectCount: 2, SizeBytes: 128}}
+	service := NewLocalStorageService(WithStorageObjectStore(objectStore))
+
+	bucket, err := service.CreateStorageBucket(ctx, ports.StorageBucketCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "usage-delete-bucket",
+		Name:           "usage-delete",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+	if _, err := service.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: storageStoreTenantID, ResourceID: bucket.BucketID}); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DeleteStorageBucket() with object-store usage error = %v, want ErrConflict", err)
+	}
+
+	// 底座清空后删除必须成功，并让内存缓存不再返回该桶。
+	objectStore.usage = ports.BucketUsage{}
+	deleted, err := service.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: storageStoreTenantID, ResourceID: bucket.BucketID})
+	if err != nil {
+		t.Fatalf("DeleteStorageBucket() error = %v", err)
+	}
+	if deleted.State != ports.StorageResourceDeleted || deleted.DeletedAt.IsZero() {
+		t.Fatalf("deleted bucket = %#v, want deleted tombstone", deleted)
+	}
+	listed, err := service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{TenantID: storageStoreTenantID})
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("listed buckets = %#v err = %v, want deleted bucket hidden", listed, err)
+	}
+	if _, err := service.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: storageStoreTenantID, ResourceID: bucket.BucketID}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("repeat DeleteStorageBucket() error = %v, want ErrNotFound", err)
+	}
+
+	// 内存缓存不保留墓碑，因此同名重建必须成功。
+	rebuilt, err := service.CreateStorageBucket(ctx, ports.StorageBucketCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "usage-delete-rebuild",
+		Name:           "usage-delete",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("rebuilt CreateStorageBucket() error = %v", err)
+	}
+	if rebuilt.BucketID == bucket.BucketID {
+		t.Fatalf("rebuilt bucket id = %s, want a new id", rebuilt.BucketID)
 	}
 }

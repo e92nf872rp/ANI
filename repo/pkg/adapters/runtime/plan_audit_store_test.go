@@ -26,9 +26,12 @@ func (s fakeMetadataStore) WithPlatformTx(ctx context.Context, fn func(context.C
 }
 
 type fakeMetadataTx struct {
-	sql      string
-	args     []any
-	execs    []string
+	sql   string
+	args  []any
+	execs []string
+	// execArgs 与 execs 一一对应，保留每次 Exec 的参数快照，
+	// 用于一次事务内有多次 Exec 时仍能断言某条 SQL 的绑定参数。
+	execArgs [][]any
 	querySQL string
 	rows     ports.Rows
 	// queryRows 按 SQL 中的表名关键字路由不同的 Rows，
@@ -50,6 +53,7 @@ func (tx *fakeMetadataTx) Exec(_ context.Context, sql string, args ...any) (port
 	tx.sql = sql
 	tx.args = args
 	tx.execs = append(tx.execs, sql)
+	tx.execArgs = append(tx.execArgs, append([]any(nil), args...))
 	if strings.Contains(sql, "network_security_group_rules") {
 		tx.ruleUpsertArgs = append(tx.ruleUpsertArgs, append([]any(nil), args...))
 	}

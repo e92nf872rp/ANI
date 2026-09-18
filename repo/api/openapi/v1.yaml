@@ -7304,6 +7304,29 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /buckets/{bucket_id}:
+    delete:
+      operationId: deleteStorageBucket
+      summary: 删除对象存储桶
+      description: |
+        删除租户名下的对象存储桶控制面记录，采用墓碑软删（state=deleted）。
+        桶内仍存在该租户对象时返回 409，需先清空对象。
+        重复删除已删除桶返回 404。
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:delete"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 对象存储桶已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketRecord' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   /buckets/{bucket_id}/objects:
     get:
       operationId: listBucketObjects

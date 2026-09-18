@@ -478,6 +478,7 @@ func registerStorageResourcesWithServiceAndTasksAndStore(v1 *route.RouterGroup, 
 
 	v1.GET("/buckets", api.listStorageBuckets)
 	v1.POST("/buckets", api.createStorageBucket)
+	v1.DELETE("/buckets/:bucket_id", api.deleteStorageBucket)
 	v1.GET("/buckets/:bucket_id/objects", api.listBucketObjects)
 	v1.DELETE("/buckets/:bucket_id/objects", api.deleteBucketObject)
 	v1.POST("/buckets/:bucket_id/objects/upload", api.uploadBucketObject)
@@ -1313,6 +1314,15 @@ func (api *storageAPI) listStorageBuckets(ctx context.Context, c *app.RequestCon
 		items = append(items, storageBucketFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *storageAPI) deleteStorageBucket(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("bucket_id")})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, storageBucketFromRecord(record))
 }
 
 func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestContext) {

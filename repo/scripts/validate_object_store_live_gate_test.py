@@ -107,6 +107,7 @@ class ObjectStoreLiveGateTest(unittest.TestCase):
         self.assertTrue(payload["cleanup_enabled"])
         self.assertEqual(201, payload["cleanup_api_key_status"])
         self.assertEqual(200, payload["cleanup_status"])
+        self.assertEqual(200, payload["bucket_delete_status"])
         self.assertEqual(200, payload["cleanup_api_key_revoke_status"])
         self.assertEqual("passed", payload["production_shape"]["status"])
         self.assertIn("production_object_store_credentials", payload["production_shape"]["proof_items"])
@@ -147,6 +148,8 @@ def object_store_json_requester(method: str, url: str, bearer_token: str, payloa
         return 201, {"key_id": "key-a", "key_value": "ani_cleanup_key"}
     if method == "DELETE" and url.endswith("/objects/obj-a"):
         return 200, {"id": "obj-a", "state": "deleted"}
+    if method == "DELETE" and url.endswith("/buckets/bucket-a"):
+        return 200, {"id": "bucket-a", "name": "models"}
     if method == "DELETE" and url.endswith("/auth/api-keys/key-a"):
         return 200, {}
     raise AssertionError(f"unexpected request {method} {url}")

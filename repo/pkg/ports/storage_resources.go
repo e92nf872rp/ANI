@@ -525,6 +525,7 @@ type StorageService interface {
 	CreateStorageBucket(ctx context.Context, request StorageBucketCreateRequest) (StorageBucketRecord, error)
 	ListStorageBuckets(ctx context.Context, request StorageResourceListRequest) ([]StorageBucketRecord, error)
 	GetStorageBucket(ctx context.Context, request StorageResourceGetRequest) (StorageBucketRecord, error)
+	DeleteStorageBucket(ctx context.Context, request StorageResourceGetRequest) (StorageBucketRecord, error)
 	ListBucketObjects(ctx context.Context, request StorageBucketObjectListRequest) (StorageBucketObjectListResult, error)
 	DeleteBucketObject(ctx context.Context, request StorageBucketObjectDeleteRequest) (StorageBucketObjectDeleteResult, error)
 	CreateBucketPrefix(ctx context.Context, request StorageBucketPrefixCreateRequest) (StorageBucketObjectEntry, error)
