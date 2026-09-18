@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 网络创建类 VPC 校验 store 化收口（2026-09-18，分支 fix/routing-loadbalancer-bugs）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| IN-NETWORK-CREATE-VPC-VALIDATION-A | store 模式下创建网络资源对"网关重启前创建"的 VPC 一律 404 `vpc not found` 收口（提交 `ead195f`，来源 `kjs-study/修复bug/路由与负载均衡问题分析与修复记录.md`；登记的存量缺陷来自 `IN-NETWORK-SG-VPC-AND-INSTANCE-FILTER-A`）。根因：`CreateSubnet`（477-483）/`CreateLoadBalancer`（1402-1408）/`CreateRoute`（1509-1515）的 VPC 存在性校验只查内存 map `s.vpcs`，store 模式（`NETWORK_PROVIDER=kubeovn_rest` + `DATABASE_URL`）进程重启后内存为空，DB 历史 VPC 被误判不存在；此前 `CreateSecurityGroup` 已用 `resolveVPCForValidation`（store 优先 `store.GetVPC` 查持久层、非 store 回退内存）修复同一问题，本次把遗漏三处对齐。租户归属校验由 helper 承担（store 分支 SQL 按 `tenant_id` 过滤、内存分支显式比对），三处 `vpc_id` 必填语义原样保留。无 OpenAPI 契约变更、无 handler 变更、无 DB 迁移、无生成物变更。单测：3 个 store 模式正向用例（断言校验 SQL 命中 `network_vpcs` 且分别落 `network_subnets`/`network_load_balancers`/`network_routes`）+ 1 个反向表驱动用例（store 无该 VPC 与 state=deleted 两情形 × 三类资源均须 `ErrNotFound` 且零写操作）。验证：`go test`/`go build`/`make validate-architecture`/`git diff --check` 全绿，`gofmt -l` 改动文件无输出；镜像 `dev-20260918-routelb`（digest `sha256:7d7c9adf…9318`）部署 ani-system（etcd 预检 43%、只 set image 未改 env、rollout 成功、healthz 200）**实测 4 项断言全 PASS**——前提为 Pod 随本批次镜像重启、目标 VPC `test-vpc-ly123` 创建于 2026-09-14（只可能在持久层）：`POST /networks/routes` 404→**201**（`dev_profile.mode=real`/`provider=kubeovn`，真实 apply 到 KubeOVN）、`POST /networks/load-balancers` 404→**201**、`POST /networks/subnets` 404→**201**（同源缺陷）、不存在 VPC 仍 `404 vpc not found`；列表接口复查两类记录均可见。遗留：deleted VPC 的线上实测未做（单测覆盖）；实测在原地留下路由/LB/子网三个关联资源，删除该 VPC 前需清理；ani-test2 未部署 | network-create-vpc-validation-store.md |
+
 ### 对象存储后端桶一致性修复（2026-09-17，分支 fix/object-storage-bugs）
 
 | 批次 | 内容摘要 | 文件 |
