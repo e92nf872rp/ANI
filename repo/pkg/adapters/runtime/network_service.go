@@ -474,8 +474,10 @@ func (s *LocalNetworkService) CreateSubnet(ctx context.Context, request ports.Ne
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	vpc, ok := s.vpcs[record.VPCID]
-	if !ok || vpc.TenantID != request.TenantID || vpc.State == ports.NetworkResourceDeleted {
+	// store 模式必须查持久层：网关重启后内存 map 不含历史 VPC，
+	// 只查内存会把已存在的 VPC 误判为 not found（同 CreateSecurityGroup）。
+	vpc, ok := s.resolveVPCForValidation(ctx, request.TenantID, record.VPCID)
+	if !ok || vpc.State == ports.NetworkResourceDeleted {
 		s.mu.Unlock()
 		return ports.NetworkSubnetRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
 	}
@@ -1397,8 +1399,10 @@ func (s *LocalNetworkService) CreateLoadBalancer(ctx context.Context, request po
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	vpc, ok := s.vpcs[record.VPCID]
-	if !ok || vpc.TenantID != request.TenantID || vpc.State == ports.NetworkResourceDeleted {
+	// store 模式必须查持久层：网关重启后内存 map 不含历史 VPC，
+	// 只查内存会把已存在的 VPC 误判为 not found（同 CreateSecurityGroup）。
+	vpc, ok := s.resolveVPCForValidation(ctx, request.TenantID, record.VPCID)
+	if !ok || vpc.State == ports.NetworkResourceDeleted {
 		s.mu.Unlock()
 		return ports.NetworkLoadBalancerRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
 	}
@@ -1502,8 +1506,10 @@ func (s *LocalNetworkService) CreateRoute(ctx context.Context, request ports.Net
 			return record, nil
 		}
 	}
-	vpc, ok := s.vpcs[strings.TrimSpace(request.VPCID)]
-	if !ok || vpc.TenantID != request.TenantID || vpc.State == ports.NetworkResourceDeleted {
+	// store 模式必须查持久层：网关重启后内存 map 不含历史 VPC，
+	// 只查内存会把已存在的 VPC 误判为 not found（同 CreateSecurityGroup）。
+	vpc, ok := s.resolveVPCForValidation(ctx, request.TenantID, strings.TrimSpace(request.VPCID))
+	if !ok || vpc.State == ports.NetworkResourceDeleted {
 		s.mu.Unlock()
 		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
 	}

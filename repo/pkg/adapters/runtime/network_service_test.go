@@ -714,6 +714,160 @@ func TestLocalNetworkServiceCreateSecurityGroupRejectsMissingVPCViaStore(t *test
 	}
 }
 
+// 子网-3 回归：网关重启后内存 map 不含历史 VPC，创建子网绑定历史 VPC 必须
+// 通过持久层校验，而不是误判 vpc not found。
+func TestLocalNetworkServiceCreateSubnetValidatesVPCViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+		networkStoreTenantID, "vpc-persisted", "vpc-a", "10.30.0.0/16",
+		string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(90, 0),
+	}}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	record, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+		TenantID:       networkStoreTenantID,
+		IdempotencyKey: "subnet-store-vpc",
+		VPCID:          "vpc-persisted",
+		Name:           "web-subnet",
+		CIDR:           "10.30.1.0/24",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubnet() error = %v", err)
+	}
+	if record.VPCID != "vpc-persisted" {
+		t.Fatalf("VPCID = %q, want vpc-persisted", record.VPCID)
+	}
+	if !strings.Contains(tx.queryRowSQL, "FROM network_vpcs") {
+		t.Fatalf("validation must query network_vpcs via store, sql = %q", tx.queryRowSQL)
+	}
+	if len(tx.execs) == 0 || !strings.Contains(tx.execs[len(tx.execs)-1], "INSERT INTO network_subnets") {
+		t.Fatalf("expected subnet persistence, execs = %v", tx.execs)
+	}
+}
+
+// 负载均衡创建 404 回归：同源缺陷，VPC 校验必须走持久层。
+func TestLocalNetworkServiceCreateLoadBalancerValidatesVPCViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+		networkStoreTenantID, "vpc-persisted", "vpc-a", "10.30.0.0/16",
+		string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(90, 0),
+	}}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	record, err := service.CreateLoadBalancer(context.Background(), ports.NetworkLoadBalancerCreateRequest{
+		TenantID:       networkStoreTenantID,
+		IdempotencyKey: "lb-store-vpc",
+		Name:           "web-lb",
+		VPCID:          "vpc-persisted",
+	})
+	if err != nil {
+		t.Fatalf("CreateLoadBalancer() error = %v", err)
+	}
+	if record.VPCID != "vpc-persisted" {
+		t.Fatalf("VPCID = %q, want vpc-persisted", record.VPCID)
+	}
+	if !strings.Contains(tx.queryRowSQL, "FROM network_vpcs") {
+		t.Fatalf("validation must query network_vpcs via store, sql = %q", tx.queryRowSQL)
+	}
+	if len(tx.execs) == 0 || !strings.Contains(tx.execs[len(tx.execs)-1], "INSERT INTO network_load_balancers") {
+		t.Fatalf("expected load balancer persistence, execs = %v", tx.execs)
+	}
+}
+
+// 路由创建 404 回归：同源缺陷，VPC 校验必须走持久层。
+func TestLocalNetworkServiceCreateRouteValidatesVPCViaStore(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+		networkStoreTenantID, "vpc-persisted", "vpc-a", "10.30.0.0/16",
+		string(ports.NetworkResourceAvailable), "", time.Unix(90, 0), time.Unix(90, 0),
+	}}}
+	service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+
+	record, err := service.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
+		TenantID:        networkStoreTenantID,
+		IdempotencyKey:  "route-store-vpc",
+		VPCID:           "vpc-persisted",
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "test",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoute() error = %v", err)
+	}
+	if record.VPCID != "vpc-persisted" {
+		t.Fatalf("VPCID = %q, want vpc-persisted", record.VPCID)
+	}
+	if !strings.Contains(tx.queryRowSQL, "FROM network_vpcs") {
+		t.Fatalf("validation must query network_vpcs via store, sql = %q", tx.queryRowSQL)
+	}
+	if len(tx.execs) == 0 || !strings.Contains(tx.execs[len(tx.execs)-1], "INSERT INTO network_routes") {
+		t.Fatalf("expected route persistence, execs = %v", tx.execs)
+	}
+}
+
+// 反向路径：store 查不到 VPC 时，子网/负载均衡/路由三类创建都必须拒绝且不落库。
+func TestLocalNetworkServiceCreateRejectsMissingVPCViaStore(t *testing.T) {
+	cases := []struct {
+		name   string
+		create func(*LocalNetworkService) error
+	}{
+		{"subnet", func(s *LocalNetworkService) error {
+			_, err := s.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+				TenantID:       networkStoreTenantID,
+				IdempotencyKey: "subnet-missing-vpc",
+				VPCID:          "vpc-missing",
+				Name:           "web-subnet",
+			})
+			return err
+		}},
+		{"load_balancer", func(s *LocalNetworkService) error {
+			_, err := s.CreateLoadBalancer(context.Background(), ports.NetworkLoadBalancerCreateRequest{
+				TenantID:       networkStoreTenantID,
+				IdempotencyKey: "lb-missing-vpc",
+				Name:           "web-lb",
+				VPCID:          "vpc-missing",
+			})
+			return err
+		}},
+		{"route", func(s *LocalNetworkService) error {
+			_, err := s.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
+				TenantID:        networkStoreTenantID,
+				IdempotencyKey:  "route-missing-vpc",
+				VPCID:           "vpc-missing",
+				DestinationCIDR: "0.0.0.0/0",
+				NextHopType:     "gateway",
+				NextHopID:       "test",
+			})
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := &fakeMetadataTx{row: fakeMetadataRow{err: errors.New("no rows in result set")}}
+			service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+			if err := tc.create(service); !errors.Is(err, ports.ErrNotFound) {
+				t.Fatalf("error = %v, want ErrNotFound", err)
+			}
+			if len(tx.execs) != 0 {
+				t.Fatalf("rejected create must not persist, execs = %v", tx.execs)
+			}
+		})
+	}
+	// 持久层查到但已删除的 VPC 仍须拒绝（保留原有 State 校验语义）。
+	for _, tc := range cases {
+		t.Run("deleted/"+tc.name, func(t *testing.T) {
+			tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+				networkStoreTenantID, "vpc-deleted", "vpc-a", "10.30.0.0/16",
+				string(ports.NetworkResourceDeleted), "", time.Unix(90, 0), time.Unix(90, 0),
+			}}}
+			service := NewLocalNetworkService(WithNetworkResourceStore(NewMetadataNetworkStore(fakeMetadataStore{tx: tx})))
+			if err := tc.create(service); !errors.Is(err, ports.ErrNotFound) {
+				t.Fatalf("error = %v, want ErrNotFound", err)
+			}
+			if len(tx.execs) != 0 {
+				t.Fatalf("rejected create must not persist, execs = %v", tx.execs)
+			}
+		})
+	}
+}
+
 func TestMetadataNetworkStoreListsSecurityGroupsWithVPC(t *testing.T) {
 	tx := &fakeMetadataTx{rows: &fakeRows{values: [][]any{
 		{
