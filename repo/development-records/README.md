@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 文件存储扩容 store 化与 capacity 过渡别名（2026-09-18，分支 fix/routing-loadbalancer-bugs）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| STORAGE-FILESYSTEM-EXPAND-STORE-A | 文件存储扩容 `POST /filesystems/{filesystem_id}/expand` 对"网关重启前创建"的历史文件存储一律 `404 capability resource not found` 收口（来源 `kjs-study/修复bug/文件存储扩容问题分析与修复记录.md`，用例 文件存储-4）。根因二层：① (主) `LocalStorageService.ExpandFilesystem`（908-937）是 storage 模块**最后一个 memory-only 漏网点**——只查内存 map `s.filesystems`，store 模式（`DATABASE_URL`）进程重启后内存为空即 404（同族 `GetFilesystem`/`DeleteFilesystem`/`CreateFilesystemMountTarget`/`MountFilesystem`/`UnmountFilesystem` 均已走 store 或 `lookupFilesystemRecord` 回退）；② (次) Console 扩容请求体发 `{"capacity": N}` 而契约与 handler 只声明 `size_gib`，字段被 `BindJSON` 静默忽略（`size_gib=0` 撞容量校验）。修法：service 改复用 `lookupFilesystemRecord`（483-510，内存未命中时 store `GetFilesystem` 回退并回填缓存，租户校验由 helper 承担）；handler `storageFilesystemExpandRequest` 新增过渡别名 `Capacity`（仅实现级 shim，不动 OpenAPI 契约/SDK，`SizeGiB==0 && Capacity>0` 时取别名，`size_gib` 优先）。幂等检查仍留内存（与 mount/unmount 一致）未改动。无契约变更、无 SDK/生成物变更、无 DB 迁移。单测：runtime 2 用例（重启后仅库中存在 → 扩容成功且落库；不存在 → `ErrNotFound`、不增长 → `size_gib must be greater`）+ gateway 1 用例（`capacity` 生效且 `size_gib` 优先）。验证：相关 `go test` 全通过、`go vet` 通过、`gofmt -l` 改动文件无输出；镜像 `fix-20260918-fsexpand`（digest `sha256:6b74374d…00d9f`）部署 ani-system（只 set image 未改 env、rollout 成功、healthz 200）**实测 5 项断言全 PASS / 0 FAIL**——前提为 Pod 随本批次镜像重启内存为空、目标 `fs_f600cbd5-bc90-40ce-b216-2e2ec57da6b0`（`test-ly-nfs`，创建于 2026-09-14，只可能在持久层，列表 13 条正常可见）：`capacity=101` 404→**202** 且 `size_gib` 回显 101、`size_gib=102` 再扩 202、等容量 400、不存在 404、回读落库 102。遗留：`capacity` shim 属已知轻量契约/实现漂移（代码注释+文档三处留痕），前端 Console 扩容器字段应切 `size_gib` 后移除；实测使测试环境该文件存储 100→102 GiB（扩容不可逆未回滚）；ani-test2 未部署 | storage-filesystem-expand-store.md |
+
 ### 网络创建类 VPC 校验 store 化收口（2026-09-18，分支 fix/routing-loadbalancer-bugs）
 
 | 批次 | 内容摘要 | 文件 |
