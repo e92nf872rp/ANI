@@ -1122,16 +1122,33 @@ func (s *LocalStorageService) UnmountFilesystem(ctx context.Context, request por
 	return s.enrichFilesystemLocked(record), nil
 }
 
-func (s *LocalStorageService) GetFilesystemMountCommand(_ context.Context, request ports.StorageResourceGetRequest) (ports.FilesystemMountCommand, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	record, ok := s.filesystems[strings.TrimSpace(request.ResourceID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
+func (s *LocalStorageService) GetFilesystemMountCommand(ctx context.Context, request ports.StorageResourceGetRequest) (ports.FilesystemMountCommand, error) {
+	record, found, err := s.lookupFilesystemRecord(ctx, request.TenantID, request.ResourceID)
+	if err != nil {
+		return ports.FilesystemMountCommand{}, err
+	}
+	if !found {
 		return ports.FilesystemMountCommand{}, ports.ErrNotFound
 	}
+	if err := s.hydrateFilesystemMountTargets(ctx, request.TenantID, record.FilesystemID); err != nil {
+		return ports.FilesystemMountCommand{}, err
+	}
+	// 与 GET /filesystems/{id} 的 mount_command 口径一致：优先回放落库命令（挂载时生成，
+	// 携带真实挂载目标 IP 与实例实际挂载点）；仅落库为空（历史 NULL 行）时才按挂载目标合成。
+	if persisted := strings.TrimSpace(record.MountCommand); persisted != "" {
+		ipAddress, mountPath := storageFilesystemMountCommandParts(persisted)
+		return ports.FilesystemMountCommand{
+			Command:   persisted,
+			Protocol:  record.Protocol,
+			IPAddress: ipAddress,
+			MountPath: mountPath,
+		}, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	ipAddress := "127.0.0.1"
 	for _, target := range s.mountTargets {
-		if target.FilesystemID == record.FilesystemID && target.Status == ports.MountTargetAvailable {
+		if target.FilesystemID == record.FilesystemID && target.Status == ports.MountTargetAvailable && strings.TrimSpace(target.IPAddress) != "" {
 			ipAddress = target.IPAddress
 			break
 		}
@@ -2825,6 +2842,21 @@ func storageFilesystemMountCommand(record ports.StorageFilesystemRecord, ipAddre
 		IPAddress: ipAddress,
 		MountPath: mountPath,
 	}
+}
+
+// storageFilesystemMountCommandParts 反解本服务生成的挂载命令
+// （形如 `mount -t nfs <ip>:<export> <mount_path>`），用于落库命令回放时填充
+// ip_address/mount_path；格式不符时返回空值，不回显猜测值。
+func storageFilesystemMountCommandParts(command string) (string, string) {
+	fields := strings.Fields(command)
+	if len(fields) < 5 {
+		return "", ""
+	}
+	address := strings.SplitN(fields[3], ":", 2)
+	if len(address) != 2 || strings.TrimSpace(address[0]) == "" {
+		return "", ""
+	}
+	return address[0], fields[4]
 }
 
 func replaceFilesystemAttachment(items []ports.FilesystemAttachment, next ports.FilesystemAttachment) []ports.FilesystemAttachment {

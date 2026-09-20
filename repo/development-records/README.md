@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 文件存储挂载命令接口 store 回落与命令口径对齐（2026-09-20，分支 feat/storage-bucket-delete）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| STORAGE-FILESYSTEM-MOUNT-COMMAND-STORE-A | 修复 `GET /api/v1/filesystems/{filesystem_id}/mount-command` 在网关重启后**恒返回 404**（`NOT_FOUND capability resource not found`，前端报障 `request_id req_5754cad1-…`）的缺陷：修复前 `GetFilesystemMountCommand` 只读进程内存 map `s.filesystems`，Pod 重启后内存为空、对只存在于持久层的历史文件存储一律 404，错误文案正是 `ports.ErrNotFound`——与同族已修缺陷 `ExpandFilesystem` / `MountFilesystem` / `UnmountFilesystem` / `CreateFilesystemMountTarget` 完全同构，是该模块**最后一个 memory-only 漏网点**。修复：① 记录解析改走 `lookupFilesystemRecord`（内存优先 + store 回填 + 租户校验 + 已删过滤）；② 挂载目标改走 `hydrateFilesystemMountTargets`；③ **命令口径对齐 `GET /filesystems/{id}` 的 `mount_command`**（经确认「改为与详情一致」）——优先回放落库命令 `record.MountCommand`（挂载时生成，携带真实挂载目标 IP 与实例实际挂载点），新增包级辅助 `storageFilesystemMountCommandParts` 反解 `mount -t <proto> <ip>:<export> <mount_path>` 填充 `ip_address`/`mount_path`（格式不符返回空值而非猜测值），**仅**落库命令为空（历史 NULL 行）时才按挂载目标合成。**契约零变更**：不动 v1.yaml、不动 ports、无 DB 迁移、无生成物变更，仅 2 个代码文件（`pkg/adapters/runtime/storage_service.go`、`storage_service_store_authority_test.go`）。单测在既有 `TestLocalStorageServiceMountSurvivesRestartViaStore` 内追加「重启后内存为空」新实例断言（`Command` 逐字等于落库 `MountCommand`、`IPAddress` 非 `127.0.0.1`、`MountPath == "/data"`、不存在/跨租户 → `ErrNotFound`）；反向验证跑在修复前实现上可复现同一条线上错误。门禁：`gofmt -l` 无输出、`go test ./pkg/adapters/runtime/ -run 'TestLocalStorageService'` 通过。ani-system 实测（镜像 `dev-20260920-mountcmd2`，digest `sha256:e3ce8aa5…5c23`；etcd 预检 42.5%、只 set image 未改 env（75 个 env key 逐项一致）、rollout 成功、Pod 1/1 Running）**8 项断言全 PASS / 0 FAIL**：报障接口 404→200 且 `command` 与详情 `mount_command` 逐字一致（`mount -t ceph 10.0.0.11:/test-ly-nfs /test`，反解 `ip_address=10.0.0.11`/`mount_path=/test`）、列表内 13 个文件存储该接口全部 200（证明接口级修复非单条特例）、不存在 404、无凭证 401、列表/详情回归 200；另补 4 例详情逐字对比（含落库命令为空样本）**4/4 identical**。遗留：未挂载文件存储返回 `127.0.0.1` 占位命令（详情接口同值，非本接口独有偏差）、合成路径多目标 IP 选择非确定性（未改动）、跨租户未实测（tenant-b 无凭据，由单测覆盖）、ani-test2 未部署 | storage-filesystem-mount-command-store-a.md |
+
 ### 对象存储桶删除接口（2026-09-18，分支 feat/storage-bucket-delete）
 
 | 批次 | 内容摘要 | 文件 |

@@ -412,6 +412,41 @@ func TestLocalStorageServiceMountSurvivesRestartViaStore(t *testing.T) {
 		t.Fatalf("restarted MountFilesystem() = %#v, want 1 mount", fsMounted)
 	}
 
+	// 挂载命令查询同样必须经 store 解析记录，且与详情接口的 mount_command 口径一致（回放落库命令）。
+	freshReader := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock))
+	command, err := freshReader.GetFilesystemMountCommand(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: filesystem.FilesystemID,
+	})
+	if err != nil {
+		t.Fatalf("fresh GetFilesystemMountCommand() error = %v", err)
+	}
+	if command.Command == "" || command.Protocol != "nfs" {
+		t.Fatalf("fresh GetFilesystemMountCommand() = %#v, want nfs command", command)
+	}
+	if command.Command != fsMounted.MountCommand {
+		t.Fatalf("fresh GetFilesystemMountCommand() command = %q, want persisted %q", command.Command, fsMounted.MountCommand)
+	}
+	if command.IPAddress == "" || command.IPAddress == "127.0.0.1" {
+		t.Fatalf("fresh GetFilesystemMountCommand() = %#v, want mount target IP from store", command)
+	}
+	if command.MountPath != "/data" {
+		t.Fatalf("fresh GetFilesystemMountCommand() mount path = %q, want /data", command.MountPath)
+	}
+	if _, err := freshReader.GetFilesystemMountCommand(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: "fs-missing",
+	}); err != ports.ErrNotFound {
+		t.Fatalf("missing GetFilesystemMountCommand() error = %v, want ErrNotFound", err)
+	}
+	if _, err := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock)).
+		GetFilesystemMountCommand(context.Background(), ports.StorageResourceGetRequest{
+			TenantID:   "5dbb1d01-0000-4000-8000-000000000099",
+			ResourceID: filesystem.FilesystemID,
+		}); err != ports.ErrNotFound {
+		t.Fatalf("cross-tenant GetFilesystemMountCommand() error = %v, want ErrNotFound", err)
+	}
+
 	unmounted, err := restarted.UnmountVolume(context.Background(), ports.StorageVolumeUnmountRequest{
 		TenantID:       storageStoreTenantID,
 		VolumeID:       volume.VolumeID,
