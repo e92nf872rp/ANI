@@ -339,6 +339,9 @@ class _QueryMockConn:
             return {"top_k": 5, "score_threshold": 0.3, "retrieval_mode": "hybrid",
                     "vector_store_id": "vs-test-001", "embedding_model": "bge-m3"}
         # create_session returns id; insert_message returns a row
+        if "kb_audit_log" in sql:
+            self.events.append(("insert_audit", args))
+            return {"id": uuid.uuid4()}
         if "kb_sessions" in sql:
             self.events.append(("create_session", args))
             return {"id": uuid.uuid4()}
@@ -490,6 +493,103 @@ def test_query_persists_user_and_assistant_messages_and_caches():
     assert resp.sources[0].doc_id == "d1"
 
 
+def test_query_writes_qa_audit_row():
+    """操作历史 bug fix: a successful Query records the Q&A turn into
+    kb_audit_log (action kb.query) with the question/answer content and
+    token usage — the operation history previously never showed Q&A."""
+    pool = _QueryMockPool()
+    servicer, _ = _make_query_servicer(pool=pool)
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="什么是 ANI？",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    resp = asyncio.new_event_loop().run_until_complete(
+        servicer._query(req, ctx)
+    )
+
+    import json as _json
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert len(audits) == 1
+    # insert_audit_in_tx args: (tenant, kb, actor, action, before, after,
+    # error_code, error_msg)
+    args = audits[0][1]
+    assert str(args[0]) == TENANT_ID
+    assert str(args[1]) == KB_ID
+    assert args[3] == "kb.query"
+    assert args[4] is None  # creation-type: no before_state
+    assert args[6] is None  # success → error_code NULL
+    after = _json.loads(args[5])
+    assert after["question"] == "什么是 ANI？"
+    assert after["answer"] == "hello"
+    assert after["source_count"] == 1
+    assert after["input_tokens"] == 10
+    assert after["output_tokens"] == 5
+    assert after["session_id"] == resp.session_id
+
+
+def test_query_audit_truncates_long_content():
+    """Question/answer longer than the 500-char audit cap are truncated so
+    a long Q&A turn cannot bloat kb_audit_log rows."""
+    pool = _QueryMockPool()
+    servicer, _ = _make_query_servicer(
+        pool=pool, rag_grpc=_MockRagGrpcClient(answer="a" * 2000),
+    )
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="q" * 2000,
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
+
+    import json as _json
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert len(audits) == 1
+    after = _json.loads(audits[0][1][5])
+    assert after["question"] == "q" * 500
+    assert after["answer"] == "a" * 500
+
+
+def test_query_audit_failure_does_not_fail_query():
+    """Best-effort audit: if the kb_audit_log INSERT fails, the Query
+    response still returns normally (audit write is swallowed)."""
+
+    class _AuditFailingConn(_QueryMockConn):
+        async def fetchrow(self, sql, *args):
+            if "kb_audit_log" in sql:
+                raise RuntimeError("audit insert exploded")
+            return await super().fetchrow(sql, *args)
+
+    class _AuditFailingPool:
+        def __init__(self):
+            self.conns: list = []
+
+        @asynccontextmanager
+        async def acquire(self):
+            conn = _AuditFailingConn()
+            self.conns.append(conn)
+            yield conn
+
+    pool = _AuditFailingPool()
+    servicer, _ = _make_query_servicer(pool=pool)
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    resp = asyncio.new_event_loop().run_until_complete(
+        servicer._query(req, ctx)
+    )
+    assert resp.answer == "hello"
+
+
 def test_query_missing_idempotency_key_returns_invalid_argument():
     pool = _QueryMockPool()
     servicer, _ = _make_query_servicer(pool=pool)
@@ -569,9 +669,9 @@ def test_query_works_without_cache_factory_returning_none():
     import asyncio
     resp = asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
     # Still persists both messages to DB (cache is best-effort).
-    # 4 connections: KB existence check + user msg + history load (no
-    # cache, so _load_history falls back to DB) + assistant msg.
-    assert len(pool.conns) == 4
+    # 5 connections: KB existence check + user msg + history load (no
+    # cache, so _load_history falls back to DB) + assistant msg + Q&A audit.
+    assert len(pool.conns) == 5
     assert resp.answer == "hello"
 
 

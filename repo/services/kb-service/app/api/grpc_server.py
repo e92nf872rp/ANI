@@ -952,29 +952,6 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                         context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
                         return  # unreachable; for type checkers
 
-                    # audit doc.parse (plan §6.3) — same transaction as the
-                    # parse_status update. before = the row pre-notify; after
-                    # = the row with the notified parse lifecycle (status
-                    # pending, error cleared — mirrors update above).
-                    # doc_row None + updated True means the doc exists under a
-                    # different kb_id than requested (update only keys on
-                    # doc_id): skip the audit row rather than risk an FK
-                    # violation on the requested kb_id rolling the business
-                    # write back into an UNKNOWN.
-                    if doc_row is not None:
-                        after_row = dict(doc_row)
-                        after_row["parse_status"] = "pending"
-                        after_row["error_message"] = None
-                        await audit_repo.insert_audit_in_tx(
-                            conn,
-                            tenant_id=tenant_id,
-                            kb_id=kb_id,
-                            action="doc.parse",
-                            actor_user_id=actor,
-                            before_state=_doc_audit_snapshot(doc_row),
-                            after_state=_doc_audit_snapshot(after_row),
-                        )
-
                     # c. insert async_tasks row for idempotent replay + status
                     #    tracking, with UNIQUE race self-heal (same pattern as
                     #    _update_kb): the replay check above runs outside this
@@ -1044,6 +1021,35 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                             # already published the outbox event — replay it,
                             # do not publish a second one.
                             publish_event = False
+
+                    # audit doc.parse (plan §6.3) — same transaction, written
+                    # AFTER the task row so after_state can link task_id: the
+                    # parse consumer later flips THIS row in place at terminal
+                    # parse_status (update_parse_result_in_tx) instead of
+                    # inserting a second result row, so the operation history
+                    # shows one entry per operation. before = the row
+                    # pre-notify; after = the row with the notified parse
+                    # lifecycle (status pending, error cleared — mirrors the
+                    # update above) + the task link. doc_row None + updated
+                    # True means the doc exists under a different kb_id than
+                    # requested (update only keys on doc_id): skip the audit
+                    # row rather than risk an FK violation on the requested
+                    # kb_id rolling the business write back into an UNKNOWN.
+                    if doc_row is not None:
+                        after_row = dict(doc_row)
+                        after_row["parse_status"] = "pending"
+                        after_row["error_message"] = None
+                        after_snapshot = _doc_audit_snapshot(after_row) or {}
+                        after_snapshot["task_id"] = task_id
+                        await audit_repo.insert_audit_in_tx(
+                            conn,
+                            tenant_id=tenant_id,
+                            kb_id=kb_id,
+                            action="doc.parse",
+                            actor_user_id=actor,
+                            before_state=_doc_audit_snapshot(doc_row),
+                            after_state=after_snapshot,
+                        )
 
                     # d. insert outbox_events row; dispatcher publishes to NATS.
                     from app.repositories import outbox as outbox_repo
@@ -1409,6 +1415,21 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             cache=cache,
         )
 
+        # Q&A audit: record the turn's content into the operation history
+        # (kb_audit_log, action kb.query). Best-effort, after the response
+        # data is durable — see _record_query_audit.
+        await self._record_query_audit(
+            context=context,
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            session_id=session_id,
+            question=request.question,
+            answer=answer,
+            sources=sources,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
         # 8. build response (session_id may have been newly created).
         source_chunks = [
             kb_pb.SourceChunk(
@@ -1715,6 +1736,20 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             cache=cache,
         )
 
+        # Q&A audit (mirror Query): record the streamed turn's content into
+        # the operation history. Best-effort — the stream is already complete.
+        await self._record_query_audit(
+            context=context,
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            session_id=session_id,
+            question=request.question,
+            answer=answer,
+            sources=final_sources,
+            input_tokens=final_input_tokens,
+            output_tokens=final_output_tokens,
+        )
+
     async def _persist_assistant(
         self, *, tenant_id: str, session_id: str,
         answer: str, sources: list[dict[str, Any]],
@@ -1741,6 +1776,48 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 sources=sources,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+            )
+
+    async def _record_query_audit(
+        self, *, context: Any, tenant_id: str, kb_id: str, session_id: str,
+        question: str, answer: str, sources: list[dict[str, Any]],
+        input_tokens: int, output_tokens: int,
+    ) -> None:
+        """Audit one Q&A turn into kb_audit_log (action ``kb.query``).
+
+        The operation history previously never recorded Q&A — the turn's
+        question/answer (truncated) plus token usage now land in the KB
+        audit trail so ListKBAuditLogs shows Q&A activity. Best-effort:
+        audit write failures are logged, never propagated — a Query /
+        Retrieve response must not fail because of the audit trail (the
+        Q&A itself is already persisted to kb_messages by _persist_assistant).
+        """
+        if self._pool is None:
+            return
+        try:
+            after_state = {
+                "session_id": session_id,
+                "question": _audit_text_truncate(question),
+                "answer": _audit_text_truncate(answer),
+                "source_count": len(sources),
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        action="kb.query",
+                        actor_user_id=_actor_user_id(context),
+                        before_state=None,
+                        after_state=after_state,
+                    )
+        except Exception as e:  # noqa: BLE001 — best-effort audit
+            logger.warning(
+                "kb-service: failed to persist query audit (kb_id=%s "
+                "session_id=%s): %s", kb_id, session_id, e,
             )
 
     # ── Plan step 8A: new path helpers (flag=true) ───────────────────────────
@@ -2169,25 +2246,6 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                         context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
                         return  # unreachable; for type checkers
 
-                    # audit doc.reparse (plan §6.3) — same transaction as the
-                    # reset. before = the row as it stood (the failed state
-                    # the gate validated); after = the row with the reset
-                    # parse lifecycle (pending, error/parsed_at cleared,
-                    # chunk_count 0 — mirrors reset_for_reparse_in_tx).
-                    after_row = dict(doc_row)
-                    after_row["parse_status"] = "pending"
-                    after_row["error_message"] = None
-                    after_row["chunk_count"] = 0
-                    await audit_repo.insert_audit_in_tx(
-                        conn,
-                        tenant_id=tenant_id,
-                        kb_id=kb_id,
-                        action="doc.reparse",
-                        actor_user_id=actor,
-                        before_state=_doc_audit_snapshot(doc_row),
-                        after_state=_doc_audit_snapshot(after_row),
-                    )
-
                     # UNIQUE race self-heal (same pattern as _update_kb /
                     # NotifyDocumentUploaded): a concurrent reparse with the
                     # same idempotency key can win the INSERT between the
@@ -2241,6 +2299,32 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                         # published the outbox event — replay it, publish nothing.
                         task_id = str(existing["id"])
                         publish_event = False
+
+                    # audit doc.reparse (plan §6.3) — same transaction as the
+                    # reset, written AFTER the task row so after_state can
+                    # link task_id: the parse consumer later flips THIS row in
+                    # place at terminal parse_status (update_parse_result_in_tx)
+                    # instead of inserting a second result row, so the
+                    # operation history shows one entry per operation.
+                    # before = the row as it stood (the failed state the gate
+                    # validated); after = the row with the reset parse
+                    # lifecycle (pending, error/parsed_at cleared, chunk_count
+                    # 0 — mirrors reset_for_reparse_in_tx) + the task link.
+                    after_row = dict(doc_row)
+                    after_row["parse_status"] = "pending"
+                    after_row["error_message"] = None
+                    after_row["chunk_count"] = 0
+                    after_snapshot = _doc_audit_snapshot(after_row) or {}
+                    after_snapshot["task_id"] = task_id
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        action="doc.reparse",
+                        actor_user_id=actor,
+                        before_state=_doc_audit_snapshot(doc_row),
+                        after_state=after_snapshot,
+                    )
 
                     if publish_event:
                         # Payload mirrors the notify template; storage_path/file_name
@@ -3742,6 +3826,16 @@ def _kb_audit_snapshot(kb_row: dict[str, Any] | None) -> dict[str, Any] | None:
         "status": kb_row.get("status"),
         "doc_count": kb_row.get("doc_count"),
     }
+
+
+# Audit text cap: Q&A content is truncated before it lands in kb_audit_log
+# so a long question/answer cannot bloat the audit trail rows.
+_AUDIT_TEXT_MAX = 500
+
+
+def _audit_text_truncate(text: str | None) -> str:
+    text = text or ""
+    return text if len(text) <= _AUDIT_TEXT_MAX else text[:_AUDIT_TEXT_MAX]
 
 
 def _doc_audit_snapshot(doc_row: dict[str, Any] | None) -> dict[str, Any] | None:

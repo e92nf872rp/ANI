@@ -173,17 +173,27 @@ class _MockConn:
     """Minimal asyncpg.Connection mock for doc_repo + kb_repo lookups.
 
     Records execute() calls so tests can assert async_tasks close-out
-    statements (complete_task_in_tx's UPDATE)."""
+    statements (complete_task_in_tx's UPDATE) and the kb_audit_log
+    in-place result UPDATE, plus kb_audit_log INSERTs (the fallback
+    result row) so tests can assert the parse-result audit outcome."""
 
     def __init__(
         self,
         *,
         doc_row: dict | None = None,
         kb_row: dict | None = None,
+        task_row: dict | None = None,
+        task_update: str = "UPDATE 1",
+        audit_update_status: str = "UPDATE 1",
     ):
         self._doc_row = doc_row
         self._kb_row = kb_row
+        self._task_row = task_row
+        self._task_update = task_update
+        self._audit_update_status = audit_update_status
         self.executes: list[tuple[str, tuple]] = []
+        self.audit_updates: list[tuple] = []
+        self.audit_inserts: list[tuple] = []
 
     @asynccontextmanager
     async def transaction(self):
@@ -195,6 +205,11 @@ class _MockConn:
         # doc_count), so check the outer "FROM knowledge_bases" first.
         if "FROM knowledge_bases" in sql:
             return self._kb_row
+        if "FROM async_tasks" in sql:
+            return self._task_row
+        if "INSERT INTO kb_audit_log" in sql:
+            self.audit_inserts.append(args)
+            return {"id": AUDIT_LOG_ID}
         if "FROM kb_documents" in sql:
             return self._doc_row
         return None
@@ -203,7 +218,10 @@ class _MockConn:
         self.executes.append((sql, args))
         # complete_task_in_tx checks "UPDATE 1"
         if "UPDATE async_tasks" in sql:
-            return "UPDATE 1"
+            return self._task_update
+        if "UPDATE kb_audit_log" in sql:
+            self.audit_updates.append((sql, args))
+            return self._audit_update_status
         # set_tenant_context / set_config calls
         return None
 
@@ -211,14 +229,22 @@ class _MockConn:
 class _MockPool:
     """Returns _MockConn instances from acquire()."""
 
-    def __init__(self, *, doc_row=None, kb_row=None):
+    def __init__(self, *, doc_row=None, kb_row=None, task_row=None,
+                 task_update="UPDATE 1", audit_update_status="UPDATE 1"):
         self._doc_row = doc_row
         self._kb_row = kb_row
+        self._task_row = task_row
+        self._task_update = task_update
+        self._audit_update_status = audit_update_status
         self._conns: list[_MockConn] = []
 
     @asynccontextmanager
     async def acquire(self):
-        conn = _MockConn(doc_row=self._doc_row, kb_row=self._kb_row)
+        conn = _MockConn(
+            doc_row=self._doc_row, kb_row=self._kb_row,
+            task_row=self._task_row, task_update=self._task_update,
+            audit_update_status=self._audit_update_status,
+        )
         self._conns.append(conn)
         yield conn
 
@@ -856,6 +882,7 @@ async def test_max_concurrency_bounds_in_flight_tasks():
 
 
 TASK_ID = "55555555-5555-5555-5555-555555555555"
+AUDIT_LOG_ID = "66666666-6666-6666-6666-666666666666"
 
 
 def _async_task_updates(pool: _MockPool) -> list[tuple[str, tuple]]:
@@ -868,6 +895,52 @@ def _async_task_updates(pool: _MockPool) -> list[tuple[str, tuple]]:
     ]
 
 
+def _audit_rows(pool: _MockPool) -> list[tuple]:
+    """Collect INSERT INTO kb_audit_log arg tuples across all pooled conns."""
+    return [
+        args
+        for conn in pool._conns
+        for args in conn.audit_inserts
+    ]
+
+
+def _audit_updates(pool: _MockPool) -> list[tuple]:
+    """Collect the in-place kb_audit_log result UPDATEs across pooled conns.
+
+    Each entry is the (sql, args) of update_parse_result_in_tx's UPDATE:
+    args = (tenant, kb, overlay_json, error_code, error_msg, action, task_id).
+    """
+    return [
+        (sql, args)
+        for conn in pool._conns
+        for (sql, args) in conn.audit_updates
+        if "UPDATE kb_audit_log" in sql
+    ]
+
+
+def _assert_result_update(pool: _MockPool, *, action, error_code,
+                          error_msg=None, parse_status=None,
+                          chunk_count=None):
+    """Assert exactly one in-place result UPDATE with the given outcome."""
+    updates = _audit_updates(pool)
+    assert len(updates) == 1
+    sql, args = updates[0]
+    assert "after_state = COALESCE(after_state, '{}'::jsonb) || $3::jsonb" in sql
+    assert "after_state->>'task_id' = $7" in sql
+    assert args[5] == action
+    assert args[6] == TASK_ID
+    assert args[3] == error_code
+    assert args[4] == error_msg
+    import json as _json
+    overlay = _json.loads(args[2])
+    assert overlay["task_id"] == TASK_ID
+    if parse_status is not None:
+        assert overlay["parse_status"] == parse_status
+    if chunk_count is not None:
+        assert overlay["chunk_count"] == chunk_count
+    return overlay
+
+
 def _assert_complete(update, *, status):
     sql, args = update
     assert "SET status = $2" in sql
@@ -878,10 +951,12 @@ def _assert_complete(update, *, status):
 @pytest.mark.asyncio
 async def test_closes_task_completed_when_doc_ready():
     """With task_id in the payload, a ready doc closes the task as
-    completed (UPDATE async_tasks SET status='completed')."""
+    completed (UPDATE async_tasks SET status='completed') and flips the
+    intent audit row in place (error_code NULL)."""
     nats = _FakeNATS()
     doc_row = _make_doc_row()
     doc_row["parse_status"] = "ready"
+    doc_row["chunk_count"] = 7
     pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
     orchestrator = _FakeOrchestrator()
     consumer = ParseConsumer(
@@ -897,13 +972,24 @@ async def test_closes_task_completed_when_doc_ready():
     # The UPDATE targeted the payload's task_id
     assert str(updates[0][1][0]) == TASK_ID
 
+    # Result audit: the intent row flipped in place (doc.parse, error_code
+    # NULL), overlay carrying the terminal doc state + task link.
+    _assert_result_update(
+        pool, action="doc.parse", error_code=None,
+        parse_status="ready", chunk_count=7,
+    )
+    # No fallback INSERT when the intent row was found.
+    assert _audit_rows(pool) == []
+
 
 @pytest.mark.asyncio
 async def test_closes_task_failed_when_doc_failed():
-    """A failed doc closes the task as failed."""
+    """A failed doc closes the task as failed and flips the intent audit
+    row in place: error_code PARSE_FAILED + the doc's sanitized message."""
     nats = _FakeNATS()
     doc_row = _make_doc_row()
     doc_row["parse_status"] = "failed"
+    doc_row["error_message"] = "embedding service unavailable"
     pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
     orchestrator = _FakeOrchestrator()
     consumer = ParseConsumer(
@@ -916,6 +1002,12 @@ async def test_closes_task_failed_when_doc_failed():
     updates = _async_task_updates(pool)
     assert len(updates) == 1
     _assert_complete(updates[0], status="failed")
+
+    _assert_result_update(
+        pool, action="doc.parse", error_code="PARSE_FAILED",
+        error_msg="embedding service unavailable", parse_status="failed",
+    )
+    assert _audit_rows(pool) == []
 
 
 @pytest.mark.asyncio
@@ -1005,6 +1097,111 @@ async def test_close_out_uses_terminal_state_guard():
     for terminal in ("'completed'", "'failed'", "'cancelled'",
                      "'dead_letter'"):
         assert terminal in sql
+
+
+@pytest.mark.asyncio
+async def test_result_audit_action_follows_task_type():
+    """A kb.reparse task flips a doc.reparse intent row; a task row with an
+    unknown/missing task_type falls back to doc.parse."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "ready"
+    pool = _MockPool(
+        doc_row=doc_row, kb_row=_make_kb_row(),
+        task_row={"task_type": "kb.reparse"},
+    )
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    _assert_result_update(pool, action="doc.reparse", error_code=None)
+
+
+@pytest.mark.asyncio
+async def test_result_audit_falls_back_to_insert_without_task_id_link():
+    """An intent row predating the task_id link (older build, or the audit
+    was skipped at notify time) doesn't match the in-place UPDATE — the
+    consumer falls back to a separate result INSERT so the outcome is
+    still recorded."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "failed"
+    doc_row["error_message"] = "boom"
+    pool = _MockPool(
+        doc_row=doc_row, kb_row=_make_kb_row(),
+        audit_update_status="UPDATE 0",
+    )
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    updates = _audit_updates(pool)
+    assert len(updates) == 1  # attempted in place first
+    audits = _audit_rows(pool)
+    assert len(audits) == 1
+    # args: (tenant, kb, actor, action, before, after, error_code, error_msg)
+    assert audits[0][3] == "doc.parse"
+    assert audits[0][2] is None  # NULL actor = internal system consumer
+    assert audits[0][6] == "PARSE_FAILED"
+    assert audits[0][7] == "boom"
+    import json as _json
+    after = _json.loads(audits[0][5])
+    assert after["doc_id"] == DOC_ID
+    assert after["parse_status"] == "failed"
+    assert after["task_id"] == TASK_ID
+
+
+@pytest.mark.asyncio
+async def test_result_audit_skipped_when_task_already_terminal():
+    """complete_task_in_tx's terminal-state guard returns UPDATE 0 (task
+    already closed by a redelivery race) — no duplicate audit write."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "ready"
+    pool = _MockPool(
+        doc_row=doc_row, kb_row=_make_kb_row(), task_update="UPDATE 0",
+    )
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    assert _audit_updates(pool) == []
+    assert _audit_rows(pool) == []
+
+
+@pytest.mark.asyncio
+async def test_result_audit_error_msg_truncated():
+    """A very long sanitized error message is truncated in the flipped
+    audit row's error_msg (512-char cap)."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "failed"
+    doc_row["error_message"] = "x" * 5000
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    _assert_result_update(
+        pool, action="doc.parse", error_code="PARSE_FAILED",
+        error_msg="x" * 512, parse_status="failed",
+    )
 
 
 @pytest.mark.asyncio
