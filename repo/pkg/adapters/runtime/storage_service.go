@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -1281,6 +1280,10 @@ func (s *LocalStorageService) CreateStorageBucket(ctx context.Context, request p
 	if accessMode != "private" && accessMode != "public_read" {
 		return ports.StorageBucketRecord{}, fmt.Errorf("%w: unsupported bucket access_mode %q", ports.ErrUnsupported, request.AccessMode)
 	}
+	storageClass := firstNetworkNonEmpty(strings.ToLower(strings.TrimSpace(request.StorageClass)), "standard")
+	if storageClass != "standard" && storageClass != "infrequent_access" {
+		return ports.StorageBucketRecord{}, fmt.Errorf("%w: unsupported bucket storage_class %q", ports.ErrUnsupported, request.StorageClass)
+	}
 
 	if s.store != nil {
 		if existing, err := s.store.FindBucketByCreateIdempotency(ctx, request.TenantID, request.IdempotencyKey); err == nil {
@@ -1310,6 +1313,7 @@ func (s *LocalStorageService) CreateStorageBucket(ctx context.Context, request p
 	if region == "" {
 		region = "cn-east-1"
 	}
+	acl, aclLabel := storageBucketACLForAccessMode(accessMode)
 	record := ports.StorageBucketRecord{
 		TenantID:                 request.TenantID,
 		BucketID:                 uuid.NewString(),
@@ -1317,9 +1321,9 @@ func (s *LocalStorageService) CreateStorageBucket(ctx context.Context, request p
 		Region:                   region,
 		Endpoint:                 storageBucketEndpoint(region),
 		AccessMode:               accessMode,
-		ACL:                      "private",
-		ACLLabel:                 storageBucketACLLabel("private"),
-		StorageClass:             "standard",
+		ACL:                      acl,
+		ACLLabel:                 aclLabel,
+		StorageClass:             storageClass,
 		Versioning:               "disabled",
 		LifecycleRules:           []ports.StorageBucketLifecycleRule{},
 		LifecycleNote:            "未配置生命周期规则",
@@ -1328,7 +1332,7 @@ func (s *LocalStorageService) CreateStorageBucket(ctx context.Context, request p
 		CreatedAt:                now,
 		UpdatedAt:                now,
 		CreateIdempotencyKey:     request.IdempotencyKey,
-		CreateRequestFingerprint: strings.Join([]string{strings.TrimSpace(request.Name), accessMode, region}, "|"),
+		CreateRequestFingerprint: strings.Join([]string{strings.TrimSpace(request.Name), accessMode, storageClass, region}, "|"),
 	}
 	if s.objectStore == nil {
 		record.State = ports.StorageResourceAvailable
@@ -1343,6 +1347,20 @@ func (s *LocalStorageService) CreateStorageBucket(ctx context.Context, request p
 				"tenant_id", record.TenantID,
 				"bucket_id", record.BucketID,
 				"name", record.Name,
+				"err", err,
+			)
+			record.State = ports.StorageResourceFailed
+			record.Reason = err.Error()
+			record.UpdatedAt = s.now().UTC()
+			_ = s.upsertBucket(ctx, record)
+			return ports.StorageBucketRecord{}, err
+		}
+		if err := s.applyBucketACLPolicy(ctx, record); err != nil {
+			slog.Warn("storage bucket object store acl apply failed",
+				"tenant_id", record.TenantID,
+				"bucket_id", record.BucketID,
+				"name", record.Name,
+				"access_mode", record.AccessMode,
 				"err", err,
 			)
 			record.State = ports.StorageResourceFailed
@@ -1903,6 +1921,10 @@ func (s *LocalStorageService) GenerateBucketObjectPresignedURL(ctx context.Conte
 	if !ok {
 		return ports.StorageObjectDownloadRecord{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
+	// Presigning must survive gateway restarts just like the object browser:
+	// backfill the in-memory object cache from the control-plane store first,
+	// otherwise a valid object is reported as missing.
+	s.hydrateObjectsFromStore(ctx, request.TenantID)
 	s.mu.RLock()
 	var object ports.StorageObjectRecord
 	found := false
@@ -1917,7 +1939,7 @@ func (s *LocalStorageService) GenerateBucketObjectPresignedURL(ctx context.Conte
 	if !found {
 		// allow PUT for not-yet-uploaded keys
 		if method != "PUT" {
-			return ports.StorageObjectDownloadRecord{}, ports.ErrNotFound
+			return ports.StorageObjectDownloadRecord{}, fmt.Errorf("%w: object %q not found in bucket %s", ports.ErrNotFound, key, bucket.Name)
 		}
 		object = ports.StorageObjectRecord{
 			TenantID:    request.TenantID,
@@ -1948,8 +1970,8 @@ func (s *LocalStorageService) GenerateBucketObjectPresignedURL(ctx context.Conte
 }
 
 func (s *LocalStorageService) SetStorageBucketACL(ctx context.Context, request ports.StorageBucketACLUpdateRequest) (ports.StorageBucketRecord, error) {
-	acl := strings.TrimSpace(request.ACL)
-	if acl != "private" && acl != "tenant_read" {
+	acl, ok := normalizeStorageBucketACL(request.ACL)
+	if !ok {
 		return ports.StorageBucketRecord{}, fmt.Errorf("%w: unsupported acl %q", ports.ErrUnsupported, request.ACL)
 	}
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
@@ -1968,19 +1990,34 @@ func (s *LocalStorageService) SetStorageBucketACL(ctx context.Context, request p
 	if !ok {
 		return ports.StorageBucketRecord{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	bucket.ACL = acl
-	bucket.ACLLabel = storageBucketACLLabel(acl)
-	if acl == "tenant_read" {
-		bucket.AccessMode = "public_read"
-	} else {
-		bucket.AccessMode = "private"
+	updated := bucket
+	updated.ACL = acl
+	updated.ACLLabel = storageBucketACLLabel(acl)
+	updated.AccessMode = storageBucketAccessModeForACL(acl)
+	updated.UpdatedAt = s.now().UTC()
+	// Apply to the object store authority before recording the change: a failed
+	// apply must not leave the control plane advertising a permission the real
+	// bucket does not have.
+	if err := s.applyBucketACLPolicy(ctx, updated); err != nil {
+		return ports.StorageBucketRecord{}, err
 	}
-	bucket.UpdatedAt = s.now().UTC()
-	s.buckets[bucket.BucketID] = bucket
-	s.bucketUpdateIdem[idemKey] = bucket.BucketID
-	return s.enrichStorageBucketLocked(bucket), nil
+	// The control-plane store is the read authority for bucket detail/list, so
+	// an in-memory-only update is reverted on the next page refresh.
+	if err := s.upsertBucket(ctx, updated); err != nil {
+		return ports.StorageBucketRecord{}, err
+	}
+	s.mu.Lock()
+	s.buckets[updated.BucketID] = updated
+	s.bucketUpdateIdem[idemKey] = updated.BucketID
+	s.mu.Unlock()
+	slog.Info("storage bucket acl updated",
+		"tenant_id", updated.TenantID,
+		"bucket_id", updated.BucketID,
+		"acl", updated.ACL,
+		"access_mode", updated.AccessMode,
+		"object_store_configured", s.objectStore != nil,
+	)
+	return s.enrichStorageBucketRecord(updated), nil
 }
 
 func (s *LocalStorageService) SetStorageBucketClass(ctx context.Context, request ports.StorageBucketClassUpdateRequest) (ports.StorageBucketRecord, error) {
@@ -2004,13 +2041,24 @@ func (s *LocalStorageService) SetStorageBucketClass(ctx context.Context, request
 	if !ok {
 		return ports.StorageBucketRecord{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
+	updated := bucket
+	updated.StorageClass = class
+	updated.UpdatedAt = s.now().UTC()
+	// The control-plane store is the read authority for bucket detail/list, so
+	// an in-memory-only update is reverted on the next page refresh.
+	if err := s.upsertBucket(ctx, updated); err != nil {
+		return ports.StorageBucketRecord{}, err
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	bucket.StorageClass = class
-	bucket.UpdatedAt = s.now().UTC()
-	s.buckets[bucket.BucketID] = bucket
-	s.bucketUpdateIdem[idemKey] = bucket.BucketID
-	return s.enrichStorageBucketLocked(bucket), nil
+	s.buckets[updated.BucketID] = updated
+	s.bucketUpdateIdem[idemKey] = updated.BucketID
+	s.mu.Unlock()
+	slog.Info("storage bucket storage class updated",
+		"tenant_id", updated.TenantID,
+		"bucket_id", updated.BucketID,
+		"storage_class", updated.StorageClass,
+	)
+	return s.enrichStorageBucketRecord(updated), nil
 }
 
 func (s *LocalStorageService) ListStorageBucketLifecycleRules(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageBucketLifecycleRuleListResult, error) {
@@ -2568,23 +2616,21 @@ func (s *LocalStorageService) signedUploadForObject(ctx context.Context, object 
 }
 
 func (s *LocalStorageService) signedUploadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
-	if s.objectStore != nil {
-		return s.objectStore.SignedUploadURL(ctx, ref, ttl)
+	if s.objectStore == nil {
+		// A fabricated URL is not a usable upload target. Fail loudly instead of
+		// handing the console a link that cannot resolve anywhere.
+		return ports.SignedURL{}, fmt.Errorf("%w: object store is required to sign upload urls", ports.ErrNotConfigured)
 	}
-	return ports.SignedURL{
-		URL:       localStorageSignedURL("upload", ref),
-		ExpiresAt: s.now().UTC().Add(ttl),
-	}, nil
+	return s.objectStore.SignedUploadURL(ctx, ref, ttl)
 }
 
 func (s *LocalStorageService) signedDownloadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
-	if s.objectStore != nil {
-		return s.objectStore.SignedDownloadURL(ctx, ref, ttl)
+	if s.objectStore == nil {
+		// A fabricated URL is not a usable download target. Fail loudly instead of
+		// handing the console a link that cannot resolve anywhere.
+		return ports.SignedURL{}, fmt.Errorf("%w: object store is required to sign download urls", ports.ErrNotConfigured)
 	}
-	return ports.SignedURL{
-		URL:       localStorageSignedURL("download", ref),
-		ExpiresAt: s.now().UTC().Add(ttl),
-	}, nil
+	return s.objectStore.SignedDownloadURL(ctx, ref, ttl)
 }
 
 func storageObjectRef(object ports.StorageObjectRecord) ports.ObjectRef {
@@ -2607,10 +2653,6 @@ func storageSignedURLTTL(expiresSeconds int) time.Duration {
 		expiresSeconds = 86400
 	}
 	return time.Duration(expiresSeconds) * time.Second
-}
-
-func localStorageSignedURL(action string, ref ports.ObjectRef) string {
-	return "https://local-object-store.dev/" + action + "/" + url.PathEscape(string(ref.BucketClass)) + "/" + url.PathEscape(ref.ObjectKey)
 }
 
 func requireStorageTenantAndName(tenantID string, name string) error {
@@ -2786,6 +2828,56 @@ func storageBucketACLLabel(acl string) string {
 	default:
 		return "私有"
 	}
+}
+
+// normalizeStorageBucketACL maps the accepted acl spellings onto the canonical
+// record value. Creation uses access_mode (private/public_read) while the acl
+// update endpoint uses acl (private/tenant_read); accepting both spellings on
+// update keeps the console from silently failing when it reuses the creation
+// vocabulary.
+func normalizeStorageBucketACL(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "private":
+		return "private", true
+	case "tenant_read", "public_read":
+		return "tenant_read", true
+	default:
+		return "", false
+	}
+}
+
+func storageBucketACLForAccessMode(accessMode string) (string, string) {
+	acl := "private"
+	if accessMode == "public_read" {
+		acl = "tenant_read"
+	}
+	return acl, storageBucketACLLabel(acl)
+}
+
+func storageBucketAccessModeForACL(acl string) string {
+	if acl == "tenant_read" {
+		return "public_read"
+	}
+	return "private"
+}
+
+// applyBucketACLPolicy pushes the bucket access mode to the object store
+// authority. The control-plane record alone is not proof that the real bucket
+// changed, so a store that cannot apply policy is reported as unsupported
+// rather than silently accepted.
+func (s *LocalStorageService) applyBucketACLPolicy(ctx context.Context, bucket ports.StorageBucketRecord) error {
+	if s.objectStore == nil {
+		return nil
+	}
+	applier, ok := s.objectStore.(ports.ObjectStorePolicyApplier)
+	if !ok {
+		return nil
+	}
+	policy := ports.BucketACLPolicyPrivate
+	if bucket.AccessMode == "public_read" {
+		policy = ports.BucketACLPolicyTenantRead
+	}
+	return applier.ApplyBucketPolicy(ctx, ports.BucketClass(bucket.Name), bucket.TenantID, policy)
 }
 
 func storageBucketLifecycleNote(count int) string {

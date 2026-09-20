@@ -123,6 +123,7 @@ type storageCreateBucketRequest struct {
 	Name           string `json:"name"`
 	Region         string `json:"region,omitempty"`
 	AccessMode     string `json:"access_mode,omitempty"`
+	StorageClass   string `json:"storage_class,omitempty"`
 }
 
 type storageObjectUploadRequest struct {
@@ -1288,6 +1289,7 @@ func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestCo
 		Name:           req.Name,
 		Region:         req.Region,
 		AccessMode:     req.AccessMode,
+		StorageClass:   req.StorageClass,
 	})
 	if err != nil {
 		writeStorageError(c, err)

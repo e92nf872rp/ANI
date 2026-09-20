@@ -3874,6 +3874,7 @@ components:
         name:        { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$' }
         region:      { type: string }
         access_mode: { type: string, enum: [private, public_read], default: private }
+        storage_class: { type: string, enum: [standard, infrequent_access], default: standard }
 
     StorageObjectUploadRequest:
       type: object

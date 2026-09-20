@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -13,6 +15,59 @@ import (
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
+
+// testObjectStore is a minimal ports.ObjectStore for router-level tests that
+// need presigned URLs and object verification without a live S3 backend.
+type testObjectStore struct{}
+
+func (testObjectStore) Health(context.Context) error { return nil }
+
+func (testObjectStore) EnsureBucket(context.Context, ports.BucketClass) error { return nil }
+
+func (testObjectStore) BucketUsage(context.Context, ports.BucketClass, string) (ports.BucketUsage, error) {
+	return ports.BucketUsage{}, nil
+}
+
+func (testObjectStore) PutObject(context.Context, ports.PutObjectInput) (ports.ObjectMetadata, error) {
+	return ports.ObjectMetadata{}, ports.ErrUnsupported
+}
+
+func (testObjectStore) GetObject(context.Context, ports.ObjectRef) (io.ReadCloser, ports.ObjectMetadata, error) {
+	return nil, ports.ObjectMetadata{}, ports.ErrUnsupported
+}
+
+func (testObjectStore) DeleteObject(context.Context, ports.ObjectRef) error { return nil }
+
+func (testObjectStore) StatObject(_ context.Context, ref ports.ObjectRef) (ports.ObjectMetadata, error) {
+	return ports.ObjectMetadata{
+		Ref:         ref,
+		ContentType: "application/octet-stream",
+		SizeBytes:   1024,
+		UpdatedAt:   time.Unix(3000, 0).UTC(),
+	}, nil
+}
+
+func (testObjectStore) SignedUploadURL(_ context.Context, _ ports.ObjectRef, _ time.Duration) (ports.SignedURL, error) {
+	return ports.SignedURL{URL: "https://objects.test/upload", ExpiresAt: time.Unix(3001, 0).UTC()}, nil
+}
+
+func (testObjectStore) SignedDownloadURL(_ context.Context, _ ports.ObjectRef, _ time.Duration) (ports.SignedURL, error) {
+	return ports.SignedURL{URL: "https://objects.test/download", ExpiresAt: time.Unix(3002, 0).UTC()}, nil
+}
+
+// newObjectStoreStorageService builds a storage service wired to the stub object
+// store, matching the deployed profile where presigning has a real backend.
+func newObjectStoreStorageService() ports.StorageService {
+	return runtimeadapter.NewLocalStorageService(runtimeadapter.WithStorageObjectStore(testObjectStore{}))
+}
+
+// newStorageAPIWithObjectStore returns the storage API backed by the stub object
+// store instead of the object-store-less local profile.
+func newStorageAPIWithObjectStore() *storageAPI {
+	api := newStorageAPI()
+	api.service = newObjectStoreStorageService()
+	return api
+}
 
 func TestStorageAPIDevProfileVolumeFilesystemAndObject(t *testing.T) {
 	api := newStorageAPI()
@@ -245,7 +300,7 @@ func TestStorageHTTPCompleteObjectConfirmsPresignedUpload(t *testing.T) {
 		c.Set("tenant_id", "tenant-a")
 		c.Next(ctx)
 	})
-	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+	registerStorageResourcesWithService(h.Group("/api/v1"), newObjectStoreStorageService())
 
 	bucket := performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets", `{"idempotency_key":"http-complete-bucket","name":"uploads-a","region":"local","access_mode":"private"}`, http.StatusCreated)
 	bucketID := jsonStringField(t, bucket, "id")
@@ -270,7 +325,7 @@ func TestStorageHTTPCompleteObjectConfirmsPresignedUpload(t *testing.T) {
 }
 
 func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
-	api := newStorageAPI()
+	api := newStorageAPIWithObjectStore()
 	bucket, err := api.service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
 		TenantID:       "tenant-a",
 		IdempotencyKey: "api-bucket-a",
@@ -321,7 +376,7 @@ func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
 }
 
 func TestStorageAPIBucketConsoleResponsesMatchCoreSchema(t *testing.T) {
-	api := newStorageAPI()
+	api := newStorageAPIWithObjectStore()
 	bucket, err := api.service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
 		TenantID:       "tenant-a",
 		IdempotencyKey: "api-bucket-console",
