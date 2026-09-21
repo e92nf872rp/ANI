@@ -179,7 +179,9 @@ func streamQuerySSENewPath(cfg KbSSEConfig) app.HandlerFunc {
 			InferenceServiceName: inferenceServiceName,
 			RetrievalMode:        retrievalMode,
 		}
-		stream, err := cfg.KBClient.Retrieve(ctx, tenantID, c.Param("kb_id"), req)
+		// kb.query rows are audit-worthy: attribute the streamed turn to the
+		// acting user via x-user-id (mirrors queryKnowledgeBase).
+		stream, err := cfg.KBClient.Retrieve(kbWriteCtx(ctx, c), tenantID, c.Param("kb_id"), req)
 		if err != nil {
 			// Pre-stream gRPC errors: map to JSON for 4xx, SSE error for others.
 			ke := mapGRPCError(err)

@@ -471,7 +471,9 @@ func (a *kbAPI) queryKnowledgeBase(ctx context.Context, c *app.RequestContext) {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key must be a uuid")
 		return
 	}
-	resp, err := a.client.Query(ctx, instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.QueryRequest{
+	// kb.query rows are audit-worthy (B8 #21 + Q&A auditing): attribute the
+	// turn to the acting user — same mechanism as management-plane writes.
+	resp, err := a.client.Query(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.QueryRequest{
 		Question:             req.Question,
 		SessionId:            req.SessionID,
 		TopK:                 req.TopK,
