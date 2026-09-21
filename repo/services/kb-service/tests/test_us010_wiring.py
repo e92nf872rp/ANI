@@ -590,6 +590,131 @@ def test_query_audit_failure_does_not_fail_query():
     assert resp.answer == "hello"
 
 
+class _FailingGenerateRag(_MockRagGrpcClient):
+    """generate() raises — simulates rag-engine/AI-Gateway failures."""
+
+    def __init__(self, error_text="Error code: 404"):
+        super().__init__()
+        self._error_text = error_text
+
+    async def generate(self, **kwargs):
+        raise RuntimeError(self._error_text)
+
+
+class _FailingStreamRag(_MockRagGrpcClient):
+    """generate_stream() raises — mid-stream failure for Retrieve."""
+
+    def __init__(self, error_text="Error code: 404"):
+        super().__init__()
+        self._error_text = error_text
+
+    async def generate_stream(self, **kwargs):
+        raise RuntimeError(self._error_text)
+        yield  # pragma: no cover — makes this an async generator
+
+
+def test_query_failure_persists_placeholder_and_failed_audit():
+    """失败问答不再是无痕半记录：用户消息已落库（步骤 3-4）而生成失败时，
+    需补 1) assistant 错误占位消息（会话详情可见失败原因）+
+    2) kb.query 失败审计行（QA_FAILED，操作历史可见）；原异常语义不变。"""
+    pool = _QueryMockPool()
+    servicer, cache = _make_query_servicer(
+        pool=pool, rag_grpc=_FailingGenerateRag())
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="什么是 ANI？",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    with pytest.raises(RuntimeError, match="404"):
+        asyncio.new_event_loop().run_until_complete(
+            servicer._query(req, ctx)
+        )
+
+    # 1) assistant error placeholder: DB (3rd conn) + Redis cache
+    placeholder_conn = pool.conns[2]
+    assert "insert_message" in [e[0] for e in placeholder_conn.events]
+    asst = [a for a in cache.appended if a.get("role") == "assistant"]
+    assert len(asst) == 1
+    assert asst[0]["content"].startswith("回答生成失败：")
+    assert "Error code: 404" in asst[0]["content"]
+
+    # 2) failed kb.query audit row: QA_FAILED + error text, answer empty
+    import json as _json
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert len(audits) == 1
+    args = audits[0][1]
+    assert args[3] == "kb.query"
+    assert args[6] == "QA_FAILED"
+    assert "Error code: 404" in str(args[7])
+    after = _json.loads(args[5])
+    assert after["question"] == "什么是 ANI？"
+    assert after["answer"] == ""
+    assert after["source_count"] == 0
+
+
+def test_query_failure_truncates_error_text():
+    """Error text (e.g. a multi-line AioRpcError repr) is capped at the
+    500-char audit limit in BOTH the placeholder content and error_msg."""
+
+    class _LongErrorRag(_FailingGenerateRag):
+        async def generate(self, **kwargs):
+            raise RuntimeError("E" * 2000)
+
+    pool = _QueryMockPool()
+    servicer, cache = _make_query_servicer(
+        pool=pool, rag_grpc=_LongErrorRag())
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="q",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    with pytest.raises(RuntimeError):
+        asyncio.new_event_loop().run_until_complete(
+            servicer._query(req, ctx)
+        )
+
+    asst = [a for a in cache.appended if a.get("role") == "assistant"]
+    assert asst[0]["content"] == "回答生成失败：" + "E" * 500
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert audits[0][1][7] == "E" * 500
+
+
+def test_retrieve_stream_failure_persists_placeholder_and_failed_audit():
+    """SSE 流式路径：流开始前/流中失败同样补占位消息 + 失败审计行。"""
+    pool = _QueryMockPool()
+    servicer, cache = _make_query_servicer(
+        pool=pool, rag_grpc=_FailingStreamRag())
+    ctx = _make_context()
+    req = kb_pb.RetrieveRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+
+    async def _drain():
+        async for _ev in servicer._retrieve_stream(req, ctx):
+            pass
+
+    with pytest.raises(RuntimeError, match="404"):
+        asyncio.new_event_loop().run_until_complete(_drain())
+
+    asst = [a for a in cache.appended if a.get("role") == "assistant"]
+    assert len(asst) == 1
+    assert asst[0]["content"].startswith("回答生成失败：")
+    assert "Error code: 404" in asst[0]["content"]
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert len(audits) == 1
+    assert audits[0][1][6] == "QA_FAILED"
+
+
 def test_query_missing_idempotency_key_returns_invalid_argument():
     pool = _QueryMockPool()
     servicer, _ = _make_query_servicer(pool=pool)

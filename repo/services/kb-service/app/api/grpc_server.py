@@ -1384,24 +1384,39 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         )
         retrieval_mode = (request.retrieval_mode or kb_cfg["retrieval_mode"] or "hybrid")
 
-        # 6. QueryOrchestrator: retrieve → gates → Generate RPC.
-        result = await self._query_new_path(
-            tenant_id=tenant_id,
-            kb_id=kb_id,
-            question=request.question,
-            session_id=session_id,
-            top_k=top_k,
-            score_threshold=score_threshold,
-            retrieval_mode=retrieval_mode,
-            inference_service_name=(
-                request.inference_service_name
-                or kb_cfg["default_inference_service"]
-                or ""
-            ),
-            vector_store_id=str(kb_row.get("vector_store_id") or ""),
-            embedding_model=kb_cfg["embedding_model"],
-            cache=cache,
-        )
+        # 6. QueryOrchestrator: retrieve → gates → Generate RPC. A failure
+        # here must not leave a half-record: the user message was already
+        # persisted (steps 3-4), so record the failure trail (assistant
+        # error placeholder + kb.query audit row) before re-raising.
+        try:
+            result = await self._query_new_path(
+                tenant_id=tenant_id,
+                kb_id=kb_id,
+                question=request.question,
+                session_id=session_id,
+                top_k=top_k,
+                score_threshold=score_threshold,
+                retrieval_mode=retrieval_mode,
+                inference_service_name=(
+                    request.inference_service_name
+                    or kb_cfg["default_inference_service"]
+                    or ""
+                ),
+                vector_store_id=str(kb_row.get("vector_store_id") or ""),
+                embedding_model=kb_cfg["embedding_model"],
+                cache=cache,
+            )
+        except Exception as e:
+            await self._on_query_failure(
+                context=context,
+                tenant_id=tenant_id,
+                kb_id=kb_id,
+                session_id=session_id,
+                question=request.question,
+                cache=cache,
+                error=e,
+            )
+            raise
         answer = result.answer
         sources = result.sources
         input_tokens = result.input_tokens
@@ -1672,12 +1687,21 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             )
             self._orchestrators[tenant_id] = orch
 
-        # 8. Delegate to orchestrator.query_stream (single source of gate logic).
+        # 8. Delegate to orchestrator.query_stream (single source of gate
+        # logic). Failures before or mid-stream get the same failure trail
+        # as the synchronous Query path (assistant error placeholder +
+        # kb.query audit row) before the exception propagates.
         answer = ""
         final_sources: list[dict[str, Any]] = []
         final_input_tokens = 0
         final_output_tokens = 0
-        async for ev in orch.query_stream(
+
+        async def _stream_with_failure_trail():
+            # Thin wrapper so a failure before/inside the stream records
+            # the failure trail (assistant error placeholder + audit row)
+            # without re-indenting the consumer loop below.
+            try:
+                async for ev in orch.query_stream(
             tenant_id=tenant_id,
             kb_id=kb_id,
             question=request.question,
@@ -1687,9 +1711,23 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             retrieval_mode=retrieval_mode,
             inference_service_name=inference_service_name,
             vector_store_id=vector_store_id,
-            embedding_model=kb_cfg["embedding_model"],
-            history=history,
-        ):
+                    embedding_model=kb_cfg["embedding_model"],
+                    history=history,
+                ):
+                    yield ev
+            except Exception as e:
+                await self._on_query_failure(
+                    context=context,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    session_id=session_id,
+                    question=request.question,
+                    cache=cache,
+                    error=e,
+                )
+                raise
+
+        async for ev in _stream_with_failure_trail():
             if isinstance(ev, StreamTokenEvent):
                 answer += ev.content
                 yield kb_pb.RetrieveEvent(
@@ -1818,6 +1856,122 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             logger.warning(
                 "kb-service: failed to persist query audit (kb_id=%s "
                 "session_id=%s): %s", kb_id, session_id, e,
+            )
+
+    async def _on_query_failure(
+        self, *, context: Any, tenant_id: str, kb_id: str,
+        session_id: str, question: str, cache: Any, error: Exception,
+    ) -> None:
+        """Best-effort failure trail for a failed Q&A turn (Query + Retrieve).
+
+        A failed turn previously left a half-record: the user message was
+        already persisted (steps 3-4) but no assistant message and no audit
+        row ever appeared — the session detail showed an unanswered
+        question and the operation history showed nothing at all. Both
+        gaps are filled here (never raising):
+          - a role='assistant' error placeholder message in kb_messages +
+            Redis — the session detail shows WHY there is no answer and
+            the multi-turn history stays complete;
+          - a ``kb.query`` audit row with error_code ``QA_FAILED`` + the
+            error text (operation-history visibility, mirrors the parse
+            result audit's PARSE_FAILED).
+        The caller re-raises the original exception afterwards, so the
+        RPC error semantics are unchanged.
+        """
+        error_text = str(error) or repr(error)
+        await self._persist_assistant_error(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            error_message=error_text,
+            cache=cache,
+        )
+        await self._record_query_failure_audit(
+            context=context,
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            session_id=session_id,
+            question=question,
+            error_message=error_text,
+        )
+
+    async def _persist_assistant_error(
+        self, *, tenant_id: str, session_id: str,
+        error_message: str, cache: Any,
+    ) -> None:
+        """Persist an assistant error placeholder (best-effort, never raises).
+
+        The placeholder content is user-facing (session detail) and feeds
+        the next turn's chat history; the raw error text is truncated to
+        the same 500-char cap used by the audit trail.
+        """
+        content = f"回答生成失败：{_audit_text_truncate(error_message)}"
+        try:
+            if self._pool is not None:
+                async with self._pool.acquire() as conn:
+                    await message_repo.insert_message(
+                        conn,
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        role="assistant",
+                        content=content,
+                        source_chunks=[],
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+            if cache is not None:
+                await cache.append_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=content,
+                    sources=[],
+                    input_tokens=0,
+                    output_tokens=0,
+                )
+        except Exception as e:  # noqa: BLE001 — best-effort placeholder
+            logger.warning(
+                "kb-service: failed to persist assistant error placeholder "
+                "(session_id=%s): %s", session_id, e,
+            )
+
+    async def _record_query_failure_audit(
+        self, *, context: Any, tenant_id: str, kb_id: str,
+        session_id: str, question: str, error_message: str,
+    ) -> None:
+        """Audit a failed Q&A turn (action ``kb.query``, QA_FAILED).
+
+        Mirrors _record_query_audit but records the failure: answer is
+        empty, source_count/tokens are 0, and the error text rides in
+        error_msg (visible in the operation history's failure display).
+        Best-effort — never raises.
+        """
+        if self._pool is None:
+            return
+        try:
+            after_state = {
+                "session_id": session_id,
+                "question": _audit_text_truncate(question),
+                "answer": "",
+                "source_count": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+            }
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        action="kb.query",
+                        actor_user_id=_actor_user_id(context),
+                        before_state=None,
+                        after_state=after_state,
+                        error_code="QA_FAILED",
+                        error_msg=_audit_text_truncate(error_message),
+                    )
+        except Exception as e:  # noqa: BLE001 — best-effort audit
+            logger.warning(
+                "kb-service: failed to persist query failure audit "
+                "(kb_id=%s session_id=%s): %s", kb_id, session_id, e,
             )
 
     # ── Plan step 8A: new path helpers (flag=true) ───────────────────────────
