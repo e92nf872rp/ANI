@@ -36,6 +36,7 @@ KB_ID = "22222222-2222-2222-2222-222222222222"
 DOC_ID = "33333333-3333-3333-3333-333333333333"
 SESSION_ID = "44444444-4444-4444-4444-444444444444"
 MSG_ID = "55555555-5555-5555-5555-555555555555"
+USER_ID = "77777777-7777-7777-7777-777777777777"
 
 
 # ── recording fake conn ──────────────────────────────────────────────────────
@@ -583,6 +584,8 @@ class _GatesConn:
         return "UPDATE 1"
 
     async def fetchrow(self, sql, *args):
+        if "INSERT INTO kb_audit_log" in sql:
+            return {"id": uuid.uuid4()}
         if "FROM knowledge_bases" in sql:
             if self.kb_exists:
                 return {"id": uuid.UUID(KB_ID), "tenant_id": uuid.UUID(TENANT_ID)}
@@ -593,7 +596,14 @@ class _GatesConn:
             return None
         if "FROM kb_sessions" in sql:
             if self.session_exists:
-                return {"id": uuid.UUID(SESSION_ID), "kb_id": uuid.UUID(KB_ID)}
+                return {
+                    "id": uuid.UUID(SESSION_ID),
+                    "kb_id": uuid.UUID(KB_ID),
+                    "tenant_id": uuid.UUID(TENANT_ID),
+                    "user_id": uuid.UUID("66666666-6666-6666-6666-666666666666"),
+                    "title": "Q&A about contracts",
+                    "created_at": datetime(2026, 9, 21, tzinfo=timezone.utc),
+                }
             return None
         return None
 
@@ -755,6 +765,121 @@ async def test_delete_session_calls_cache_delete_after_commit():
     resp = await servicer._delete_session(req, _ServicerContext())
     assert resp is not None
     assert deleted == [SESSION_ID]
+
+
+# ── servicer: DeleteSession session.delete audit ─────────────────────────────
+
+
+class _AuditConn(_GatesConn):
+    """_GatesConn + INSERT INTO kb_audit_log recording (fetchrow-based) and
+    a count fetchval for kb_messages."""
+
+    def __init__(self, message_count=3):
+        super().__init__(session_exists=True)
+        self.audit_rows: list[dict] = []
+        self.message_count = message_count
+
+    async def fetchrow(self, sql, *args):
+        if "INSERT INTO kb_audit_log" in sql:
+            # insert_audit_in_tx: (tenant, kb, actor, action, before, after, ec, em)
+            self.audit_rows.append({
+                "args": args,
+                "action": args[3],
+                "actor_user_id": args[2],
+                "before_state": args[4],
+                "after_state": args[5],
+            })
+            return {"id": uuid.uuid4()}
+        # get_session: session summary for the audit before_state.
+        return await super().fetchrow(sql, *args)
+
+    async def fetchval(self, sql, *args):
+        if "count(*) FROM kb_messages" in sql:
+            return self.message_count
+        return await super().fetchval(sql, *args)
+
+
+class _ActorContext(_ServicerContext):
+    """_ServicerContext carrying x-user-id metadata (as the gateway does)."""
+
+    def __init__(self, user_id=USER_ID):
+        super().__init__()
+        self._user_id = user_id
+
+    def invocation_metadata(self):
+        return (("x-user-id", self._user_id),)
+
+
+def _make_audit_servicer(conn, cache=None):
+    from app.api.grpc_server import KBServiceServicer
+    from app.generated.kb.v1 import kb_service_pb2 as kb_pb
+
+    class _Pool:
+        @asynccontextmanager
+        async def acquire(self):
+            yield conn
+
+    servicer = KBServiceServicer(
+        pool=_Pool(),
+        session_cache_factory=(lambda: cache) if cache is not None else _FailingCacheFactory(),
+    )
+    req = kb_pb.DeleteSessionRequest(tenant_id=TENANT_ID, kb_id=KB_ID, session_id=SESSION_ID)
+    return servicer, req
+
+
+class _FailingCacheFactory:
+    def __call__(self):
+        raise RuntimeError("no cache configured")
+
+
+async def test_delete_session_records_session_delete_audit():
+    """A successful delete records one session.delete audit row in the same
+    transaction: before_state carries the session summary + message_count
+    (the only surviving record of the destroyed content), after_state marks
+    it deleted, and the actor comes from x-user-id."""
+    conn = _AuditConn(message_count=3)
+    servicer, req = _make_audit_servicer(conn)
+    resp = await servicer._delete_session(req, _ActorContext())
+    assert resp is not None
+
+    assert len(conn.audit_rows) == 1
+    row = conn.audit_rows[0]
+    assert row["action"] == "session.delete"
+    # insert_audit_in_tx casts the actor to uuid.UUID before binding.
+    assert row["actor_user_id"] == uuid.UUID(USER_ID)
+
+    # before/after are bound as JSON strings (json.dumps in insert_audit_in_tx).
+    before = json.loads(row["before_state"])
+    assert before["session_id"] == SESSION_ID
+    assert before["title"] == "Q&A about contracts"
+    assert before["user_id"] == "66666666-6666-6666-6666-666666666666"
+    assert before["message_count"] == 3
+    assert before["created_at"].startswith("2026-09-21")
+
+    after = json.loads(row["after_state"])
+    assert after["session_id"] == SESSION_ID
+    assert after["deleted"] is True
+
+
+async def test_delete_session_missing_session_no_audit_row():
+    """Idempotent no-op (session already gone): no audit row, so a retried
+    delete does not accumulate duplicate history (mirrors doc.delete)."""
+    conn = _AuditConn()
+    conn.session_exists = False
+    servicer, req = _make_audit_servicer(conn)
+    resp = await servicer._delete_session(req, _ActorContext())
+    assert resp is not None
+    assert conn.audit_rows == []
+
+
+async def test_delete_session_audit_actor_none_without_metadata():
+    """Without x-user-id metadata (internal caller), the audit row's actor
+    stays NULL — same semantics as the other audit actions."""
+    conn = _AuditConn()
+    servicer, req = _make_audit_servicer(conn)
+    await servicer._delete_session(req, _ServicerContext())
+    assert len(conn.audit_rows) == 1
+    assert conn.audit_rows[0]["actor_user_id"] is None
 
 
 async def test_list_sessions_servicer_maps_aggregates():

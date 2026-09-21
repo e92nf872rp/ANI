@@ -2235,6 +2235,14 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         kb_id ownership check) → after commit, best-effort cache delete. A
         missing session still returns Empty (idempotent 204); only a missing
         KB returns NOT_FOUND.
+
+        Audit: session.delete is a hard, irreversible delete of the session
+        AND its messages, so a successful deletion records a session.delete
+        audit row in the same transaction — before_state carries the session
+        summary + message_count (the only surviving record of what was
+        destroyed), after_state marks it gone. A missing-session no-op
+        (idempotent retry) records nothing, mirroring doc.delete's handling
+        of repeated deletes.
         """
         if not request.tenant_id:
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required")
@@ -2243,6 +2251,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
 
+        actor = _actor_user_id(context)
         async with self._pool.acquire() as conn:
             kb_row = await kb_repo.get_kb(
                 conn, tenant_id=request.tenant_id, kb_id=request.kb_id
@@ -2250,12 +2259,50 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             if not kb_row:
                 context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
                 return
-            await message_repo.delete_session(
-                conn,
-                tenant_id=request.tenant_id,
-                kb_id=request.kb_id,
-                session_id=request.session_id,
-            )
+            # Read the pre-delete snapshot and count inside the same outer
+            # transaction as the delete + audit so the audit row and the
+            # destructive write commit atomically.
+            async with conn.transaction():
+                session_row = await message_repo.get_session(
+                    conn,
+                    tenant_id=request.tenant_id,
+                    kb_id=request.kb_id,
+                    session_id=request.session_id,
+                )
+                if session_row is None:
+                    # Missing session: idempotent no-op — no audit row, so a
+                    # retried delete does not accumulate duplicate history.
+                    return empty_pb2.Empty()
+                message_count = await message_repo.count_session_messages(
+                    conn,
+                    tenant_id=request.tenant_id,
+                    session_id=request.session_id,
+                )
+                before_state = {
+                    "session_id": request.session_id,
+                    "title": session_row.get("title") or "",
+                    "user_id": str(session_row.get("user_id") or ""),
+                    "message_count": message_count,
+                    "created_at": _cursor_ts(session_row.get("created_at")),
+                }
+                # delete_session opens its own nested transaction (a
+                # savepoint under the outer one).
+                deleted = await message_repo.delete_session(
+                    conn,
+                    tenant_id=request.tenant_id,
+                    kb_id=request.kb_id,
+                    session_id=request.session_id,
+                )
+                if deleted:
+                    await audit_repo.insert_audit_in_tx(
+                        conn,
+                        tenant_id=request.tenant_id,
+                        kb_id=request.kb_id,
+                        action="session.delete",
+                        actor_user_id=actor,
+                        before_state=before_state,
+                        after_state={"session_id": request.session_id, "deleted": True},
+                    )
 
         # Best-effort Redis DEL after the DB transaction commits (SPEC §5.1 #18
         # step 4): on failure the 24h TTL expires the stale entries anyway.

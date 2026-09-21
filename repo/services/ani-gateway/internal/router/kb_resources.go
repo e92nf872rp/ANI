@@ -767,7 +767,10 @@ func (a *kbAPI) deleteKnowledgeBaseSession(ctx context.Context, c *app.RequestCo
 		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
-	if _, err := a.client.DeleteSession(ctx, instanceTenantID(c), c.Param("kb_id"), c.Param("session_id")); err != nil {
+	// kb-service records a session.delete audit row for this destructive
+	// write; forward the acting user via x-user-id (mirrors the other
+	// management-plane writes) so the audit actor is not "system".
+	if _, err := a.client.DeleteSession(kbWriteCtx(ctx, c), instanceTenantID(c), c.Param("kb_id"), c.Param("session_id")); err != nil {
 		writeKBError(c, err)
 		return
 	}

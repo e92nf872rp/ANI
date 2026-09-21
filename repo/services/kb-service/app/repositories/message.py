@@ -330,6 +330,25 @@ async def list_session_messages_paged(
     return [dict(r) for r in rows]
 
 
+async def count_session_messages(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: str,
+    session_id: str,
+) -> int:
+    """Count a session's messages (RLS-scoped) for the session.delete audit
+    before_state — the session row and its messages vanish on delete, so the
+    count captured here is the only surviving record of how much content was
+    destroyed."""
+    async with conn.transaction():
+        await set_tenant_context(conn, tenant_id)
+        count = await conn.fetchval(
+            "SELECT count(*) FROM kb_messages WHERE session_id = $1",
+            uuid.UUID(session_id),
+        )
+    return int(count or 0)
+
+
 async def delete_session(
     conn: asyncpg.Connection,
     *,
