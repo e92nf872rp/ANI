@@ -269,6 +269,78 @@ func TestLocalStorageServiceBucketObjectOperationsAfterRestart(t *testing.T) {
 	}
 }
 
+func TestLocalStorageServiceExpandFilesystemAfterRestart(t *testing.T) {
+	store := newSharedMemoryStorageStore()
+	service := NewLocalStorageService(WithStorageResourceStore(store))
+
+	filesystem, err := service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-expand",
+		Name:           "persisted-expand",
+		Protocol:       "nfs",
+		SizeGiB:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem() error = %v", err)
+	}
+
+	// Simulate Gateway restart: fresh service with an empty in-memory map, the
+	// filesystem only lives in the store authority.
+	restarted := NewLocalStorageService(WithStorageResourceStore(store))
+	expanded, err := restarted.ExpandFilesystem(context.Background(), ports.StorageFilesystemExpandRequest{
+		TenantID:       storageStoreTenantID,
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "persisted-expand-op",
+		SizeGiB:        101,
+	})
+	if err != nil {
+		t.Fatalf("ExpandFilesystem after restart error = %v", err)
+	}
+	if expanded.SizeGiB != 101 {
+		t.Fatalf("expanded size = %d, want 101", expanded.SizeGiB)
+	}
+	stored, err := store.GetFilesystem(context.Background(), storageStoreTenantID, filesystem.FilesystemID)
+	if err != nil {
+		t.Fatalf("store GetFilesystem error = %v", err)
+	}
+	if stored.SizeGiB != 101 {
+		t.Fatalf("store size = %d, want 101", stored.SizeGiB)
+	}
+}
+
+func TestLocalStorageServiceExpandFilesystemRejectsViaStore(t *testing.T) {
+	store := newSharedMemoryStorageStore()
+	service := NewLocalStorageService(WithStorageResourceStore(store))
+	filesystem, err := service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-expand-guard",
+		Name:           "persisted-expand-guard",
+		Protocol:       "nfs",
+		SizeGiB:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem() error = %v", err)
+	}
+
+	restarted := NewLocalStorageService(WithStorageResourceStore(store))
+	if _, err := restarted.ExpandFilesystem(context.Background(), ports.StorageFilesystemExpandRequest{
+		TenantID:       storageStoreTenantID,
+		FilesystemID:   "fs-missing",
+		IdempotencyKey: "persisted-expand-missing",
+		SizeGiB:        200,
+	}); err != ports.ErrNotFound {
+		t.Fatalf("ExpandFilesystem missing error = %v, want ErrNotFound", err)
+	}
+	if _, err := restarted.ExpandFilesystem(context.Background(), ports.StorageFilesystemExpandRequest{
+		TenantID:       storageStoreTenantID,
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "persisted-expand-shrink",
+		SizeGiB:        100,
+	}); err == nil || !strings.Contains(err.Error(), "size_gib must be greater") {
+		t.Fatalf("ExpandFilesystem shrink error = %v, want size_gib validation", err)
+	}
+}
+
 func TestMetadataStorageStoreUpdatesResourceState(t *testing.T) {
 	tx := &fakeMetadataTx{}
 	store := NewMetadataStorageStore(fakeMetadataStore{tx: tx}, WithStorageStoreClock(func() time.Time {

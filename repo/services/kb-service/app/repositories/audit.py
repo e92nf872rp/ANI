@@ -1,9 +1,14 @@
 """kb_audit_log repository (B8 #21, plan §6.3/§6.4).
 
 Covers the KB management-plane audit trail (`kb_audit_log` table,
-migration 006). Insert-only: write paths instrument business success and
-business failure (404/409/429 after basic validation) inside the caller's
+migration 006). Write paths instrument business success and business
+failure (404/409/429 after basic validation) inside the caller's
 transaction; the read side is keyset-paginated over (created_at, id) DESC.
+
+Parse/reparse operations record intent at task creation and update the
+*same row* in place when the parse reaches a terminal state
+(``update_parse_result_in_tx``), so the operation history shows a single
+flipping entry rather than an intent row plus a separate result row.
 """
 from __future__ import annotations
 
@@ -59,6 +64,53 @@ async def insert_audit_in_tx(
         error_msg,
     )
     return str(row["id"])
+
+
+async def update_parse_result_in_tx(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: str,
+    kb_id: str,
+    action: str,
+    task_id: str,
+    result_overlay: dict[str, Any],
+    error_code: str | None,
+    error_msg: str | None,
+) -> int:
+    """UPDATE the doc.parse/doc.reparse intent row in place (caller-owned tx).
+
+    The intent row written at task creation carries ``task_id`` inside its
+    ``after_state`` JSONB; the parse consumer flips that same row when the
+    doc reaches a terminal parse_status — error_code/error_msg are set
+    (NULL on success) and ``result_overlay`` is JSONB-merged into
+    ``after_state`` (terminal parse_status / chunk_count / task_id), so the
+    operation history shows one entry per operation, not two.
+
+    Returns the number of rows updated. 0 means no intent row carried this
+    task_id (e.g. written by an older build, or the audit was skipped) —
+    the caller falls back to a result INSERT to keep the trail complete.
+    """
+    await set_tenant_context(conn, tenant_id)
+    status = await conn.execute(
+        """
+        UPDATE kb_audit_log
+           SET after_state = COALESCE(after_state, '{}'::jsonb) || $3::jsonb,
+               error_code  = $4,
+               error_msg   = $5
+         WHERE tenant_id = $1
+           AND kb_id = $2
+           AND action = $6
+           AND after_state->>'task_id' = $7
+        """,
+        uuid.UUID(tenant_id),
+        uuid.UUID(kb_id),
+        json.dumps(result_overlay, default=str),
+        error_code,
+        error_msg,
+        action,
+        task_id,
+    )
+    return int(status.split()[-1])
 
 
 async def list_logs(

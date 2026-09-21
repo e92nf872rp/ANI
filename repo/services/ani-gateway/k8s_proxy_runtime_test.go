@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -145,6 +147,52 @@ func TestGatewayK8sClusterServiceFromConfigUsesMetadataForwardingTarget(t *testi
 	}
 	if got.StatusCode != http.StatusCreated || got.Headers["x-upstream"] != "metadata-vcluster" || got.Body["kind"] != "Namespace" {
 		t.Fatalf("proxy result = %+v", got)
+	}
+}
+
+// 网关滚动重启后内存 map 全新，但集群记录必须仍然可见：此前记录只存进程内存，导致
+// 界面看不到集群而底座 release 仍在，用户既删不掉也建不了新的。
+func TestGatewayK8sClusterServiceFromConfigPersistsClusterRecords(t *testing.T) {
+	tenantID := "11111111-1111-4111-8111-111111111111"
+	store := &gatewayK8sProxyMetadataStore{}
+	cfg := gatewayK8sClusterRuntimeConfig{
+		ProxyMode:                        "forwarding_metadata",
+		ProviderMode:                     "vcluster_helm",
+		MetadataStore:                    store,
+		VClusterHelmRunner:               &gatewayVClusterHelmRunner{},
+		VClusterProxyBearerToken:         "tenant-token",
+		VClusterKubeconfigServerTemplate: "https://{cluster_id}.{namespace}:443",
+	}
+
+	restarted := func() ports.K8sClusterService {
+		service, err := newGatewayK8sClusterService(cfg)
+		if err != nil {
+			t.Fatalf("newGatewayK8sClusterService() error = %v", err)
+		}
+		return service
+	}
+	created, err := restarted().CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       tenantID,
+		IdempotencyKey: "create-vc-persisted",
+		Name:           "vc-persisted",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster error = %v", err)
+	}
+	if !created.RealProvider || created.Provider != "vcluster" {
+		t.Fatalf("created cluster = %+v, want vcluster real provider record", created)
+	}
+
+	listed, err := restarted().ListClusters(context.Background(), ports.K8sClusterListRequest{TenantID: tenantID})
+	if err != nil {
+		t.Fatalf("ListClusters() after simulated restart error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].ClusterID != created.ClusterID {
+		t.Fatalf("listed clusters = %+v, want persisted cluster %s", listed, created.ClusterID)
+	}
+	if listed[0].Provider != "vcluster" || !listed[0].RealProvider {
+		t.Fatalf("listed cluster = %+v, want persisted provider evidence", listed[0])
 	}
 }
 
@@ -359,6 +407,9 @@ func (r *gatewayVClusterHelmRunner) Run(_ context.Context, binary string, args .
 	if binary == "vcluster" {
 		return []byte("apiVersion: v1\nusers:\n- name: vc-a\n  user:\n    token: tenant-token\n"), nil
 	}
+	if len(args) > 0 && args[0] == "list" {
+		return []byte("[]"), nil
+	}
 	return []byte("release applied"), nil
 }
 
@@ -395,6 +446,23 @@ func (t *gatewayK8sProxyRoundTripper) RoundTrip(req *http.Request) (*http.Respon
 type gatewayK8sProxyMetadataStore struct {
 	target       ports.K8sClusterProxyTarget
 	usedTenantTx bool
+	// clusters 承载 k8s_clusters 表记录，用于验证集群控制面记录落库（不再随网关重启失忆）。
+	clusters   map[string]ports.K8sClusterRecord
+	createIdem map[string]string
+}
+
+func (s *gatewayK8sProxyMetadataStore) clusterRows() map[string]ports.K8sClusterRecord {
+	if s.clusters == nil {
+		s.clusters = map[string]ports.K8sClusterRecord{}
+	}
+	return s.clusters
+}
+
+func (s *gatewayK8sProxyMetadataStore) createIdempotency() map[string]string {
+	if s.createIdem == nil {
+		s.createIdem = map[string]string{}
+	}
+	return s.createIdem
 }
 
 func (s *gatewayK8sProxyMetadataStore) Ping(context.Context) error {
@@ -414,23 +482,155 @@ type gatewayK8sProxyMetadataTx struct {
 	store *gatewayK8sProxyMetadataStore
 }
 
-func (tx gatewayK8sProxyMetadataTx) Exec(context.Context, string, ...any) (ports.CommandTag, error) {
-	return ports.CommandTag{}, nil
+func (tx gatewayK8sProxyMetadataTx) Exec(_ context.Context, sql string, args ...any) (ports.CommandTag, error) {
+	if !strings.Contains(sql, "k8s_clusters") {
+		return ports.CommandTag{}, nil
+	}
+	if strings.Contains(sql, "DELETE FROM k8s_clusters") {
+		delete(tx.store.clusterRows(), args[1].(string))
+		return ports.CommandTag{RowsAffected: 1}, nil
+	}
+	if strings.Contains(sql, "SET upgrade_idempotency_key") {
+		return ports.CommandTag{RowsAffected: 1}, nil
+	}
+	record := ports.K8sClusterRecord{
+		TenantID:     args[0].(string),
+		ClusterID:    args[1].(string),
+		Name:         args[2].(string),
+		Version:      args[3].(string),
+		State:        ports.K8sClusterState(args[4].(string)),
+		Reason:       args[5].(string),
+		Provider:     args[6].(string),
+		RealProvider: args[7].(bool),
+		CreatedAt:    args[10].(time.Time).Unix(),
+		UpdatedAt:    args[11].(time.Time).Unix(),
+	}
+	if encoded, ok := args[8].(string); ok {
+		_ = json.Unmarshal([]byte(encoded), &record.ProviderRefs)
+	}
+	// 对应 idx_k8s_clusters_tenant_unique。
+	for _, existing := range tx.store.clusterRows() {
+		if existing.TenantID == record.TenantID && existing.ClusterID != record.ClusterID {
+			return ports.CommandTag{}, ports.ErrConflict
+		}
+	}
+	tx.store.clusterRows()[record.ClusterID] = record
+	if key, ok := args[9].(string); ok && key != "" {
+		tx.store.createIdempotency()[record.TenantID+"\x00"+key] = record.ClusterID
+	}
+	return ports.CommandTag{RowsAffected: 1}, nil
 }
 
-func (tx gatewayK8sProxyMetadataTx) Query(context.Context, string, ...any) (ports.Rows, error) {
-	return nil, nil
+func (tx gatewayK8sProxyMetadataTx) Query(_ context.Context, sql string, args ...any) (ports.Rows, error) {
+	if !strings.Contains(sql, "FROM k8s_clusters") {
+		return nil, nil
+	}
+	tenantID, _ := args[0].(string)
+	values := [][]any{}
+	for _, record := range tx.store.clusterRows() {
+		if record.TenantID != tenantID {
+			continue
+		}
+		values = append(values, gatewayK8sClusterScanValues(record))
+	}
+	return &gatewayK8sClusterRows{values: values}, nil
 }
 
-func (tx gatewayK8sProxyMetadataTx) QueryRow(context.Context, string, ...any) ports.Row {
-	return gatewayK8sProxyMetadataRow{target: tx.store.target}
+func (tx gatewayK8sProxyMetadataTx) QueryRow(_ context.Context, sql string, args ...any) ports.Row {
+	if !strings.Contains(sql, "FROM k8s_clusters") {
+		return gatewayK8sProxyMetadataRow{target: tx.store.target}
+	}
+	tenantID, _ := args[0].(string)
+	clusterID, _ := args[1].(string)
+	if strings.Contains(sql, "create_idempotency_key = $2") {
+		if id, ok := tx.store.createIdempotency()[tenantID+"\x00"+clusterID]; ok {
+			if record, ok := tx.store.clusterRows()[id]; ok {
+				return gatewayK8sProxyMetadataRow{cluster: &record}
+			}
+		}
+		return gatewayK8sProxyMetadataRow{err: pgx.ErrNoRows}
+	}
+	if strings.Contains(sql, "upgrade_idempotency_key = $2") {
+		return gatewayK8sProxyMetadataRow{err: pgx.ErrNoRows}
+	}
+	if record, ok := tx.store.clusterRows()[clusterID]; ok && record.TenantID == tenantID {
+		return gatewayK8sProxyMetadataRow{cluster: &record}
+	}
+	return gatewayK8sProxyMetadataRow{err: pgx.ErrNoRows}
+}
+
+type gatewayK8sClusterRows struct {
+	values [][]any
+	index  int
+}
+
+func (r *gatewayK8sClusterRows) Close() {}
+
+func (r *gatewayK8sClusterRows) Err() error { return nil }
+
+func (r *gatewayK8sClusterRows) Next() bool {
+	if r.index >= len(r.values) {
+		return false
+	}
+	r.index++
+	return true
+}
+
+func (r *gatewayK8sClusterRows) Scan(dest ...any) error {
+	return scanGatewayK8sClusterValues(dest, r.values[r.index-1])
+}
+
+func gatewayK8sClusterScanValues(record ports.K8sClusterRecord) []any {
+	refs, err := json.Marshal(record.ProviderRefs)
+	if err != nil || record.ProviderRefs == nil {
+		refs = []byte("[]")
+	}
+	return []any{
+		record.TenantID,
+		record.ClusterID,
+		record.Name,
+		record.Version,
+		string(record.State),
+		record.Reason,
+		record.Provider,
+		record.RealProvider,
+		refs,
+		time.Unix(record.CreatedAt, 0).UTC(),
+		time.Unix(record.UpdatedAt, 0).UTC(),
+	}
+}
+
+func scanGatewayK8sClusterValues(dest []any, values []any) error {
+	if len(dest) != 11 || len(values) != 11 {
+		return errors.New("unexpected k8s cluster scan destination count")
+	}
+	*(dest[0].(*string)) = values[0].(string)
+	*(dest[1].(*string)) = values[1].(string)
+	*(dest[2].(*string)) = values[2].(string)
+	*(dest[3].(*string)) = values[3].(string)
+	*(dest[4].(*string)) = values[4].(string)
+	*(dest[5].(*string)) = values[5].(string)
+	*(dest[6].(*string)) = values[6].(string)
+	*(dest[7].(*bool)) = values[7].(bool)
+	*(dest[8].(*[]byte)) = values[8].([]byte)
+	*(dest[9].(*time.Time)) = values[9].(time.Time)
+	*(dest[10].(*time.Time)) = values[10].(time.Time)
+	return nil
 }
 
 type gatewayK8sProxyMetadataRow struct {
-	target ports.K8sClusterProxyTarget
+	target  ports.K8sClusterProxyTarget
+	cluster *ports.K8sClusterRecord
+	err     error
 }
 
 func (r gatewayK8sProxyMetadataRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	if r.cluster != nil {
+		return scanGatewayK8sClusterValues(dest, gatewayK8sClusterScanValues(*r.cluster))
+	}
 	if len(dest) != 7 {
 		return errors.New("unexpected metadata scan destination count")
 	}

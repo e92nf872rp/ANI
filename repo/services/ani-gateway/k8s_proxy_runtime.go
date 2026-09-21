@@ -37,6 +37,7 @@ type gatewayK8sClusterRuntimeConfig struct {
 	VClusterBinary                          string
 	VClusterChartName                       string
 	VClusterChartRepo                       string
+	VClusterChartVersion                    string
 	VClusterHelmSetValues                   []string
 	VClusterProxyServerTemplate             string
 	VClusterProxyBearerToken                string
@@ -74,6 +75,7 @@ func gatewayK8sClusterRuntimeConfigFromEnv() gatewayK8sClusterRuntimeConfig {
 		VClusterBinary:                          os.Getenv("VCLUSTER_BINARY"),
 		VClusterChartName:                       os.Getenv("VCLUSTER_CHART_NAME"),
 		VClusterChartRepo:                       os.Getenv("VCLUSTER_CHART_REPO"),
+		VClusterChartVersion:                    os.Getenv("VCLUSTER_CHART_VERSION"),
 		VClusterHelmSetValues:                   splitGatewayCSVEnv(os.Getenv("VCLUSTER_HELM_SET_VALUES")),
 		VClusterProxyServerTemplate:             os.Getenv("VCLUSTER_PROXY_SERVER_TEMPLATE"),
 		VClusterProxyBearerToken:                os.Getenv("VCLUSTER_PROXY_BEARER_TOKEN"),
@@ -124,17 +126,23 @@ func newGatewayK8sClusterService(cfg gatewayK8sClusterRuntimeConfig) (ports.K8sC
 	if mode == "forwarding_metadata" && cfg.MetadataStore != nil {
 		metadataTargetStore = runtimeadapter.NewMetadataK8sClusterProxyTargetStore(cfg.MetadataStore)
 	}
+	// 集群控制面记录只要有 MetadataStore 就必须落库：此前只存进程内存，网关每次滚动
+	// 重启即丢失，界面看不到集群而底座 Helm release 仍在，用户既删不掉也建不了新的。
+	var clusterStore ports.K8sClusterStore
+	if cfg.MetadataStore != nil {
+		clusterStore = runtimeadapter.NewMetadataK8sClusterStore(cfg.MetadataStore)
+	}
 	switch mode {
 	case "", "local":
 		if strings.TrimSpace(cfg.ProviderMode) != "" && strings.TrimSpace(cfg.ProviderMode) != "local" {
-			return newGatewayK8sClusterBaseService(cfg, metadataTargetStore)
+			return newGatewayK8sClusterBaseService(cfg, metadataTargetStore, clusterStore)
 		}
 		return nil, nil
 	case "forwarding_static":
 		if strings.TrimSpace(cfg.TargetServer) == "" {
 			return nil, fmt.Errorf("%w: K8S_CLUSTER_PROXY_TARGET_SERVER is required for forwarding_static", ports.ErrNotConfigured)
 		}
-		base, err := newGatewayK8sClusterBaseService(cfg, metadataTargetStore)
+		base, err := newGatewayK8sClusterBaseService(cfg, metadataTargetStore, clusterStore)
 		if err != nil {
 			return nil, err
 		}
@@ -154,7 +162,7 @@ func newGatewayK8sClusterService(cfg gatewayK8sClusterRuntimeConfig) (ports.K8sC
 		if cfg.MetadataStore == nil {
 			return nil, fmt.Errorf("%w: MetadataStore is required for forwarding_metadata", ports.ErrNotConfigured)
 		}
-		base, err := newGatewayK8sClusterBaseService(cfg, metadataTargetStore)
+		base, err := newGatewayK8sClusterBaseService(cfg, metadataTargetStore, clusterStore)
 		if err != nil {
 			return nil, err
 		}
@@ -172,10 +180,13 @@ func newGatewayK8sClusterService(cfg gatewayK8sClusterRuntimeConfig) (ports.K8sC
 	}
 }
 
-func newGatewayK8sClusterBaseService(cfg gatewayK8sClusterRuntimeConfig, targetStore ports.K8sClusterProxyTargetStore) (ports.K8sClusterService, error) {
+func newGatewayK8sClusterBaseService(cfg gatewayK8sClusterRuntimeConfig, targetStore ports.K8sClusterProxyTargetStore, clusterStore ports.K8sClusterStore) (ports.K8sClusterService, error) {
 	options := []runtimeadapter.K8sClusterServiceOption{}
 	if targetStore != nil {
 		options = append(options, runtimeadapter.WithK8sClusterProxyTargetStore(targetStore))
+	}
+	if clusterStore != nil {
+		options = append(options, runtimeadapter.WithK8sClusterStore(clusterStore))
 	}
 	nodePoolProvider, err := newGatewayK8sClusterNodePoolProvider(cfg)
 	if err != nil {
@@ -193,13 +204,19 @@ func newGatewayK8sClusterBaseService(cfg gatewayK8sClusterRuntimeConfig, targetS
 			VClusterBinary:           cfg.VClusterBinary,
 			ChartName:                cfg.VClusterChartName,
 			ChartRepo:                cfg.VClusterChartRepo,
+			ChartVersion:             cfg.VClusterChartVersion,
 			HelmSetValues:            cfg.VClusterHelmSetValues,
 			Runner:                   cfg.VClusterHelmRunner,
 			ProxyServerTemplate:      cfg.VClusterProxyServerTemplate,
 			ProxyBearerToken:         cfg.VClusterProxyBearerToken,
 			KubeconfigServerTemplate: cfg.VClusterKubeconfigServerTemplate,
 		})
-		options = append(options, runtimeadapter.WithK8sClusterProviderApply(provider), runtimeadapter.WithK8sClusterProviderUpgrade(provider), runtimeadapter.WithK8sClusterKubeconfigProvider(provider))
+		options = append(options,
+			runtimeadapter.WithK8sClusterProviderApply(provider),
+			runtimeadapter.WithK8sClusterProviderUpgrade(provider),
+			runtimeadapter.WithK8sClusterProviderDelete(provider),
+			runtimeadapter.WithK8sClusterKubeconfigProvider(provider),
+		)
 		return runtimeadapter.NewLocalK8sClusterService(options...), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported K8S_CLUSTER_PROVIDER_MODE %q", ports.ErrUnsupported, providerMode)

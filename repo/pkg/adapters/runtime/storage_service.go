@@ -910,12 +910,15 @@ func (s *LocalStorageService) ExpandFilesystem(ctx context.Context, request port
 	if err != nil {
 		return ports.StorageFilesystemRecord{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.filesystems[strings.TrimSpace(request.FilesystemID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
+	record, found, err := s.lookupFilesystemRecord(ctx, request.TenantID, request.FilesystemID)
+	if err != nil {
+		return ports.StorageFilesystemRecord{}, err
+	}
+	if !found {
 		return ports.StorageFilesystemRecord{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if id, ok := s.fsOpIdem[storageOperationIdempotencyKey(idemKey, "expand")]; ok && id == record.FilesystemID {
 		return s.enrichFilesystemLocked(record), nil
 	}

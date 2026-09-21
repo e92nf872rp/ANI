@@ -658,6 +658,28 @@ func TestStorageHTTPVolumeFilesystemOperationsEndToEnd(t *testing.T) {
 	performJSONRequest(t, h, http.MethodPost, "/api/v1/filesystems/"+filesystemID+"/unmount", `{"idempotency_key":"http-fs-unmount","instance_id":"vm-001"}`, http.StatusAccepted)
 }
 
+func TestStorageHTTPFilesystemExpandAcceptsCapacityAlias(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	filesystemResp := performJSONRequest(t, h, http.MethodPost, "/api/v1/filesystems", `{"idempotency_key":"http-fs-alias","name":"shared-alias","protocol":"nfs","size_gib":100}`, http.StatusCreated)
+	filesystemID := jsonStringField(t, filesystemResp, "id")
+	// Console still posts the legacy capacity field; it is read as size_gib.
+	expanded := performJSONRequest(t, h, http.MethodPost, "/api/v1/filesystems/"+filesystemID+"/expand", `{"idempotency_key":"http-fs-alias-expand","capacity":101}`, http.StatusAccepted)
+	if got := jsonNestedNumberField(t, expanded, "result", "filesystem", "size_gib"); got != 101 {
+		t.Fatalf("expanded body = %s, want size_gib 101", expanded)
+	}
+	// size_gib stays canonical and wins whenever it is provided.
+	canonical := performJSONRequest(t, h, http.MethodPost, "/api/v1/filesystems/"+filesystemID+"/expand", `{"idempotency_key":"http-fs-canonical-expand","size_gib":200,"capacity":999}`, http.StatusAccepted)
+	if got := jsonNestedNumberField(t, canonical, "result", "filesystem", "size_gib"); got != 200 {
+		t.Fatalf("canonical body = %s, want size_gib 200", canonical)
+	}
+}
+
 func performJSONRequest(t *testing.T, h *server.Hertz, method string, path string, body string, wantStatus int) []byte {
 	t.Helper()
 	var reqBody *ut.Body

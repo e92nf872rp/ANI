@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -85,8 +87,8 @@ users:
 		t.Fatalf("ApplyK8sCluster() error = %v", err)
 	}
 
-	if len(runner.calls) != 2 {
-		t.Fatalf("runner calls = %#v, want helm apply and vcluster kubeconfig print", runner.calls)
+	if len(runner.calls) != 3 {
+		t.Fatalf("runner calls = %#v, want helm release list, helm apply and vcluster kubeconfig print", runner.calls)
 	}
 	wantPrintArgs := []string{
 		"connect",
@@ -97,8 +99,8 @@ users:
 		"--server",
 		"https://k8sclu-provider.ani-tenant-tenant-a:443",
 	}
-	if runner.calls[1].binary != "vcluster" || !reflect.DeepEqual(runner.calls[1].args, wantPrintArgs) {
-		t.Fatalf("vcluster call = %s %#v, want vcluster %#v", runner.calls[1].binary, runner.calls[1].args, wantPrintArgs)
+	if runner.calls[2].binary != "vcluster" || !reflect.DeepEqual(runner.calls[2].args, wantPrintArgs) {
+		t.Fatalf("vcluster call = %s %#v, want vcluster %#v", runner.calls[2].binary, runner.calls[2].args, wantPrintArgs)
 	}
 	if result.ProxyTarget.Server != "https://k8sclu-provider.ani-tenant-tenant-a:443" || result.ProxyTarget.BearerToken != "tenant-token" {
 		t.Fatalf("proxy target = %+v, want templated server with printed token", result.ProxyTarget)
@@ -173,6 +175,45 @@ func TestVClusterHelmProviderAdapterSupportsLocalChartArchive(t *testing.T) {
 		"--repository-config=",
 		"--set",
 		"sync.toHost.services.enabled=true",
+	}
+	if runner.binary != "helm" || !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("helm call = %s %#v, want helm %#v", runner.binary, runner.args, wantArgs)
+	}
+}
+
+func TestVClusterHelmProviderAdapterPinsChartVersionForOCIRepository(t *testing.T) {
+	runner := &fakeVClusterHelmRunner{}
+	adapter := NewVClusterHelmProviderAdapter(VClusterHelmProviderConfig{
+		Runner:              runner,
+		ChartName:           "oci://docker.changqingyun.cn/ani/charts/vcluster",
+		ChartRepo:           "none",
+		ChartVersion:        "0.34.1",
+		ProxyServerTemplate: "https://{cluster_id}.{namespace}:443",
+		ProxyBearerToken:    "tenant-token",
+	})
+
+	_, err := adapter.ApplyK8sCluster(context.Background(), ports.K8sClusterProviderApplyRequest{
+		TenantID:  "tenant-a",
+		ClusterID: "k8sclu-provider",
+		Name:      "vc-a",
+	})
+	if err != nil {
+		t.Fatalf("ApplyK8sCluster() error = %v", err)
+	}
+
+	wantArgs := []string{
+		"upgrade",
+		"--install",
+		"k8sclu-provider",
+		"oci://docker.changqingyun.cn/ani/charts/vcluster",
+		"--namespace",
+		"ani-tenant-tenant-a",
+		"--create-namespace",
+		"--repository-config=",
+		"--set",
+		"sync.toHost.services.enabled=true",
+		"--version",
+		"0.34.1",
 	}
 	if runner.binary != "helm" || !reflect.DeepEqual(runner.args, wantArgs) {
 		t.Fatalf("helm call = %s %#v, want helm %#v", runner.binary, runner.args, wantArgs)
@@ -315,11 +356,117 @@ func TestVClusterHelmProviderAdapterRunsHelmUpgradeForClusterVersion(t *testing.
 	}
 }
 
+func TestVClusterHelmProviderAdapterUninstallsHelmRelease(t *testing.T) {
+	runner := &fakeVClusterHelmRunner{}
+	adapter := NewVClusterHelmProviderAdapter(VClusterHelmProviderConfig{Runner: runner})
+
+	result, err := adapter.DeleteK8sCluster(context.Background(), ports.K8sClusterProviderDeleteRequest{
+		TenantID:  "tenant-a",
+		ClusterID: "k8sclu-provider",
+		Name:      "vc-a",
+	})
+	if err != nil {
+		t.Fatalf("DeleteK8sCluster() error = %v", err)
+	}
+
+	wantArgs := []string{
+		"uninstall",
+		"k8sclu-provider",
+		"--namespace",
+		"ani-tenant-tenant-a",
+		"--ignore-not-found",
+	}
+	if runner.binary != "helm" || !reflect.DeepEqual(runner.args, wantArgs) {
+		t.Fatalf("helm call = %s %#v, want helm %#v", runner.binary, runner.args, wantArgs)
+	}
+	if !result.Deleted || result.Provider != "vcluster" || result.Reason != "vCluster Helm release uninstalled" {
+		t.Fatalf("result = %+v, want uninstalled vcluster provider", result)
+	}
+	if len(result.ResourceRefs) != 1 || result.ResourceRefs[0] != "vcluster/HelmRelease/k8sclu-provider" {
+		t.Fatalf("resource refs = %#v", result.ResourceRefs)
+	}
+}
+
+func TestVClusterHelmProviderAdapterRejectsVClusterAlreadyInTenantNamespace(t *testing.T) {
+	runner := &fakeVClusterHelmRunner{
+		listOutput: []byte(`[{"name":"k8sclu-existing","chart":"vcluster-0.34.1"}]`),
+	}
+	adapter := NewVClusterHelmProviderAdapter(VClusterHelmProviderConfig{Runner: runner})
+
+	_, err := adapter.ApplyK8sCluster(context.Background(), ports.K8sClusterProviderApplyRequest{
+		TenantID:  "tenant-a",
+		ClusterID: "k8sclu-provider",
+		Name:      "vc-a",
+		Version:   "v1.30.0",
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("ApplyK8sCluster() error = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "k8sclu-existing") {
+		t.Fatalf("ApplyK8sCluster() error = %v, want existing vCluster release id", err)
+	}
+	if len(runner.calls) != 1 || runner.calls[0].args[0] != "list" {
+		t.Fatalf("runner calls = %#v, want only the helm release list", runner.calls)
+	}
+}
+
+func TestVClusterHelmProviderAdapterIgnoresForeignNonVClusterRelease(t *testing.T) {
+	runner := &fakeVClusterHelmRunner{
+		listOutput: []byte(`[{"name":"ani-metrics","chart":"metrics-server-3.12.0"}]`),
+	}
+	adapter := NewVClusterHelmProviderAdapter(VClusterHelmProviderConfig{
+		Runner:              runner,
+		ProxyServerTemplate: "https://{cluster_id}.{namespace}:443",
+		ProxyBearerToken:    "tenant-token",
+	})
+
+	result, err := adapter.ApplyK8sCluster(context.Background(), ports.K8sClusterProviderApplyRequest{
+		TenantID:  "tenant-a",
+		ClusterID: "k8sclu-provider",
+		Name:      "vc-a",
+		Version:   "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("ApplyK8sCluster() error = %v", err)
+	}
+	if !result.Applied {
+		t.Fatalf("result = %+v, want applied vcluster provider", result)
+	}
+	if len(runner.calls) != 2 || runner.calls[1].args[0] != "upgrade" {
+		t.Fatalf("runner calls = %#v, want helm list then helm upgrade", runner.calls)
+	}
+}
+
+func TestVClusterHelmProviderAdapterAllowsReapplyOfSameReleaseName(t *testing.T) {
+	runner := &fakeVClusterHelmRunner{
+		listOutput: []byte(`[{"name":"k8sclu-provider","chart":"vcluster-0.34.1"}]`),
+	}
+	adapter := NewVClusterHelmProviderAdapter(VClusterHelmProviderConfig{
+		Runner:              runner,
+		ProxyServerTemplate: "https://{cluster_id}.{namespace}:443",
+		ProxyBearerToken:    "tenant-token",
+	})
+
+	result, err := adapter.ApplyK8sCluster(context.Background(), ports.K8sClusterProviderApplyRequest{
+		TenantID:  "tenant-a",
+		ClusterID: "k8sclu-provider",
+		Name:      "vc-a",
+		Version:   "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("ApplyK8sCluster() error = %v", err)
+	}
+	if !result.Applied || len(runner.calls) != 2 {
+		t.Fatalf("result = %+v calls = %#v, want idempotent re-apply", result, runner.calls)
+	}
+}
+
 type fakeVClusterHelmRunner struct {
 	binary         string
 	args           []string
 	output         []byte
 	outputByBinary map[string][]byte
+	listOutput     []byte
 	calls          []fakeVClusterHelmCall
 }
 
@@ -332,6 +479,12 @@ func (r *fakeVClusterHelmRunner) Run(_ context.Context, binary string, args ...s
 	r.binary = binary
 	r.args = append([]string(nil), args...)
 	r.calls = append(r.calls, fakeVClusterHelmCall{binary: binary, args: append([]string(nil), args...)})
+	if len(args) > 0 && args[0] == "list" {
+		if r.listOutput != nil {
+			return r.listOutput, nil
+		}
+		return []byte("[]"), nil
+	}
 	if r.outputByBinary != nil {
 		if output, ok := r.outputByBinary[binary]; ok {
 			return output, nil

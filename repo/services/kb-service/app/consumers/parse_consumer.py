@@ -59,6 +59,7 @@ import asyncpg
 
 from app.consumers import jetstream
 from app.repositories import async_task as async_task_repo
+from app.repositories import audit as audit_repo
 from app.repositories import document as doc_repo
 from app.repositories import knowledge_base as kb_repo
 
@@ -79,6 +80,15 @@ DEFAULT_MAX_CONCURRENCY = 4
 PARSE_DURABLE = "kb-parse-consumer"
 PARSE_ACK_WAIT = 30 * 60          # seconds
 PARSE_MAX_DELIVER = 3
+
+# Cap for the error message copied into the result audit row's error_msg
+# (the orchestrator's sanitized message is already length-bounded; this is
+# a defensive trim so the audit row stays small).
+_RESULT_AUDIT_MSG_MAX = 512
+
+
+def _truncate_audit_text(text: str) -> str:
+    return text if len(text) <= _RESULT_AUDIT_MSG_MAX else text[:_RESULT_AUDIT_MSG_MAX]
 
 
 @runtime_checkable
@@ -396,6 +406,14 @@ class ParseConsumer:
         # orchestrator swallows its own exceptions (writes failed), so a
         # re-read here is the single source of truth. Messages without a
         # task_id (published before this change) keep the old behavior.
+        #
+        # Result audit (operation-history display fix): the doc.parse /
+        # doc.reparse audit row written at task creation only records the
+        # *intent*, so a parse that later failed still showed success in
+        # the KB operation history. _close_task_and_audit flips THAT row
+        # in place (success: error_code stays NULL; failure: PARSE_FAILED
+        # + the doc's sanitized error message) in the same transaction as
+        # the task close — one entry per operation, not two.
         if not task_id:
             return
         try:
@@ -408,13 +426,14 @@ class ParseConsumer:
                     return
                 status = doc_row.get("parse_status")
                 if status == "ready":
-                    await async_task_repo.complete_task(
-                        conn, tenant_id=tenant_id, task_id=task_id,
+                    await self._close_task_and_audit(
+                        conn, tenant_id=tenant_id, kb_id=kb_id,
+                        task_id=task_id, doc_row=doc_row, failed=False,
                     )
                 elif status == "failed":
-                    await async_task_repo.complete_task(
-                        conn, tenant_id=tenant_id, task_id=task_id,
-                        status="failed",
+                    await self._close_task_and_audit(
+                        conn, tenant_id=tenant_id, kb_id=kb_id,
+                        task_id=task_id, doc_row=doc_row, failed=True,
                     )
                 else:
                     # Non-terminal (pending/parsing/indexing) — e.g. the
@@ -429,6 +448,93 @@ class ParseConsumer:
             logger.exception(
                 "parse_consumer: failed to close task %s for doc %s: %s",
                 task_id, doc_id, exc,
+            )
+
+    async def _close_task_and_audit(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        tenant_id: str,
+        kb_id: str,
+        task_id: str,
+        doc_row: dict[str, Any],
+        failed: bool,
+    ) -> None:
+        """Close the async_tasks row and flip the parse-intent audit row.
+
+        The task row's task_type picks the action (kb.reparse → doc.reparse,
+        anything else → doc.parse). complete_task_in_tx's terminal-state
+        guard makes this idempotent under at-least-once redelivery: a second
+        delivery sees the task already terminal (closed=False) and touches
+        no audit row. Audit failures roll the close back together with the
+        audit write — _handle leaves the message unacked and the redelivery
+        retries both atomically.
+
+        The audit write is an in-place UPDATE of the intent row written at
+        task creation (located via the task_id inside its after_state):
+        error_code flips to PARSE_FAILED on failure (stays NULL on success)
+        and after_state is JSONB-merged with the terminal parse_status /
+        chunk_count. Only if no intent row carries this task_id (rows
+        written by an older build, or the audit was skipped at notify
+        time) does it fall back to a separate result INSERT so the trail
+        still records the outcome.
+        """
+        async with conn.transaction():
+            task_row = await async_task_repo.get_task(
+                conn, tenant_id=tenant_id, task_id=task_id,
+            )
+            closed = await async_task_repo.complete_task_in_tx(
+                conn,
+                tenant_id=tenant_id,
+                task_id=task_id,
+                status="failed" if failed else "completed",
+            )
+            if not closed:
+                # Another writer already closed the task (redelivery race);
+                # the audit row was flipped by the first pass.
+                return
+            task_type = (task_row or {}).get("task_type") or "kb.parse"
+            action = "doc.reparse" if task_type == "kb.reparse" else "doc.parse"
+            error_code = "PARSE_FAILED" if failed else None
+            error_msg = (
+                _truncate_audit_text(str(doc_row.get("error_message") or ""))
+                or None
+            ) if failed else None
+            result_overlay = {
+                "parse_status": doc_row.get("parse_status"),
+                "chunk_count": doc_row.get("chunk_count"),
+                "task_id": task_id,
+            }
+            updated = await audit_repo.update_parse_result_in_tx(
+                conn,
+                tenant_id=tenant_id,
+                kb_id=kb_id,
+                action=action,
+                task_id=task_id,
+                result_overlay=result_overlay,
+                error_code=error_code,
+                error_msg=error_msg,
+            )
+            if updated:
+                return
+            # Fallback: the intent row (if any) predates the task_id link —
+            # keep the old separate result row so the outcome is recorded.
+            await audit_repo.insert_audit_in_tx(
+                conn,
+                tenant_id=tenant_id,
+                kb_id=kb_id,
+                action=action,
+                # NULL actor = internal system actor (parse consumer).
+                actor_user_id=None,
+                before_state=None,
+                after_state={
+                    "doc_id": str(doc_row.get("id") or ""),
+                    "file_name": doc_row.get("file_name"),
+                    "file_type": doc_row.get("file_type"),
+                    **result_overlay,
+                },
+                error_code=error_code,
+                error_msg=error_msg,
             )
 
 
