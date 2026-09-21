@@ -232,6 +232,20 @@ type K8sClusterProviderUpgradeResult struct {
 	AppliedAt    time.Time
 }
 
+type K8sClusterProviderDeleteRequest struct {
+	TenantID  string
+	ClusterID string
+	Name      string
+}
+
+type K8sClusterProviderDeleteResult struct {
+	Deleted      bool
+	Provider     string
+	ResourceRefs []string
+	Reason       string
+	DeletedAt    time.Time
+}
+
 type K8sClusterNodePoolProviderRequest struct {
 	Operation    string
 	TenantID     string
@@ -268,6 +282,10 @@ type K8sClusterProviderUpgrade interface {
 	UpgradeK8sCluster(ctx context.Context, req K8sClusterProviderUpgradeRequest) (K8sClusterProviderUpgradeResult, error)
 }
 
+type K8sClusterProviderDelete interface {
+	DeleteK8sCluster(ctx context.Context, req K8sClusterProviderDeleteRequest) (K8sClusterProviderDeleteResult, error)
+}
+
 type K8sClusterNodePoolProvider interface {
 	ApplyK8sClusterNodePool(ctx context.Context, req K8sClusterNodePoolProviderRequest) (K8sClusterNodePoolProviderResult, error)
 	DeleteK8sClusterNodePool(ctx context.Context, req K8sClusterNodePoolProviderRequest) (K8sClusterNodePoolProviderResult, error)
@@ -292,4 +310,19 @@ type K8sClusterService interface {
 	GetKubeconfig(ctx context.Context, req K8sClusterKubeconfigRequest) (K8sClusterKubeconfigRecord, error)
 	Proxy(ctx context.Context, req K8sClusterProxyRequest) (K8sClusterProxyRecord, error)
 	ListWorkloads(ctx context.Context, req K8sClusterWorkloadListRequest) ([]K8sClusterWorkloadRecord, error)
+}
+
+// K8sClusterStore 持久化 K8s 集群控制面记录。此前集群记录只存在网关进程内存，每次滚动
+// 重启即丢失：界面看不到集群，而底座 Helm release 仍在，用户既无法删除也无法新建
+// （同租户唯一约束）。注入该 store 后，集群记录改为以数据库为事实来源。
+type K8sClusterStore interface {
+	// UpsertK8sCluster 写入或更新集群记录；createIdempotencyKey 为空表示不登记创建幂等键。
+	// 同一租户已有集群时返回 ErrConflict。
+	UpsertK8sCluster(ctx context.Context, record K8sClusterRecord, createIdempotencyKey string) error
+	GetK8sCluster(ctx context.Context, req K8sClusterGetRequest) (K8sClusterRecord, error)
+	ListK8sClusters(ctx context.Context, req K8sClusterListRequest) ([]K8sClusterRecord, error)
+	DeleteK8sCluster(ctx context.Context, req K8sClusterGetRequest) error
+	FindK8sClusterByCreateIdempotencyKey(ctx context.Context, tenantID string, idempotencyKey string) (K8sClusterRecord, error)
+	SetK8sClusterUpgradeIdempotency(ctx context.Context, tenantID string, clusterID string, idempotencyKey string) error
+	FindK8sClusterByUpgradeIdempotencyKey(ctx context.Context, tenantID string, idempotencyKey string) (K8sClusterRecord, error)
 }

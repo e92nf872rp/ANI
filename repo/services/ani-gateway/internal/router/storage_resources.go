@@ -97,6 +97,10 @@ type storageVolumeOSInitCompleteRequest struct {
 type storageFilesystemExpandRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	SizeGiB        int64  `json:"size_gib"`
+	// Capacity is a transitional alias kept for the Console, which still posts
+	// {"capacity": N} instead of the contract field size_gib. Remove once the
+	// Console migrates to size_gib.
+	Capacity int64 `json:"capacity"`
 }
 
 type storageFilesystemMountTargetCreateRequest struct {
@@ -902,6 +906,9 @@ func (api *storageAPI) expandFilesystem(ctx context.Context, c *app.RequestConte
 	if err := c.BindJSON(&req); err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem expand request")
 		return
+	}
+	if req.SizeGiB == 0 && req.Capacity > 0 {
+		req.SizeGiB = req.Capacity
 	}
 	record, err := api.service.ExpandFilesystem(ctx, ports.StorageFilesystemExpandRequest{
 		TenantID:       instanceTenantID(c),

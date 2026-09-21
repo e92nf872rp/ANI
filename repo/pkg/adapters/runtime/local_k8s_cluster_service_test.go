@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -564,3 +565,346 @@ func (p *fakeK8sClusterUpgradeProvider) UpgradeK8sCluster(_ context.Context, req
 
 var _ ports.K8sClusterProviderApply = (*fakeK8sClusterUpgradeProvider)(nil)
 var _ ports.K8sClusterProviderUpgrade = (*fakeK8sClusterUpgradeProvider)(nil)
+
+type fakeK8sClusterProviderDelete struct {
+	calls  int
+	last   ports.K8sClusterProviderDeleteRequest
+	result ports.K8sClusterProviderDeleteResult
+	err    error
+}
+
+func (p *fakeK8sClusterProviderDelete) DeleteK8sCluster(_ context.Context, request ports.K8sClusterProviderDeleteRequest) (ports.K8sClusterProviderDeleteResult, error) {
+	p.calls++
+	p.last = request
+	return p.result, p.err
+}
+
+var _ ports.K8sClusterProviderDelete = (*fakeK8sClusterProviderDelete)(nil)
+
+type blockingK8sClusterProviderApply struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func newBlockingK8sClusterProviderApply() *blockingK8sClusterProviderApply {
+	return &blockingK8sClusterProviderApply{started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (p *blockingK8sClusterProviderApply) ApplyK8sCluster(_ context.Context, _ ports.K8sClusterProviderApplyRequest) (ports.K8sClusterProviderApplyResult, error) {
+	close(p.started)
+	<-p.release
+	return ports.K8sClusterProviderApplyResult{
+		Applied:      true,
+		Provider:     "vcluster",
+		ResourceRefs: []string{"vcluster/HelmRelease/k8sclu-blocking"},
+		Reason:       "vCluster Helm release applied",
+	}, nil
+}
+
+var _ ports.K8sClusterProviderApply = (*blockingK8sClusterProviderApply)(nil)
+
+func newDeletableK8sClusterService(t *testing.T, deleteProvider *fakeK8sClusterProviderDelete) (ports.K8sClusterService, *LocalK8sClusterProxyTargetStore) {
+	t.Helper()
+	targets := NewLocalK8sClusterProxyTargetStore()
+	service := NewLocalK8sClusterService(
+		WithK8sClusterProviderApply(&fakeK8sClusterProviderApply{
+			result: ports.K8sClusterProviderApplyResult{
+				Applied:      true,
+				Provider:     "vcluster",
+				ResourceRefs: []string{"vcluster/HelmRelease/k8sclu-provider"},
+				ProxyTarget: ports.K8sClusterProxyTarget{
+					Server:      "https://k8sclu-provider.ani-tenant-tenant-a.svc:443",
+					BearerToken: "tenant-token",
+				},
+				Reason: "vCluster Helm release applied",
+			},
+		}),
+		WithK8sClusterProviderDelete(deleteProvider),
+		WithK8sClusterProxyTargetStore(targets),
+	)
+	return service, targets
+}
+
+func TestLocalK8sClusterServiceDeletesClusterThroughProvider(t *testing.T) {
+	deleteProvider := &fakeK8sClusterProviderDelete{
+		result: ports.K8sClusterProviderDeleteResult{
+			Deleted:      true,
+			Provider:     "vcluster",
+			ResourceRefs: []string{"vcluster/HelmRelease/k8sclu-provider"},
+			Reason:       "vCluster Helm release uninstalled",
+		},
+	}
+	service, targets := newDeletableK8sClusterService(t, deleteProvider)
+
+	created, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-delete",
+		Name:           "vc-delete",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+
+	deleted, err := service.DeleteCluster(context.Background(), ports.K8sClusterGetRequest{TenantID: "tenant-a", ClusterID: created.ClusterID})
+	if err != nil {
+		t.Fatalf("DeleteCluster() error = %v", err)
+	}
+	if deleteProvider.calls != 1 {
+		t.Fatalf("provider delete calls = %d, want 1", deleteProvider.calls)
+	}
+	if deleteProvider.last.TenantID != "tenant-a" || deleteProvider.last.ClusterID != created.ClusterID || deleteProvider.last.Name != "vc-delete" {
+		t.Fatalf("provider delete request = %+v, want deleted cluster identity", deleteProvider.last)
+	}
+	if deleted.State != ports.K8sClusterStateDeleting || deleted.Provider != "vcluster" || deleted.Reason != "vCluster Helm release uninstalled" {
+		t.Fatalf("deleted cluster = %+v, want provider-backed deleting cluster", deleted)
+	}
+
+	if _, err := targets.ResolveK8sClusterProxyTarget(context.Background(), ports.K8sClusterGetRequest{TenantID: "tenant-a", ClusterID: created.ClusterID}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("ResolveK8sClusterProxyTarget() error = %v, want ErrNotFound after cluster delete", err)
+	}
+	if _, err := service.GetCluster(context.Background(), ports.K8sClusterGetRequest{TenantID: "tenant-a", ClusterID: created.ClusterID}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("GetCluster() error = %v, want ErrNotFound after cluster delete", err)
+	}
+	listed, err := service.ListClusters(context.Background(), ports.K8sClusterListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListClusters() error = %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("listed clusters = %+v, want empty list after cluster delete", listed)
+	}
+
+	recreated, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-delete",
+		Name:           "vc-delete",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster(replay deleted idempotency key) error = %v", err)
+	}
+	if recreated.ClusterID == "" || recreated.ClusterID == created.ClusterID {
+		t.Fatalf("recreated cluster = %+v, want new cluster for a deleted idempotency key", recreated)
+	}
+}
+
+func TestLocalK8sClusterServiceRestoresClusterWhenProviderDeleteFails(t *testing.T) {
+	deleteProvider := &fakeK8sClusterProviderDelete{err: errors.New("helm uninstall failed")}
+	service, targets := newDeletableK8sClusterService(t, deleteProvider)
+
+	created, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-delete-fail",
+		Name:           "vc-delete-fail",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+
+	if _, err := service.DeleteCluster(context.Background(), ports.K8sClusterGetRequest{TenantID: "tenant-a", ClusterID: created.ClusterID}); err == nil {
+		t.Fatal("DeleteCluster() error = nil, want provider uninstall failure")
+	}
+	if deleteProvider.calls != 1 {
+		t.Fatalf("provider delete calls = %d, want 1", deleteProvider.calls)
+	}
+	current, err := service.GetCluster(context.Background(), ports.K8sClusterGetRequest{TenantID: "tenant-a", ClusterID: created.ClusterID})
+	if err != nil {
+		t.Fatalf("GetCluster() error = %v, want retained cluster after failed delete", err)
+	}
+	if current.State != ports.K8sClusterStateRunning {
+		t.Fatalf("cluster state = %s, want running after failed provider delete", current.State)
+	}
+	if _, err := targets.ResolveK8sClusterProxyTarget(context.Background(), ports.K8sClusterGetRequest{TenantID: "tenant-a", ClusterID: created.ClusterID}); err != nil {
+		t.Fatalf("ResolveK8sClusterProxyTarget() error = %v, want retained proxy target after failed delete", err)
+	}
+}
+
+func TestLocalK8sClusterServiceListsClustersWhileProviderApplyIsRunning(t *testing.T) {
+	provider := newBlockingK8sClusterProviderApply()
+	service := NewLocalK8sClusterService(WithK8sClusterProviderApply(provider))
+
+	created := make(chan ports.K8sClusterRecord, 1)
+	createErr := make(chan error, 1)
+	go func() {
+		record, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+			TenantID:       "tenant-a",
+			IdempotencyKey: "create-vc-blocking",
+			Name:           "vc-blocking",
+			Version:        "v1.30.0",
+		})
+		if err != nil {
+			createErr <- err
+			return
+		}
+		created <- record
+	}()
+
+	select {
+	case <-provider.started:
+	case err := <-createErr:
+		t.Fatalf("CreateCluster() error = %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider apply was never invoked")
+	}
+
+	listed := make(chan []ports.K8sClusterRecord, 1)
+	listErr := make(chan error, 1)
+	go func() {
+		records, err := service.ListClusters(context.Background(), ports.K8sClusterListRequest{TenantID: "tenant-a"})
+		if err != nil {
+			listErr <- err
+			return
+		}
+		listed <- records
+	}()
+	select {
+	case records := <-listed:
+		if len(records) != 1 || records[0].State != ports.K8sClusterStateProvisioning {
+			t.Fatalf("listed clusters = %+v, want single provisioning cluster while apply is in flight", records)
+		}
+	case err := <-listErr:
+		t.Fatalf("ListClusters() error = %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ListClusters() blocked while provider apply was in flight")
+	}
+
+	close(provider.release)
+	select {
+	case record := <-created:
+		if record.State != ports.K8sClusterStateRunning || !record.RealProvider {
+			t.Fatalf("created cluster = %+v, want running real provider cluster", record)
+		}
+	case err := <-createErr:
+		t.Fatalf("CreateCluster() error = %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("CreateCluster() did not return after provider apply completed")
+	}
+}
+
+func TestLocalK8sClusterServiceRejectsSecondClusterForTenant(t *testing.T) {
+	service := NewLocalK8sClusterService()
+	first, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-first",
+		Name:           "vc-first",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+
+	_, err = service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-second",
+		Name:           "vc-second",
+		Version:        "v1.30.0",
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("CreateCluster(second cluster) error = %v, want ErrConflict for the one-vCluster-per-tenant limit", err)
+	}
+
+	replay, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-first",
+		Name:           "vc-first",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster(idempotent replay) error = %v", err)
+	}
+	if replay.ClusterID != first.ClusterID {
+		t.Fatalf("idempotent replay cluster = %+v, want original cluster %+v", replay, first)
+	}
+
+	other, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-b",
+		IdempotencyKey: "create-vc-first",
+		Name:           "vc-first",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster(other tenant) error = %v, want independent tenant cluster", err)
+	}
+	if other.TenantID != "tenant-b" || other.ClusterID == first.ClusterID {
+		t.Fatalf("other tenant cluster = %+v, want its own cluster", other)
+	}
+
+	listed, err := service.ListClusters(context.Background(), ports.K8sClusterListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListClusters() error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].ClusterID != first.ClusterID {
+		t.Fatalf("listed clusters = %+v, want only the first tenant cluster", listed)
+	}
+}
+
+func TestLocalK8sClusterServiceAllowsNewClusterAfterTenantClusterDeleted(t *testing.T) {
+	deleteProvider := &fakeK8sClusterProviderDelete{
+		result: ports.K8sClusterProviderDeleteResult{
+			Deleted:  true,
+			Provider: "vcluster",
+			Reason:   "vCluster Helm release uninstalled",
+		},
+	}
+	service, _ := newDeletableK8sClusterService(t, deleteProvider)
+
+	created, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-release-slot",
+		Name:           "vc-release-slot",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	if _, err := service.DeleteCluster(context.Background(), ports.K8sClusterGetRequest{TenantID: "tenant-a", ClusterID: created.ClusterID}); err != nil {
+		t.Fatalf("DeleteCluster() error = %v", err)
+	}
+
+	next, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-after-delete",
+		Name:           "vc-after-delete",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster() after delete error = %v, want tenant slot released", err)
+	}
+	if next.ClusterID == "" || next.ClusterID == created.ClusterID {
+		t.Fatalf("cluster after delete = %+v, want a new cluster", next)
+	}
+}
+
+func TestLocalK8sClusterServiceReleasesTenantSlotWhenProviderApplyFails(t *testing.T) {
+	provider := &fakeK8sClusterProviderApply{err: errors.New("helm install failed")}
+	service := NewLocalK8sClusterService(WithK8sClusterProviderApply(provider))
+
+	if _, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-failed-apply",
+		Name:           "vc-failed-apply",
+		Version:        "v1.30.0",
+	}); err == nil || errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("CreateCluster() error = %v, want provider apply failure", err)
+	}
+
+	provider.err = nil
+	provider.result = ports.K8sClusterProviderApplyResult{
+		Applied:  true,
+		Provider: "vcluster",
+		Reason:   "vCluster Helm release applied",
+	}
+	retried, err := service.CreateCluster(context.Background(), ports.K8sClusterCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-vc-retry-after-failure",
+		Name:           "vc-retry-after-failure",
+		Version:        "v1.30.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateCluster() retry error = %v, want released tenant slot after failed create", err)
+	}
+	if !retried.RealProvider || retried.State != ports.K8sClusterStateRunning {
+		t.Fatalf("retried cluster = %+v, want running real provider cluster", retried)
+	}
+}
