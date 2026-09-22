@@ -925,7 +925,7 @@ func TestSourceOpenRangeStreamsValidatedPartialContent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("OpenRange() error = %v", err)
 			}
-			defer body.Close()
+			defer func() { _ = body.Close() }()
 			data, err := io.ReadAll(body)
 			if err != nil || string(data) != "cde" {
 				t.Fatalf("OpenRange() body = %q, err=%v; want cde", data, err)
@@ -1005,7 +1005,7 @@ func TestSourceOpenRangeRejectsTruncatedBodyWhenRead(t *testing.T) {
 			if err != nil {
 				t.Fatalf("OpenRange() error = %v", err)
 			}
-			defer body.Close()
+			defer func() { _ = body.Close() }()
 			if _, err := io.ReadAll(body); err == nil {
 				t.Fatal("reading OpenRange() accepted a truncated body")
 			}
@@ -1022,7 +1022,7 @@ func TestSourceOpenRangeRejectsExtraBodyBytesWhenRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenRange() error = %v", err)
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	if _, err := io.ReadAll(body); err == nil {
 		t.Fatal("reading OpenRange() accepted extra bytes")
 	}
@@ -1062,7 +1062,7 @@ func TestSourceOpenRangePreservesRangeAcrossAllowlistedRedirects(t *testing.T) {
 			if err != nil {
 				t.Fatalf("OpenRange() error = %v", err)
 			}
-			defer body.Close()
+			defer func() { _ = body.Close() }()
 			if _, err := io.ReadAll(body); err != nil {
 				t.Fatalf("reading OpenRange() error = %v", err)
 			}

@@ -85,7 +85,7 @@ func (s modelObjectStoreAdapter) ReadObject(ctx context.Context, ref types.Model
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	if metadata.SizeBytes > maxBytes {
 		return nil, errors.New("object exceeds read limit")
 	}

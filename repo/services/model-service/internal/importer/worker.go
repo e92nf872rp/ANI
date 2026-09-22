@@ -638,7 +638,7 @@ func (w *Worker) uploadMultipartFile(ctx context.Context, message ImportMessage,
 	if err != nil || reader == nil {
 		return "", fmt.Errorf("%w: verify multipart object", errObjectStoreUnavailable)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	verifyDigest := sha256.New()
 	read, err := io.Copy(verifyDigest, reader)
 	if err != nil || read != file.Size || metadata.SizeBytes != 0 && metadata.SizeBytes != file.Size {
@@ -652,7 +652,7 @@ func (w *Worker) readStoredSnapshotFile(ctx context.Context, ref ports.ObjectRef
 	if err != nil || reader == nil {
 		return "", false
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	digest := sha256.New()
 	read, err := io.Copy(digest, reader)
 	if err != nil || read != expectedSize || metadata.SizeBytes != 0 && metadata.SizeBytes != expectedSize {
@@ -781,9 +781,14 @@ func importObjectRef(raw string, task *modelrepo.ImportTask) (ports.ObjectRef, e
 	}
 	cleanPath := strings.TrimPrefix(parsed.Path, "/")
 	parts := strings.Split(cleanPath, "/")
+	validObject := false
+	if len(parts) == 5 {
+		validObject = (parts[3] == "archive" && parts[4] == "model.tar.gz") ||
+			(parts[3] == "snapshot" && parts[4] == "manifest.json")
+	}
 	if len(parts) != 5 || parts[0] != task.TenantID.String() || parts[1] != task.ModelID.String() ||
 		parts[2] != "import-"+task.ID.String() ||
-		!((parts[3] == "archive" && parts[4] == "model.tar.gz") || (parts[3] == "snapshot" && parts[4] == "manifest.json")) {
+		!validObject {
 		return ports.ObjectRef{}, errors.New("import object URI identity mismatch")
 	}
 	for _, part := range parts {
