@@ -114,13 +114,15 @@ func (t *PostgresTenant) CreateTenant(ctx context.Context, in ports.CreateTenant
 			return fmt.Errorf("insert tenant_auth: %w", execErr)
 		}
 
-		// 步骤 2d：INSERT users（admin_name→username；password_hash 已 bcrypt）
+		// 步骤 2d：INSERT users（admin_name→username，带 local: 命名空间前缀，
+		// 与 auth-service 密码登录的 "local:"+username 查询约定一致；
+		// password_hash 已 bcrypt；display_name 用裸名）
 		var userID uuid.UUID
 		if scanErr := tx.QueryRow(ctx, `
 			INSERT INTO users (tenant_id, username, email, password_hash, status, display_name)
 			VALUES ($1, $2, $3, $4, 'active', $5)
 			RETURNING id
-		`, rowID, adminName, adminEmail, passwordHash, adminName).Scan(&userID); scanErr != nil {
+		`, rowID, "local:"+adminName, adminEmail, passwordHash, adminName).Scan(&userID); scanErr != nil {
 			if isPGUniqueViolation(scanErr) {
 				return fmt.Errorf("%w: admin email or username conflict", ports.ErrInvalid)
 			}

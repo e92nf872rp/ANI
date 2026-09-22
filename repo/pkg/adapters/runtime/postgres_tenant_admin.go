@@ -51,7 +51,10 @@ func (u *PostgresTenantAdmin) LookupUser(ctx context.Context, tenantID, email, u
 		return ports.User{}, fmt.Errorf("%w: username required", ports.ErrInvalid)
 	}
 
-	// 步骤 2：平台事务内按 email+username 精确匹配
+	// 步骤 2：平台事务内按 email+username 精确匹配。
+	// username 匹配剥除 local:/oidc: 存储前缀后再比较：调用方（如 tenant-service
+	// 邀请管理员）传入的是裸用户名（入参已禁止含 ':'），而库里存的是带前缀的
+	// 命名空间形态；REGEXP_REPLACE 兼容存量裸名数据（剥前缀后与裸名相等）。
 	var out ports.User
 	err = u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		user, scanErr := scanTenantAdminUser(ctx, tx, `
@@ -71,7 +74,7 @@ func (u *PostgresTenantAdmin) LookupUser(ctx context.Context, tenantID, email, u
 			) r ON TRUE
 			WHERE u.tenant_id = $1
 			  AND lower(u.email) = lower($2)
-			  AND u.username = $3
+			  AND REGEXP_REPLACE(u.username, '^(local:|oidc:)', '') = $3
 			  AND COALESCE(u.is_deleted, FALSE) = FALSE
 		`, tid, email, username, tenantAdminRoleName)
 		if scanErr != nil {
