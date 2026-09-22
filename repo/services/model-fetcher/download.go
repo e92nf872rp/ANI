@@ -63,7 +63,7 @@ func Download(ctx context.Context, d Descriptor, client *http.Client, outputDir 
 		return errors.New("create temporary download file")
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, d.URL, nil)
 	if err != nil {
@@ -82,7 +82,7 @@ func Download(ctx context.Context, d Descriptor, client *http.Client, outputDir 
 	if err != nil {
 		return errors.New("download request failed")
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
 			return errors.New("download redirect rejected")

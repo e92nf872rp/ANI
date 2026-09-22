@@ -100,7 +100,7 @@ func ExtractArchiveWithLimits(ctx context.Context, archivePath, destination stri
 	if err != nil {
 		return errors.New("open archive")
 	}
-	defer archiveFile.Close()
+	defer func() { _ = archiveFile.Close() }()
 	openedInfo, err := archiveFile.Stat()
 	if err != nil || !openedInfo.Mode().IsRegular() || openedInfo.Size() != archiveInfo.Size() {
 		return errors.New("archive file changed during inspection")
@@ -130,7 +130,7 @@ func ExtractArchiveWithLimits(ctx context.Context, archivePath, destination stri
 	if err != nil {
 		return errors.New("create extraction workspace")
 	}
-	defer os.RemoveAll(temporary)
+	defer func() { _ = os.RemoveAll(temporary) }()
 
 	if _, err := archiveFile.Seek(0, io.SeekStart); err != nil {
 		return errors.New("rewind archive")
@@ -139,7 +139,7 @@ func ExtractArchiveWithLimits(ctx context.Context, archivePath, destination stri
 	if err != nil {
 		return errors.New("invalid model archive")
 	}
-	defer gzipReader.Close()
+	defer func() { _ = gzipReader.Close() }()
 	tarReader := tar.NewReader(gzipReader)
 	seen := make(map[string]struct{})
 	var totalBytes int64
@@ -163,7 +163,7 @@ func ExtractArchiveWithLimits(ctx context.Context, archivePath, destination stri
 			return errors.New("duplicate archive entry")
 		}
 		seen[name] = struct{}{}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return errors.New("archive contains a non-regular entry")
 		}
 		if header.Size < 0 || header.Size > limits.MaxEntryBytes || header.Size > limits.MaxTotalBytes-totalBytes {

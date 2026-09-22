@@ -136,7 +136,7 @@ func runWithDependencies(ctx context.Context, cfg FetcherConfig, dialer modelSer
 		return errors.New("model-service client unavailable")
 	}
 	if closeClient != nil {
-		defer closeClient()
+		defer func() { _ = closeClient() }()
 	}
 	response, err := client.GetModelDownloadURL(lookupCtx, &modelv1.GetModelDownloadURLRequest{
 		TenantId: cfg.TenantID, ModelVersionId: cfg.ModelVersionID, Requester: "init-container",
@@ -171,7 +171,7 @@ func runWithDependencies(ctx context.Context, cfg FetcherConfig, dialer modelSer
 		}, httpClient, archiveDir); err != nil {
 			return err
 		}
-		defer os.Remove(archivePath)
+		defer func() { _ = os.Remove(archivePath) }()
 		return ExtractArchive(ctx, archivePath, cfg.TargetPath)
 	}
 	return Download(ctx, Descriptor{

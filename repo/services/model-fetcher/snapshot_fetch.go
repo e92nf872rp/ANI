@@ -43,7 +43,7 @@ func fetchModelSnapshot(ctx context.Context, cfg FetcherConfig, response *modelv
 		return err
 	}
 	manifestPath := filepath.Join(parent, manifestName)
-	defer os.Remove(manifestPath)
+	defer func() { _ = os.Remove(manifestPath) }()
 	manifestBytes, err := os.ReadFile(manifestPath)
 	if err != nil || int64(len(manifestBytes)) > maxSnapshotManifestBytes {
 		return errors.New("invalid model snapshot manifest")
@@ -72,7 +72,7 @@ func fetchModelSnapshot(ctx context.Context, cfg FetcherConfig, response *modelv
 	if err != nil {
 		return errors.New("create model snapshot workspace")
 	}
-	defer os.RemoveAll(staging)
+	defer func() { _ = os.RemoveAll(staging) }()
 	for _, entry := range snapshot.Files {
 		if err := ctx.Err(); err != nil {
 			return err
