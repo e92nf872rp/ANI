@@ -199,6 +199,7 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
         if not request.texts:
             return rag_pb.EmbedResponse(vectors_flat=[], dimension=0, count=0)
 
+        from app.core.config import EMBED_SAFE_CHARS
         from app.services.embed_rpc_service import EmbedRPCService
 
         if self._embed_svc is None:
@@ -207,7 +208,13 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
                     self._embed_svc = EmbedRPCService()
         svc = self._embed_svc
         try:
-            vectors, dim = await asyncio.to_thread(svc.embed, list(request.texts))
+            # Bug B fix, layer 2: single choke point — clamp every text to
+            # EMBED_SAFE_CHARS so no input (summary, oversized atomic table
+            # block, caller error) can exceed the model's context limit.
+            texts = [t[:EMBED_SAFE_CHARS] for t in request.texts]
+            vectors, dim = await asyncio.to_thread(
+                svc.embed, texts, request.model
+            )
         except Exception as exc:
             logger.exception("rag-engine Embed failed")
             await context.abort(grpc.StatusCode.INTERNAL, str(exc))
@@ -692,6 +699,20 @@ def serve(
             terminates (process entrypoint). When ``False`` starts in the
             background and returns the :class:`GrpcServer`.
     """
+    # Bug B fix, layer 3: fail fast if the child chunk size exceeds the
+    # embedding model's context limit — every child chunk is embedded as-is,
+    # so a too-large CHILD_CHUNK_SIZE would make every document fail.
+    # Local import (server.py already local-imports ChunkService in Parse)
+    # to avoid an import cycle at module load time.
+    from app.core.config import EMBED_MAX_SEQ_TOKENS
+    from app.services.chunk_service import CHILD_CHUNK_SIZE
+
+    assert CHILD_CHUNK_SIZE <= EMBED_MAX_SEQ_TOKENS, (
+        f"CHILD_CHUNK_SIZE ({CHILD_CHUNK_SIZE}) exceeds the embedding "
+        f"model context limit EMBED_MAX_SEQ_TOKENS ({EMBED_MAX_SEQ_TOKENS}); "
+        "reduce CHILD_CHUNK_SIZE or switch to a larger-context embedding model."
+    )
+
     server = GrpcServer(bind_addr=bind_addr, servicer=RagEngineServicer())
     if block:
         # #14: unified path — reuse GrpcServer._serve_async instead of a

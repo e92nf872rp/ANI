@@ -10,6 +10,13 @@ import (
 
 type KubernetesStorageRenderer struct{}
 
+// defaultVolumeStorageClassName is the Kubernetes StorageClass used when a
+// volume request does not declare one. The legacy "standard" fallback has no
+// matching StorageClass in target clusters, which leaves volume PVCs Pending
+// forever and blocks VM/instance scheduling; ani-block matches the sandbox
+// workspace precedent.
+const defaultVolumeStorageClassName = "ani-block"
+
 func NewKubernetesStorageRenderer() *KubernetesStorageRenderer {
 	return &KubernetesStorageRenderer{}
 }
@@ -28,7 +35,7 @@ func (r *KubernetesStorageRenderer) RenderVolume(_ context.Context, record ports
 		"metadata":   storageProviderNamespacedMetadata(record.TenantID, name, "volume", record.VolumeID),
 		"spec": map[string]any{
 			"accessModes":      []any{"ReadWriteOnce"},
-			"storageClassName": firstNetworkNonEmpty(record.StorageClass, "standard"),
+			"storageClassName": firstNetworkNonEmpty(record.StorageClass, defaultVolumeStorageClassName),
 			"volumeMode":       "Filesystem",
 			"resources":        pvcStorageResources(record.SizeGiB),
 		},

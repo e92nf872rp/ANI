@@ -53,6 +53,7 @@ type Capabilities struct {
 	WorkloadOperations    ports.WorkloadOperationStore
 	WorkloadIdentity      ports.WorkloadIdentityService
 	SandboxRuntime        ports.SandboxRuntime
+	SandboxExpiration     ports.SandboxExpirationController
 	AsyncTasks            ports.AsyncTaskStore
 	SecretService         ports.SecretService
 	InstanceService       ports.WorkloadInstanceService
@@ -286,6 +287,10 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 			runtimeadapter.WithKubernetesSandboxApplyEnabled(true),
 		)
 	}
+	// Sandbox expiration background scanner (Bug-7). The MetadataInstanceStore
+	// implements the cross-tenant ExpirableSandboxLister, and doubles as the
+	// persistence store for the controller.
+	sandboxExpirationController := runtimeadapter.NewSandboxExpirationController(instanceStore, instanceStore, sandboxRuntime)
 	orchestratorOptions := []runtimeadapter.InstanceOrchestratorOption{
 		runtimeadapter.WithInstanceStore(instanceStore),
 		runtimeadapter.WithInstanceOrchestratorWorkloadIdentityService(workloadIdentity),
@@ -361,6 +366,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		WorkloadOperations:   operationStore,
 		WorkloadIdentity:     workloadIdentity,
 		SandboxRuntime:       sandboxRuntime,
+		SandboxExpiration:    sandboxExpirationController,
 		AsyncTasks:           runtimeadapter.NewMetadataAsyncTaskStore(metadata),
 		SecretService:        secretService,
 		WorkloadInstances:    orchestrator,

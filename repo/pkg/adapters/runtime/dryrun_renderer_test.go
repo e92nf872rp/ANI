@@ -504,7 +504,7 @@ func TestKubernetesDryRunRendererRendersVMDataDiskSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render(VM) error = %v", err)
 	}
-	if len(manifests) != 1 || !strings.Contains(manifests[0].Content, `"claimName": "volume-data-01"`) {
+	if len(manifests) != 1 || !strings.Contains(manifests[0].Content, `"claimName": "vol-volume-data-01"`) {
 		t.Fatalf("VM manifest = %s, want data disk PVC attachment", manifests[0].Content)
 	}
 }

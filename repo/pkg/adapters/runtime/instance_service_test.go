@@ -37,6 +37,57 @@ func TestLocalInstanceServiceCreatesContainerThroughOrchestrator(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceCreateProvisionsVMDataDisks(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	storage := &fakeInstanceStorageBinder{}
+	service := NewLocalInstanceServiceWithOptions(
+		orchestrator,
+		&fakeInstanceStore{},
+		NewLocalInstanceOpsGuard(),
+		WithInstanceStorageService(storage),
+	)
+	_, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey: "vm-create-datadisk-01",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "vm-data",
+			Kind:     ports.WorkloadKindVM,
+			Image:    "harbor/app:1",
+			VM: &ports.VMInstanceSpec{
+				BootImage: "ubuntu.qcow2",
+				DataDiskSpecs: []ports.InstanceDiskSpec{
+					{Name: "data-1", SizeGiB: 100},
+					{VolumeID: "vol-existing"},
+				},
+			},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(storage.createdVolumes) != 1 {
+		t.Fatalf("createdVolumes = %d, want 1", len(storage.createdVolumes))
+	}
+	created := storage.createdVolumes[0]
+	if created.Name != "data-1" || created.SizeGiB != 100 || created.TenantID != "tenant-a" {
+		t.Fatalf("created volume = %#v, want data-1/100GiB/tenant-a", created)
+	}
+	if created.IdempotencyKey != "vm-create-datadisk-01:vm-data-disk:data-1" {
+		t.Fatalf("idempotency key = %q, want derived from instance create key", created.IdempotencyKey)
+	}
+	if len(orchestrator.last.Spec.VM.DataDiskSpecs) != 2 {
+		t.Fatalf("data disk specs = %#v, want 2", orchestrator.last.Spec.VM.DataDiskSpecs)
+	}
+	if got := orchestrator.last.Spec.VM.DataDiskSpecs[0].VolumeID; got != "vol-provisioned-1" {
+		t.Fatalf("provisioned data disk volume id = %q, want vol-provisioned-1", got)
+	}
+	if got := orchestrator.last.Spec.VM.DataDiskSpecs[1].VolumeID; got != "vol-existing" {
+		t.Fatalf("existing data disk volume id = %q, want vol-existing", got)
+	}
+}
+
 func TestLocalInstanceServiceCreateOrchestratesNetworkAndStorage(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	operations := NewLocalOperationStore()
@@ -1037,6 +1088,71 @@ func TestLocalInstanceServiceVMSnapshotRecordsLocalProfile(t *testing.T) {
 		},
 	}
 	operations := NewLocalOperationStore()
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(operations),
+	)
+
+	record, err := service.Snapshot(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "snap-vm-a",
+		TenantID:        "tenant-a",
+		InstanceID:      "vm-a",
+		SnapshotName:    "before-upgrade",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1500, 0),
+	})
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if store.upserts != 1 {
+		t.Fatalf("upserts = %d, want 1", store.upserts)
+	}
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if len(record.Snapshots) != 1 {
+		t.Fatalf("snapshots = %d, want 1", len(record.Snapshots))
+	}
+	snapshot := record.Snapshots[0]
+	if snapshot.ID != "snap-snap-vm-a" || snapshot.Name != "before-upgrade" || snapshot.State != "ready" {
+		t.Fatalf("snapshot = %+v, want ready named before-upgrade", snapshot)
+	}
+	if snapshot.SourceInstanceID != "vm-a" || !snapshot.ReadyAt.Equal(time.Unix(1500, 0)) {
+		t.Fatalf("snapshot source=%q ready=%s, want vm-a at request time", snapshot.SourceInstanceID, snapshot.ReadyAt)
+	}
+	operation, err := operations.GetOperation(context.Background(), "tenant-a", record.OperationID)
+	if err != nil {
+		t.Fatalf("GetOperation(snapshot) error = %v", err)
+	}
+	if operation.Operation != ports.WorkloadLifecycleSnapshot || operation.Status != ports.WorkloadOperationSucceeded {
+		t.Fatalf("operation=%s status=%s, want snapshot/succeeded", operation.Operation, operation.Status)
+	}
+	if got := operation.DestructiveImpact["creates_snapshot"]; got != true {
+		t.Fatalf("creates_snapshot = %v, want true", got)
+	}
+	if got := operation.AfterSpec["snapshot_count"]; got != 1 {
+		t.Fatalf("after snapshot_count = %v, want 1", got)
+	}
+	if len(operation.Steps) != 2 || operation.Steps[1].StepName != "create_snapshot" {
+		t.Fatalf("steps = %#v, want precheck + create_snapshot", operation.Steps)
+	}
+}
+
+func TestLocalInstanceServiceVMSnapshotCallsProviderWhenConfigured(t *testing.T) {
+	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "vm-a",
+		Name:       "vm-01",
+		Kind:       ports.WorkloadKindVM,
+		Provider:   "kubevirt",
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateRunning,
+		},
+	}}
+	operations := NewLocalOperationStore()
 	lifecycle := &fakeLifecycleExecutor{}
 	service := NewLocalInstanceServiceWithOptions(
 		&fakeInstanceOrchestrator{},
@@ -1058,40 +1174,11 @@ func TestLocalInstanceServiceVMSnapshotRecordsLocalProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if lifecycle.calls != 0 {
-		t.Fatalf("lifecycle calls = %d, want 0 for local snapshot metadata", lifecycle.calls)
-	}
-	if store.upserts != 1 {
-		t.Fatalf("upserts = %d, want 1", store.upserts)
-	}
-	if record.Status.State != ports.WorkloadStateRunning {
-		t.Fatalf("state = %s, want running", record.Status.State)
+	if lifecycle.calls != 1 || lifecycle.action != ports.WorkloadLifecycleSnapshot {
+		t.Fatalf("lifecycle calls=%d action=%s, want 1 snapshot", lifecycle.calls, lifecycle.action)
 	}
 	if len(record.Snapshots) != 1 {
 		t.Fatalf("snapshots = %d, want 1", len(record.Snapshots))
-	}
-	snapshot := record.Snapshots[0]
-	if snapshot.ID != "snap_snap-vm-a" || snapshot.Name != "before-upgrade" || snapshot.State != "ready" {
-		t.Fatalf("snapshot = %+v, want ready named before-upgrade", snapshot)
-	}
-	if snapshot.SourceInstanceID != "vm-a" || !snapshot.ReadyAt.Equal(time.Unix(1500, 0)) {
-		t.Fatalf("snapshot source=%q ready=%s, want vm-a at request time", snapshot.SourceInstanceID, snapshot.ReadyAt)
-	}
-	operation, err := operations.GetOperation(context.Background(), "tenant-a", record.OperationID)
-	if err != nil {
-		t.Fatalf("GetOperation(snapshot) error = %v", err)
-	}
-	if operation.Operation != ports.WorkloadLifecycleSnapshot || operation.Status != ports.WorkloadOperationSucceeded {
-		t.Fatalf("operation=%s status=%s, want snapshot/succeeded", operation.Operation, operation.Status)
-	}
-	if got := operation.DestructiveImpact["creates_snapshot"]; got != true {
-		t.Fatalf("creates_snapshot = %v, want true", got)
-	}
-	if got := operation.AfterSpec["snapshot_count"]; got != 1 {
-		t.Fatalf("after snapshot_count = %v, want 1", got)
-	}
-	if len(operation.Steps) != 2 || operation.Steps[1].StepName != "create_snapshot" {
-		t.Fatalf("steps = %#v, want precheck + create_snapshot", operation.Steps)
 	}
 }
 
@@ -1227,6 +1314,161 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 	}
 	if store.upserts != 2 {
 		t.Fatalf("upserts = %d, want 2", store.upserts)
+	}
+}
+
+func TestLocalInstanceServiceDetachVolumeAcceptsVolumeSideMount(t *testing.T) {
+	// Regression (block storage bug 4): the Console renders "attached" from the
+	// volume record's mount_instance_id, while detach precheck only looked at
+	// instance-side storage_attachments. A volume mounted on the volume side but
+	// missing from the instance record must still be detachable.
+	store := &fakeInstanceStore{
+		last: ports.WorkloadInstanceRecord{
+			TenantID:   "tenant-a",
+			InstanceID: "container-a",
+			Name:       "app-01",
+			Kind:       ports.WorkloadKindContainer,
+			Status: ports.WorkloadStatus{
+				State:   ports.WorkloadStateRunning,
+				Storage: []ports.WorkloadStorageAttachment{},
+			},
+		},
+	}
+	storage := &fakeInstanceStorageBinder{
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-data-a": {
+				TenantID:        "tenant-a",
+				VolumeID:        "vol-data-a",
+				MountInstanceID: "container-a",
+				MountRoute:      "instances/container-a",
+				MountName:       "volume-vol-data-a",
+			},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceStorageService(storage),
+	)
+
+	detached, err := service.DetachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "detach-volume-side-a",
+		TenantID:        "tenant-a",
+		InstanceID:      "container-a",
+		VolumeID:        "vol-data-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1620, 0),
+	})
+	if err != nil {
+		t.Fatalf("DetachVolume() error = %v, want the volume-side mount to be accepted", err)
+	}
+	if detached.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", detached.Status.State)
+	}
+	if storage.volumeUnmounts != 1 || len(storage.unmountedVolumes) != 1 || storage.unmountedVolumes[0] != "vol-data-a" {
+		t.Fatalf("unmounts = %d %#v, want the volume side rolled back for vol-data-a", storage.volumeUnmounts, storage.unmountedVolumes)
+	}
+}
+
+func TestLocalInstanceServiceDetachVolumeRejectsVolumeMountedElsewhere(t *testing.T) {
+	store := &fakeInstanceStore{
+		last: ports.WorkloadInstanceRecord{
+			TenantID:   "tenant-a",
+			InstanceID: "container-a",
+			Name:       "app-01",
+			Kind:       ports.WorkloadKindContainer,
+			Status: ports.WorkloadStatus{
+				State:   ports.WorkloadStateRunning,
+				Storage: []ports.WorkloadStorageAttachment{},
+			},
+		},
+	}
+	storage := &fakeInstanceStorageBinder{
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-data-a": {
+				TenantID:        "tenant-a",
+				VolumeID:        "vol-data-a",
+				MountInstanceID: "container-b",
+			},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceStorageService(storage),
+	)
+
+	_, err := service.DetachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "detach-volume-side-b",
+		TenantID:        "tenant-a",
+		InstanceID:      "container-a",
+		VolumeID:        "vol-data-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1630, 0),
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DetachVolume() error = %v, want conflict for a volume mounted on another instance", err)
+	}
+	if storage.volumeUnmounts != 0 {
+		t.Fatalf("unmounts = %d, want no volume-side rollback", storage.volumeUnmounts)
+	}
+}
+
+func TestLocalInstanceServiceDetachVolumeRollsBackBothFactSources(t *testing.T) {
+	store := &fakeInstanceStore{
+		last: ports.WorkloadInstanceRecord{
+			TenantID:   "tenant-a",
+			InstanceID: "container-a",
+			Name:       "app-01",
+			Kind:       ports.WorkloadKindContainer,
+			Status: ports.WorkloadStatus{
+				State: ports.WorkloadStateRunning,
+				Storage: []ports.WorkloadStorageAttachment{
+					{Name: "vol-data-a", Kind: ports.StorageAttachmentDataDisk, ResourceType: "volume", ResourceID: "vol-data-a"},
+				},
+			},
+		},
+	}
+	storage := &fakeInstanceStorageBinder{
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-data-a": {
+				TenantID:        "tenant-a",
+				VolumeID:        "vol-data-a",
+				MountInstanceID: "container-a",
+			},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceStorageService(storage),
+	)
+
+	detached, err := service.DetachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "detach-both-sides-a",
+		TenantID:        "tenant-a",
+		InstanceID:      "container-a",
+		VolumeID:        "vol-data-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1640, 0),
+	})
+	if err != nil {
+		t.Fatalf("DetachVolume() error = %v", err)
+	}
+	if len(detached.Status.Storage) != 0 {
+		t.Fatalf("instance-side storage = %#v, want the attachment removed", detached.Status.Storage)
+	}
+	if storage.volumeUnmounts != 1 {
+		t.Fatalf("unmounts = %d, want the volume side rolled back as well", storage.volumeUnmounts)
 	}
 }
 
@@ -1426,6 +1668,49 @@ func TestLocalInstanceServiceClearsStaleImageMetadataOnUpdate(t *testing.T) {
 	}
 	if record.Image != (ports.InstanceImageSummary{ID: "image-new"}) {
 		t.Fatalf("image = %+v, want only new image ID", record.Image)
+	}
+}
+
+func TestLocalInstanceServiceResolvesImageRefForUpdateImage(t *testing.T) {
+	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "container-a", Name: "app-01", Kind: ports.WorkloadKindContainer,
+		Image:     ports.InstanceImageSummary{ID: "image-old", Ref: "registry/old:tag"},
+		Container: &ports.ContainerInstanceStatus{Replicas: 2, RolloutStatus: "completed"},
+		Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	}}
+	resolver := &capturingInstanceResourceResolver{result: ports.WorkloadResourceResolveResult{
+		Spec: ports.WorkloadSpec{ImageSummary: ports.InstanceImageSummary{
+			ID: "image-new", Ref: "registry.example/tenant-a/app:2", Digest: "sha256:new", Name: "app", Tag: "2",
+		}},
+		ResourceRefs: []string{"image/registry.example/tenant-a/app:2"},
+	}}
+	lifecycle := &fakeLifecycleExecutor{}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{}, store, NewLocalInstanceOpsGuard(),
+		WithInstanceLifecycleExecutor(lifecycle),
+		WithInstanceResourceResolver(resolver),
+	)
+
+	record, err := service.ApplyLifecycle(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey: "update-image-resolved", TenantID: "tenant-a", InstanceID: "container-a",
+		Action: ports.WorkloadLifecycleUpdateImage, ImageID: "image-new",
+		UserID: "user-a", PermissionProof: "rbac:update:workload",
+	})
+	if err != nil {
+		t.Fatalf("ApplyLifecycle() error = %v", err)
+	}
+	if lifecycle.action != ports.WorkloadLifecycleUpdateImage {
+		t.Fatalf("executor action = %s, want update_image", lifecycle.action)
+	}
+	if lifecycle.lastRequest.ImageRef != "registry.example/tenant-a/app:2" {
+		t.Fatalf("executor image ref = %q, want resolved ref", lifecycle.lastRequest.ImageRef)
+	}
+	want := ports.InstanceImageSummary{ID: "image-new", Ref: "registry.example/tenant-a/app:2", Digest: "sha256:new", Name: "app", Tag: "2"}
+	if record.Image != want {
+		t.Fatalf("image = %+v, want %+v", record.Image, want)
+	}
+	if record.Container == nil || record.Container.RolloutStatus != "progressing" {
+		t.Fatalf("rollout status = %+v, want progressing", record.Container)
 	}
 }
 
@@ -1922,8 +2207,15 @@ func TestLocalInstanceServiceUpdatesSandboxRuntimeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyLifecycle(extend) error = %v", err)
 	}
-	if extended.Sandbox == nil || extended.Sandbox.Config.SessionTimeout != 35*time.Minute {
-		t.Fatalf("sandbox = %+v, want session timeout 35m", extended.Sandbox)
+	if extended.Sandbox == nil {
+		t.Fatalf("extended sandbox = nil")
+	}
+	if extended.Sandbox.Config.SessionTimeout != 30*time.Minute {
+		t.Fatalf("session timeout = %s, want 30m (extend advances deadline, not baseline)", extended.Sandbox.Config.SessionTimeout)
+	}
+	wantExpiresAt := time.Unix(100, 0).Add(30 * time.Minute).Add(5 * time.Minute)
+	if !extended.Sandbox.Config.ExpiresAt.Equal(wantExpiresAt) {
+		t.Fatalf("expires_at = %v, want %v", extended.Sandbox.Config.ExpiresAt, wantExpiresAt)
 	}
 
 	deleted, err := service.Delete(context.Background(), ports.WorkloadInstanceLifecycleRequest{
@@ -2126,6 +2418,61 @@ func TestLocalInstanceServiceAllowsFileSecretMountPath(t *testing.T) {
 	}
 }
 
+func TestApplyApprovedLifecycleSummarySecretBindings(t *testing.T) {
+	record := ports.WorkloadInstanceRecord{
+		Kind: ports.WorkloadKindContainer,
+		Container: &ports.ContainerInstanceStatus{
+			SecretBindings: []ports.WorkloadSecretBinding{{SecretID: "secret-create", EnvPrefix: "DB_"}},
+		},
+	}
+
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleBindSecret, SecretID: "secret-env",
+		BindingType: "env", EnvName: "DATABASE_URL",
+	})
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleBindSecret, SecretID: "secret-file",
+		BindingType: "file", MountPath: "/run/secrets/app",
+	})
+	if len(record.Container.SecretBindings) != 3 {
+		t.Fatalf("bindings = %#v, want 3 entries", record.Container.SecretBindings)
+	}
+	if record.Container.RolloutStatus != "progressing" {
+		t.Fatalf("rollout status = %q, want progressing", record.Container.RolloutStatus)
+	}
+
+	applyApprovedLifecycleSummary(&record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleUnbindSecret, SecretID: "secret-env",
+	})
+	if len(record.Container.SecretBindings) != 2 {
+		t.Fatalf("bindings after unbind = %#v, want 2 entries", record.Container.SecretBindings)
+	}
+	for _, binding := range record.Container.SecretBindings {
+		if binding.SecretID == "secret-env" {
+			t.Fatalf("unbound secret still present: %#v", record.Container.SecretBindings)
+		}
+	}
+}
+
+func TestContainerStatusInfoClonesSecretBindings(t *testing.T) {
+	spec := ports.WorkloadSpec{
+		Kind: ports.WorkloadKindContainer,
+		SecretBindings: []ports.WorkloadSecretBinding{
+			{SecretID: "secret-a", EnvPrefix: "DB_"},
+			{SecretID: "secret-b", MountPath: "/run/secrets/app"},
+		},
+	}
+	status := containerStatusInfo(spec, ports.WorkloadStatus{State: ports.WorkloadStateRunning}, time.Unix(1000, 0))
+	if status == nil || len(status.SecretBindings) != 2 {
+		t.Fatalf("container status = %#v, want 2 cloned secret bindings", status)
+	}
+	// Mutating the clone must not touch the spec.
+	status.SecretBindings[0].SecretID = "mutated"
+	if spec.SecretBindings[0].SecretID != "secret-a" {
+		t.Fatalf("spec secret bindings were mutated: %#v", spec.SecretBindings)
+	}
+}
+
 func TestValidateInstanceEnvVarAcceptsExplicitEmptyValue(t *testing.T) {
 	empty := ""
 	if err := validateInstanceEnvVar(ports.InstanceEnvVar{Name: "OPTIONAL_FLAG", Value: &empty}); err != nil {
@@ -2317,10 +2664,24 @@ var _ ports.WorkloadInstanceResourceResolver = (*capturingInstanceResourceResolv
 type fakeInstanceStorageBinder struct {
 	volumeMounts     int
 	filesystemMounts int
+	volumeUnmounts   int
 	lastVolumeID     string
 	lastFilesystemID string
 	lastInstanceID   string
 	err              error
+	createdVolumes   []ports.StorageVolumeCreateRequest
+	unmountedVolumes []string
+	// storedVolumes backs GetVolume, which the detach precheck consults for the
+	// volume-side mount_instance_id.
+	storedVolumes map[string]ports.StorageVolumeRecord
+}
+
+func (f *fakeInstanceStorageBinder) CreateVolume(_ context.Context, request ports.StorageVolumeCreateRequest) (ports.StorageVolumeRecord, error) {
+	if f.err != nil {
+		return ports.StorageVolumeRecord{}, f.err
+	}
+	f.createdVolumes = append(f.createdVolumes, request)
+	return ports.StorageVolumeRecord{TenantID: request.TenantID, VolumeID: "vol-provisioned-1", Name: request.Name, SizeGiB: request.SizeGiB}, nil
 }
 
 func (f *fakeInstanceStorageBinder) MountVolume(_ context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error) {
@@ -2343,14 +2704,33 @@ func (f *fakeInstanceStorageBinder) MountFilesystem(_ context.Context, request p
 	return ports.StorageFilesystemRecord{FilesystemID: request.FilesystemID}, nil
 }
 
+func (f *fakeInstanceStorageBinder) GetVolume(_ context.Context, request ports.StorageResourceGetRequest) (ports.StorageVolumeRecord, error) {
+	if f.err != nil {
+		return ports.StorageVolumeRecord{}, f.err
+	}
+	if record, ok := f.storedVolumes[request.ResourceID]; ok {
+		return record, nil
+	}
+	return ports.StorageVolumeRecord{}, ports.ErrNotFound
+}
+
+func (f *fakeInstanceStorageBinder) UnmountVolume(_ context.Context, request ports.StorageVolumeUnmountRequest) (ports.StorageVolumeRecord, error) {
+	f.volumeUnmounts++
+	f.unmountedVolumes = append(f.unmountedVolumes, request.VolumeID)
+	delete(f.storedVolumes, request.VolumeID)
+	return ports.StorageVolumeRecord{VolumeID: request.VolumeID}, nil
+}
+
 type fakeLifecycleExecutor struct {
-	calls  int
-	action ports.WorkloadLifecycleAction
+	calls       int
+	action      ports.WorkloadLifecycleAction
+	lastRequest ports.WorkloadInstanceLifecycleRequest
 }
 
 func (e *fakeLifecycleExecutor) Apply(_ context.Context, request ports.WorkloadInstanceLifecycleRequest, _ ports.WorkloadInstanceRecord) (ports.WorkloadInstanceLifecycleResult, error) {
 	e.calls++
 	e.action = request.Action
+	e.lastRequest = request
 	return ports.WorkloadInstanceLifecycleResult{
 		Action:   request.Action,
 		Accepted: true,
@@ -2557,5 +2937,426 @@ func TestLocalInstanceServiceAttachVolumeAllowsFilesystemShared(t *testing.T) {
 		RequestedAt:     time.Unix(1730, 0),
 	}); err != nil {
 		t.Fatalf("AttachVolume() with only filesystem holders error = %v, want success", err)
+	}
+}
+
+// Bug-2 回归：search_field=id/name 时 keyword 只对该字段匹配；不传时全字段匹配。
+func TestMatchesInstanceListSearchField(t *testing.T) {
+	record := ports.WorkloadInstanceRecord{
+		TenantID:    "tenant-a",
+		InstanceID:  "inst-abc-123",
+		Name:        "my-worker",
+		Description: "a gpu training pod",
+		Kind:        ports.WorkloadKindContainer,
+		Status:      ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		CreatedAt:   time.Unix(100, 0),
+	}
+	cases := []struct {
+		name    string
+		field   string
+		keyword string
+		want    bool
+	}{
+		{"search_field=id 命中 ID", "id", "abc-123", true},
+		{"search_field=id 不含 name", "id", "my-worker", false},
+		{"search_field=name 命中 name", "name", "worker", true},
+		{"search_field=name 不含 id", "name", "inst-abc", false},
+		{"空 search_field 全字段命中 name", "", "worker", true},
+		{"空 search_field 全字段命中 id", "", "inst-abc", true},
+		{"空 search_field 全字段命中 description", "", "gpu", true},
+		{"全字段也匹配任意组合", "", "training pod", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{Keyword: tc.keyword, SearchField: tc.field}
+			if got := MatchesInstanceList(record, request); got != tc.want {
+				t.Fatalf("MatchesInstanceList(field=%q keyword=%q) = %v, want %v", tc.field, tc.keyword, got, tc.want)
+			}
+		})
+	}
+}
+
+// Bug-6 回归：默认列表不展示已销毁（deleted 终态）实例，显式传 state=deleted 才返回，
+// 且显式传 runing 等其它状态仍按原语义过滤。
+func TestMatchesInstanceListExcludesDeletedByDefault(t *testing.T) {
+	running := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-running",
+		Name:       "running-app",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		CreatedAt:  time.Unix(100, 0),
+	}
+	deleted := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-deleted",
+		Name:       "deleted-app",
+		Kind:       ports.WorkloadKindSandbox,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateDeleted},
+		CreatedAt:  time.Unix(200, 0),
+	}
+	stopped := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-stopped",
+		Name:       "stopped-app",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateStopped},
+		CreatedAt:  time.Unix(300, 0),
+	}
+
+	cases := []struct {
+		name   string
+		record ports.WorkloadInstanceRecord
+		state  string
+		want   bool
+	}{
+		{"默认(空)列表排除 deleted", deleted, "", false},
+		{"默认(空)列表包含 running", running, "", true},
+		{"默认(空)列表包含 stopped", stopped, "", true},
+		{"显式 state=deleted 保留 deleted", deleted, "deleted", true},
+		{"显式 state=deleted 排除 running", running, "deleted", false},
+		{"显式 state=running 保留 running", running, "running", true},
+		{"显式 state=running 排除 deleted", deleted, "running", false},
+		{"显式 state=stopped 保留 stopped", stopped, "stopped", true},
+		{"显式 state=stopped 排除 deleted", deleted, "stopped", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{State: ports.WorkloadState(tc.state)}
+			if got := MatchesInstanceList(tc.record, request); got != tc.want {
+				t.Fatalf("MatchesInstanceList(state=%q) = %v, want %v", tc.state, got, tc.want)
+			}
+		})
+	}
+}
+
+// 回归：scheduling_state 过滤必须按 live status 现算，不得读 record.GPU.SchedulingState
+// 这个"物质化快照"。列表期读修复（refreshOneStoreStatus）不会更新该快照，历史上导致
+// 过滤命中陈旧值：已 stopped 的实例永远命中 pending、failed 实例命中 running，
+// 于是前端"运行中/已停止/异常"筛选结果错乱。
+func TestMatchesInstanceListSchedulingStateDerivesFromLiveStatus(t *testing.T) {
+	// 以下 GPU 记录的 GPU.SchedulingState 快照故意与 live status 不一致，
+	// 用于证明过滤走的是 Status 而不是快照。
+	stopped := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-gpu-stopped",
+		Name:       "gpu-stopped",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateStopped},
+		GPU:        &ports.GPUInstanceStatus{SchedulingState: "pending"},
+		CreatedAt:  time.Unix(100, 0),
+	}
+	failed := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-gpu-failed",
+		Name:       "gpu-failed",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateFailed},
+		GPU:        &ports.GPUInstanceStatus{SchedulingState: "running"},
+		CreatedAt:  time.Unix(200, 0),
+	}
+	pending := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-gpu-pending",
+		Name:       "gpu-pending",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateProvisioning},
+		GPU:        &ports.GPUInstanceStatus{SchedulingState: "pending"},
+		CreatedAt:  time.Unix(300, 0),
+	}
+	scheduled := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-gpu-scheduled",
+		Name:       "gpu-scheduled",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateProvisioning, NodeName: "gpu-node-a"},
+		GPU:        &ports.GPUInstanceStatus{SchedulingState: "pending"},
+		CreatedAt:  time.Unix(400, 0),
+	}
+	vm := ports.WorkloadInstanceRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-vm",
+		Name:       "vm-1",
+		Kind:       ports.WorkloadKindVM,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		CreatedAt:  time.Unix(500, 0),
+	}
+
+	cases := []struct {
+		name   string
+		record ports.WorkloadInstanceRecord
+		state  string
+		want   bool
+	}{
+		{"stopped 命中 stopped（快照 pending 不得生效）", stopped, "stopped", true},
+		{"stopped 不再命中 pending", stopped, "pending", false},
+		{"failed 命中 failed（快照 running 不得生效）", failed, "failed", true},
+		{"failed 不再命中 running", failed, "running", false},
+		{"无节点 provisioning 命中 pending", pending, "pending", true},
+		{"有节点 provisioning 命中 scheduled", scheduled, "scheduled", true},
+		{"scheduling_state 对非 GPU 实例不适用", vm, "running", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{SchedulingState: tc.state}
+			if got := MatchesInstanceList(tc.record, request); got != tc.want {
+				t.Fatalf("MatchesInstanceList(scheduling_state=%q) = %v, want %v", tc.state, got, tc.want)
+			}
+		})
+	}
+}
+
+// Bug-6 集成：LocalInstanceService.List 默认批量隐藏 deleted，显式 state=deleted 返回。
+func TestLocalInstanceServiceListExcludesDeletedByDefault(t *testing.T) {
+	store := &fakeInstanceStore{
+		records: []ports.WorkloadInstanceRecord{
+			{
+				TenantID: "tenant-a", InstanceID: "s1", Name: "sandbox-running",
+				Kind:      ports.WorkloadKindSandbox,
+				Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+				CreatedAt: time.Unix(100, 0),
+			},
+			{
+				TenantID: "tenant-a", InstanceID: "s2", Name: "sandbox-deleted",
+				Kind:      ports.WorkloadKindSandbox,
+				Status:    ports.WorkloadStatus{State: ports.WorkloadStateDeleted},
+				CreatedAt: time.Unix(200, 0),
+			},
+		},
+	}
+	service := NewLocalInstanceService(&fakeInstanceOrchestrator{}, store, NewLocalInstanceOpsGuard())
+
+	got, err := service.List(context.Background(), ports.WorkloadInstanceListRequest{TenantID: "tenant-a", Kind: ports.WorkloadKindSandbox})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 1 || got[0].InstanceID != "s1" {
+		t.Fatalf("默认列表 = %d 条 [%s]，want 仅 running 的 s1（deleted 应被隐藏）", len(got), recordsIDs(got))
+	}
+
+	// 显式 state=deleted：应能查到已销毁实例
+	gotDeleted, err := service.List(context.Background(), ports.WorkloadInstanceListRequest{
+		TenantID: "tenant-a", Kind: ports.WorkloadKindSandbox, State: ports.WorkloadStateDeleted,
+	})
+	if err != nil {
+		t.Fatalf("List(deleted) error = %v", err)
+	}
+	if len(gotDeleted) != 1 || gotDeleted[0].InstanceID != "s2" {
+		t.Fatalf("state=deleted 列表 = %d 条 [%s]，want 仅 s2", len(gotDeleted), recordsIDs(gotDeleted))
+	}
+}
+
+func recordsIDs(records []ports.WorkloadInstanceRecord) []string {
+	ids := make([]string, 0, len(records))
+	for _, r := range records {
+		ids = append(ids, r.InstanceID)
+	}
+	return ids
+}
+
+// 多值过滤回归（MatchesInstanceKind）：kind 逗号多值 OR 语义——块存储"挂载"选择器
+// 一次列多种类型依赖本语义（kind=vm,container,gpu_container）。
+func TestMatchesInstanceKindMultiValue(t *testing.T) {
+	vm := ports.WorkloadInstanceRecord{Kind: ports.WorkloadKindVM}
+	container := ports.WorkloadInstanceRecord{Kind: ports.WorkloadKindContainer}
+	notebook := ports.WorkloadInstanceRecord{Kind: ports.WorkloadKindNotebook}
+
+	cases := []struct {
+		name    string
+		request ports.WorkloadInstanceListRequest
+		record  ports.WorkloadInstanceRecord
+		want    bool
+	}{
+		{"多值命中第一项", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm", "container"}}, vm, true},
+		{"多值命中后续项", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm", "container"}}, container, true},
+		{"多值全不命中", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm", "container"}}, notebook, false},
+		{"单元素多值集合等价单值", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm"}}, vm, true},
+		{"单元素多值集合排除其它 kind", ports.WorkloadInstanceListRequest{Kinds: []ports.WorkloadKind{"vm"}}, container, false},
+		{"未传 kind 不过滤", ports.WorkloadInstanceListRequest{}, notebook, true},
+		{"旧单值 Kind 字段仍生效", ports.WorkloadInstanceListRequest{Kind: ports.WorkloadKindVM}, vm, true},
+		{"旧单值 Kind 字段排除其它 kind", ports.WorkloadInstanceListRequest{Kind: ports.WorkloadKindVM}, container, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MatchesInstanceKind(tc.record, tc.request); got != tc.want {
+				t.Fatalf("MatchesInstanceKind(kind=%v) = %v, want %v", tc.request.Kinds, got, tc.want)
+			}
+		})
+	}
+}
+
+// 多值过滤回归（MatchesInstanceState）：state 逗号多值 OR 语义——挂载选择器一次列
+// 多种状态依赖本语义（state=running,stopped）；未传时维持默认排除 deleted。
+func TestMatchesInstanceStateMultiValue(t *testing.T) {
+	running := ports.WorkloadInstanceRecord{Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}}
+	stopped := ports.WorkloadInstanceRecord{Status: ports.WorkloadStatus{State: ports.WorkloadStateStopped}}
+	pending := ports.WorkloadInstanceRecord{Status: ports.WorkloadStatus{State: ports.WorkloadStatePending}}
+	deleted := ports.WorkloadInstanceRecord{Status: ports.WorkloadStatus{State: ports.WorkloadStateDeleted}}
+
+	cases := []struct {
+		name    string
+		request ports.WorkloadInstanceListRequest
+		record  ports.WorkloadInstanceRecord
+		want    bool
+	}{
+		{"多值命中第一项", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running", "stopped"}}, running, true},
+		{"多值命中后续项", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running", "stopped"}}, stopped, true},
+		{"多值全不命中 pending", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running", "stopped"}}, pending, false},
+		{"多值全不命中 deleted", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running", "stopped"}}, deleted, false},
+		{"单元素集合等价单值", ports.WorkloadInstanceListRequest{States: []ports.WorkloadState{"running"}}, stopped, false},
+		{"未传 state 默认排除 deleted", ports.WorkloadInstanceListRequest{}, deleted, false},
+		{"未传 state 保留 running", ports.WorkloadInstanceListRequest{}, running, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MatchesInstanceState(tc.record, tc.request); got != tc.want {
+				t.Fatalf("MatchesInstanceState(states=%v) = %v, want %v", tc.request.States, got, tc.want)
+			}
+		})
+	}
+}
+
+// 多值过滤集成：LocalInstanceService.List 对多 kind（OR）+ 多 state（OR）的组合过滤。
+func TestLocalInstanceServiceListMultiValueKindAndState(t *testing.T) {
+	store := &fakeInstanceStore{
+		records: []ports.WorkloadInstanceRecord{
+			{TenantID: "tenant-a", InstanceID: "i-vm-run", Name: "vm-running", Kind: ports.WorkloadKindVM,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(100, 0)},
+			{TenantID: "tenant-a", InstanceID: "i-ct-stop", Name: "ct-stopped", Kind: ports.WorkloadKindContainer,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStateStopped}, CreatedAt: time.Unix(200, 0)},
+			{TenantID: "tenant-a", InstanceID: "i-gpu-pend", Name: "gpu-pending", Kind: ports.WorkloadKindGPUContainer,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStatePending}, CreatedAt: time.Unix(300, 0)},
+			{TenantID: "tenant-a", InstanceID: "i-nb-run", Name: "nb-running", Kind: ports.WorkloadKindNotebook,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(400, 0)},
+			{TenantID: "tenant-a", InstanceID: "i-vm-del", Name: "vm-deleted", Kind: ports.WorkloadKindVM,
+				Status: ports.WorkloadStatus{State: ports.WorkloadStateDeleted}, CreatedAt: time.Unix(500, 0)},
+		},
+	}
+	service := NewLocalInstanceService(&fakeInstanceOrchestrator{}, store, NewLocalInstanceOpsGuard())
+	wantIDs := func(want ...string) string {
+		return strings.Join(want, ",")
+	}
+
+	// 多 kind + 多 state：OR 语义组合（挂载选择器真实请求形态）
+	got, err := service.List(context.Background(), ports.WorkloadInstanceListRequest{
+		TenantID: "tenant-a",
+		Kinds:    []ports.WorkloadKind{"vm", "container", "gpu_container"},
+		States:   []ports.WorkloadState{"running", "stopped"},
+	})
+	if err != nil {
+		t.Fatalf("List(多kind+多state) error = %v", err)
+	}
+	if gotIDs := strings.Join(recordsIDs(got), ","); gotIDs != wantIDs("i-ct-stop", "i-vm-run") {
+		t.Fatalf("多kind+多state 列表 = [%s]，want [i-ct-stop,i-vm-run]（pending/notebook/deleted 均应排除）", gotIDs)
+	}
+
+	// 多 state（不过滤 kind）
+	got, err = service.List(context.Background(), ports.WorkloadInstanceListRequest{
+		TenantID: "tenant-a",
+		States:   []ports.WorkloadState{"running", "stopped"},
+	})
+	if err != nil {
+		t.Fatalf("List(多state) error = %v", err)
+	}
+	if gotIDs := strings.Join(recordsIDs(got), ","); gotIDs != wantIDs("i-nb-run", "i-ct-stop", "i-vm-run") {
+		t.Fatalf("多state 列表 = [%s]，want [i-nb-run,i-ct-stop,i-vm-run]", gotIDs)
+	}
+
+	// 单 kind（多值集合单元素）+ 多 state
+	got, err = service.List(context.Background(), ports.WorkloadInstanceListRequest{
+		TenantID: "tenant-a",
+		Kinds:    []ports.WorkloadKind{"vm"},
+		States:   []ports.WorkloadState{"running", "stopped"},
+	})
+	if err != nil {
+		t.Fatalf("List(单kind+多state) error = %v", err)
+	}
+	if gotIDs := strings.Join(recordsIDs(got), ","); gotIDs != wantIDs("i-vm-run") {
+		t.Fatalf("单kind+多state 列表 = [%s]，want [i-vm-run]", gotIDs)
+	}
+
+	// 空（不过滤 kind/state）：默认排除 deleted 终态
+	got, err = service.List(context.Background(), ports.WorkloadInstanceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("List(空过滤) error = %v", err)
+	}
+	if gotIDs := strings.Join(recordsIDs(got), ","); gotIDs != wantIDs("i-nb-run", "i-gpu-pend", "i-ct-stop", "i-vm-run") {
+		t.Fatalf("空过滤列表 = [%s]，want 排除 deleted 后的全部 4 条", gotIDs)
+	}
+}
+
+// Bug-6 回归：孤儿（live Kubernetes）实例的 state 过滤与 store 记录一致。
+// router 层合并孤儿时会调用 MatchesInstanceState——state=running 的孤儿经
+// filtered-demand 应被排除，默认(空)则排除 deleted。
+func TestMatchesInstanceStateConsistentForOrphans(t *testing.T) {
+	running := ports.WorkloadInstanceRecord{
+		Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	}
+	pending := ports.WorkloadInstanceRecord{
+		Status: ports.WorkloadStatus{State: ports.WorkloadStatePending},
+	}
+	deleted := ports.WorkloadInstanceRecord{
+		Status: ports.WorkloadStatus{State: ports.WorkloadStateDeleted},
+	}
+
+	cases := []struct {
+		name   string
+		record ports.WorkloadInstanceRecord
+		state  string
+		want   bool
+	}{
+		{"默认(空)含 running", running, "", true},
+		{"默认(空)含 pending", pending, "", true},
+		{"默认(空)排除 deleted", deleted, "", false},
+		{"state=running 含 running", running, "running", true},
+		{"state=running 排除 pending(孤儿)", pending, "running", false},
+		{"state=running 排除 deleted", deleted, "running", false},
+		{"state=pending 含 pending", pending, "pending", true},
+		{"state=pending 排除 running", running, "pending", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{State: ports.WorkloadState(tc.state)}
+			if got := MatchesInstanceState(tc.record, request); got != tc.want {
+				t.Fatalf("MatchesInstanceState(state=%q) = %v, want %v", tc.state, got, tc.want)
+			}
+		})
+	}
+}
+
+// VPC-3/子网-3 回归：实例列表的 vpc_id/subnet_id 归属过滤与 store 记录一致，
+// router 层合并孤儿（live Kubernetes）实例时共用 MatchesInstanceNetwork。
+func TestMatchesInstanceNetworkConsistentForOrphans(t *testing.T) {
+	inVPC := ports.WorkloadInstanceRecord{
+		Network: ports.InstanceNetworkSummary{VPCID: "vpc-1", SubnetID: "subnet-1"},
+	}
+	otherVPC := ports.WorkloadInstanceRecord{
+		Network: ports.InstanceNetworkSummary{VPCID: "vpc-2", SubnetID: "subnet-2"},
+	}
+	noNetwork := ports.WorkloadInstanceRecord{}
+
+	cases := []struct {
+		name     string
+		record   ports.WorkloadInstanceRecord
+		vpcID    string
+		subnetID string
+		want     bool
+	}{
+		{"未传过滤参数不过滤", noNetwork, "", "", true},
+		{"vpc_id 匹配", inVPC, "vpc-1", "", true},
+		{"vpc_id 不匹配(孤儿)", otherVPC, "vpc-1", "", false},
+		{"subnet_id 匹配", inVPC, "", "subnet-1", true},
+		{"subnet_id 不匹配(孤儿)", otherVPC, "", "subnet-1", false},
+		{"同时匹配", inVPC, "vpc-1", "subnet-1", true},
+		{"vpc 匹配但 subnet 不匹配", inVPC, "vpc-1", "subnet-2", false},
+		{"无网络归属的孤儿被 vpc_id 过滤排除", noNetwork, "vpc-1", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ports.WorkloadInstanceListRequest{VPCID: tc.vpcID, SubnetID: tc.subnetID}
+			if got := MatchesInstanceNetwork(tc.record, request); got != tc.want {
+				t.Fatalf("MatchesInstanceNetwork(vpc=%q, subnet=%q) = %v, want %v", tc.vpcID, tc.subnetID, got, tc.want)
+			}
+		})
 	}
 }

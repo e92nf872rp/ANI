@@ -52,6 +52,18 @@ type PutObjectInput struct {
 	Checksum    string
 }
 
+// BucketACLPolicy is the normalized bucket access policy applied to the object
+// store authority. It is intentionally a separate vocabulary from the console
+// api's access_mode/acl fields so a single canonical value reaches the store.
+type BucketACLPolicy string
+
+const (
+	// BucketACLPolicyPrivate keeps the bucket readable by credentialed callers only.
+	BucketACLPolicyPrivate BucketACLPolicy = "private"
+	// BucketACLPolicyTenantRead allows anonymous reads of the tenant prefix only.
+	BucketACLPolicyTenantRead BucketACLPolicy = "tenant_read"
+)
+
 type ObjectStore interface {
 	Health(ctx context.Context) error
 	EnsureBucket(ctx context.Context, class BucketClass) error
@@ -62,6 +74,15 @@ type ObjectStore interface {
 	StatObject(ctx context.Context, ref ObjectRef) (ObjectMetadata, error)
 	SignedUploadURL(ctx context.Context, ref ObjectRef, ttl time.Duration) (SignedURL, error)
 	SignedDownloadURL(ctx context.Context, ref ObjectRef, ttl time.Duration) (SignedURL, error)
+}
+
+// ObjectStorePolicyApplier is an optional capability for applying bucket-level
+// access policy to the object store authority. Implementations that do not
+// support it must not be treated as having applied the console ACL: the
+// control-plane record alone is not proof that the real bucket changed.
+type ObjectStorePolicyApplier interface {
+	ObjectStore
+	ApplyBucketPolicy(ctx context.Context, class BucketClass, tenantID string, policy BucketACLPolicy) error
 }
 
 // ObjectStoreUploadHeaders is an optional capability for presigned PUTs that

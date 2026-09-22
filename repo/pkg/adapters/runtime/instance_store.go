@@ -48,6 +48,23 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 	})
 }
 
+// UpsertStatusAsPlatform persists instance status through the platform bypass,
+// intended for the background cross-tenant SandboxExpirationController (Bug-7).
+// Unlike UpsertStatus it does not require a tenant scoped to the context; it reuses
+// the same single-row upsert SQL inside a platform transaction (WithPlatformTx),
+// mirroring how ListRunningSandboxes reads across tenants.
+func (s *MetadataInstanceStore) UpsertStatusAsPlatform(ctx context.Context, record ports.WorkloadInstanceRecord) error {
+	if s.store == nil {
+		return ports.ErrNotConfigured
+	}
+	if err := validateInstanceRecord(record); err != nil {
+		return err
+	}
+	return s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		return s.upsertStatusInTx(ctx, tx, record)
+	})
+}
+
 // UpsertStatusTx implements ports.WorkloadInstanceStoreTx (SPEC §3.2). It
 // writes the instance status inside an externally-owned MetadataTx so the
 // caller can commit it atomically with a quota Confirm/Cancel/Release in the
@@ -270,6 +287,55 @@ func (s *MetadataInstanceStore) List(ctx context.Context, tenantID string, kind 
 			WHERE tenant_id = $1::uuid AND ($2 = '' OR workload_kind = $2)
 			ORDER BY updated_at DESC
 		`, tenantID, string(kind))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var record ports.WorkloadInstanceRecord
+			if err := scanWorkloadInstance(rows, &record); err != nil {
+				return err
+			}
+			records = append(records, record)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// ListRunningSandboxes cross-tenant enumerates currently non-terminal sandbox
+// records (running/pending/paused) for the expiration background controller.
+// It reads across all tenants via a platform transaction. The caller reads
+// config.ExpiresAt / config.LastActivityAt from each record to decide whether
+// an OnTimeout action should fire (Bug-7).
+func (s *MetadataInstanceStore) ListRunningSandboxes(ctx context.Context, limit int) ([]ports.WorkloadInstanceRecord, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	var records []ports.WorkloadInstanceRecord
+	err := s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(provider, ''),
+				COALESCE(audit_id::text, ''), COALESCE(provider_id, ''), resource_refs,
+				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
+				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+				COALESCE(description, ''), labels, image_summary, compute_summary, network_summary,
+				access_summary, storage_attachments, sandbox_status, quota_tx_ids, created_at, updated_at
+			FROM workload_instances
+			WHERE workload_kind = 'sandbox' AND state NOT IN ('deleted', 'stopped', 'failed')
+			ORDER BY updated_at ASC
+			LIMIT $1
+		`, limit)
 		if err != nil {
 			return err
 		}

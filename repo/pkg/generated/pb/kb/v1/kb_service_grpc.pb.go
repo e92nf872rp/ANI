@@ -37,10 +37,13 @@ const (
 	KBService_ListKBSessions_FullMethodName         = "/kb.v1.KBService/ListKBSessions"
 	KBService_UpdateKBPermissions_FullMethodName    = "/kb.v1.KBService/UpdateKBPermissions"
 	KBService_GetKBPermissions_FullMethodName       = "/kb.v1.KBService/GetKBPermissions"
+	KBService_GetKBConfig_FullMethodName            = "/kb.v1.KBService/GetKBConfig"
+	KBService_UpdateKBConfig_FullMethodName         = "/kb.v1.KBService/UpdateKBConfig"
 	KBService_ListDocumentChunks_FullMethodName     = "/kb.v1.KBService/ListDocumentChunks"
 	KBService_GetSessionMessages_FullMethodName     = "/kb.v1.KBService/GetSessionMessages"
 	KBService_DeleteSession_FullMethodName          = "/kb.v1.KBService/DeleteSession"
 	KBService_ReparseDocument_FullMethodName        = "/kb.v1.KBService/ReparseDocument"
+	KBService_RebuildKB_FullMethodName              = "/kb.v1.KBService/RebuildKB"
 	KBService_ListKBAuditLogs_FullMethodName        = "/kb.v1.KBService/ListKBAuditLogs"
 )
 
@@ -86,6 +89,15 @@ type KBServiceClient interface {
 	// GetKBPermissions returns the access permissions of a KB (P1).
 	// No kb_permissions row → returns defaults (public_read=false, empty list).
 	GetKBPermissions(ctx context.Context, in *GetKBPermissionsRequest, opts ...grpc.CallOption) (*KBPermissions, error)
+	// GetKBConfig returns the ingest/query configuration of a KB (P1 #22).
+	GetKBConfig(ctx context.Context, in *GetKBConfigRequest, opts ...grpc.CallOption) (*KBConfig, error)
+	// UpdateKBConfig updates the ingest/query config of a KB (P1 #23).
+	// embedding_model / chunk_size changes invalidate existing vectors and
+	// trigger a full rebuild in the same transaction (active→rebuilding +
+	// rebuild task + outbox event); the other four fields are query-time or
+	// next-parse settings and never trigger a rebuild. Sync 200 semantics;
+	// the implied rebuild task is attached as rebuild_task in the response.
+	UpdateKBConfig(ctx context.Context, in *UpdateKBConfigRequest, opts ...grpc.CallOption) (*UpdateKBConfigResponse, error)
 	// ListDocumentChunks returns the chunk details of a document (P1).
 	ListDocumentChunks(ctx context.Context, in *ListDocumentChunksRequest, opts ...grpc.CallOption) (*ListDocumentChunksResponse, error)
 	// GetSessionMessages returns the message history of a chat session (P1).
@@ -97,6 +109,12 @@ type KBServiceClient interface {
 	// a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
 	// the NotifyDocumentUploaded event pipeline).
 	ReparseDocument(ctx context.Context, in *ReparseDocumentRequest, opts ...grpc.CallOption) (*v1.AsyncTaskRef, error)
+	// RebuildKB re-parses every ready/failed document in a KB (P1 #24).
+	// Returns 202-style async task semantics: sets KB status='rebuilding'
+	// (write ops on the KB fail with FAILED_PRECONDITION while rebuilding;
+	// queries stay served from the existing index) and enqueues a rebuild
+	// task via Outbox pattern onto NATS ani.tasks.kb.rebuild.v1.
+	RebuildKB(ctx context.Context, in *RebuildKBRequest, opts ...grpc.CallOption) (*v1.AsyncTaskRef, error)
 	// ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
 	// Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
 	ListKBAuditLogs(ctx context.Context, in *ListKBAuditLogsRequest, opts ...grpc.CallOption) (*ListKBAuditLogsResponse, error)
@@ -277,6 +295,24 @@ func (c *kBServiceClient) GetKBPermissions(ctx context.Context, in *GetKBPermiss
 	return out, nil
 }
 
+func (c *kBServiceClient) GetKBConfig(ctx context.Context, in *GetKBConfigRequest, opts ...grpc.CallOption) (*KBConfig, error) {
+	out := new(KBConfig)
+	err := c.cc.Invoke(ctx, KBService_GetKBConfig_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kBServiceClient) UpdateKBConfig(ctx context.Context, in *UpdateKBConfigRequest, opts ...grpc.CallOption) (*UpdateKBConfigResponse, error) {
+	out := new(UpdateKBConfigResponse)
+	err := c.cc.Invoke(ctx, KBService_UpdateKBConfig_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *kBServiceClient) ListDocumentChunks(ctx context.Context, in *ListDocumentChunksRequest, opts ...grpc.CallOption) (*ListDocumentChunksResponse, error) {
 	out := new(ListDocumentChunksResponse)
 	err := c.cc.Invoke(ctx, KBService_ListDocumentChunks_FullMethodName, in, out, opts...)
@@ -307,6 +343,15 @@ func (c *kBServiceClient) DeleteSession(ctx context.Context, in *DeleteSessionRe
 func (c *kBServiceClient) ReparseDocument(ctx context.Context, in *ReparseDocumentRequest, opts ...grpc.CallOption) (*v1.AsyncTaskRef, error) {
 	out := new(v1.AsyncTaskRef)
 	err := c.cc.Invoke(ctx, KBService_ReparseDocument_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kBServiceClient) RebuildKB(ctx context.Context, in *RebuildKBRequest, opts ...grpc.CallOption) (*v1.AsyncTaskRef, error) {
+	out := new(v1.AsyncTaskRef)
+	err := c.cc.Invoke(ctx, KBService_RebuildKB_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -364,6 +409,15 @@ type KBServiceServer interface {
 	// GetKBPermissions returns the access permissions of a KB (P1).
 	// No kb_permissions row → returns defaults (public_read=false, empty list).
 	GetKBPermissions(context.Context, *GetKBPermissionsRequest) (*KBPermissions, error)
+	// GetKBConfig returns the ingest/query configuration of a KB (P1 #22).
+	GetKBConfig(context.Context, *GetKBConfigRequest) (*KBConfig, error)
+	// UpdateKBConfig updates the ingest/query config of a KB (P1 #23).
+	// embedding_model / chunk_size changes invalidate existing vectors and
+	// trigger a full rebuild in the same transaction (active→rebuilding +
+	// rebuild task + outbox event); the other four fields are query-time or
+	// next-parse settings and never trigger a rebuild. Sync 200 semantics;
+	// the implied rebuild task is attached as rebuild_task in the response.
+	UpdateKBConfig(context.Context, *UpdateKBConfigRequest) (*UpdateKBConfigResponse, error)
 	// ListDocumentChunks returns the chunk details of a document (P1).
 	ListDocumentChunks(context.Context, *ListDocumentChunksRequest) (*ListDocumentChunksResponse, error)
 	// GetSessionMessages returns the message history of a chat session (P1).
@@ -375,6 +429,12 @@ type KBServiceServer interface {
 	// a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
 	// the NotifyDocumentUploaded event pipeline).
 	ReparseDocument(context.Context, *ReparseDocumentRequest) (*v1.AsyncTaskRef, error)
+	// RebuildKB re-parses every ready/failed document in a KB (P1 #24).
+	// Returns 202-style async task semantics: sets KB status='rebuilding'
+	// (write ops on the KB fail with FAILED_PRECONDITION while rebuilding;
+	// queries stay served from the existing index) and enqueues a rebuild
+	// task via Outbox pattern onto NATS ani.tasks.kb.rebuild.v1.
+	RebuildKB(context.Context, *RebuildKBRequest) (*v1.AsyncTaskRef, error)
 	// ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
 	// Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
 	ListKBAuditLogs(context.Context, *ListKBAuditLogsRequest) (*ListKBAuditLogsResponse, error)
@@ -433,6 +493,12 @@ func (UnimplementedKBServiceServer) UpdateKBPermissions(context.Context, *Update
 func (UnimplementedKBServiceServer) GetKBPermissions(context.Context, *GetKBPermissionsRequest) (*KBPermissions, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetKBPermissions not implemented")
 }
+func (UnimplementedKBServiceServer) GetKBConfig(context.Context, *GetKBConfigRequest) (*KBConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetKBConfig not implemented")
+}
+func (UnimplementedKBServiceServer) UpdateKBConfig(context.Context, *UpdateKBConfigRequest) (*UpdateKBConfigResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateKBConfig not implemented")
+}
 func (UnimplementedKBServiceServer) ListDocumentChunks(context.Context, *ListDocumentChunksRequest) (*ListDocumentChunksResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListDocumentChunks not implemented")
 }
@@ -444,6 +510,9 @@ func (UnimplementedKBServiceServer) DeleteSession(context.Context, *DeleteSessio
 }
 func (UnimplementedKBServiceServer) ReparseDocument(context.Context, *ReparseDocumentRequest) (*v1.AsyncTaskRef, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReparseDocument not implemented")
+}
+func (UnimplementedKBServiceServer) RebuildKB(context.Context, *RebuildKBRequest) (*v1.AsyncTaskRef, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RebuildKB not implemented")
 }
 func (UnimplementedKBServiceServer) ListKBAuditLogs(context.Context, *ListKBAuditLogsRequest) (*ListKBAuditLogsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListKBAuditLogs not implemented")
@@ -752,6 +821,42 @@ func _KBService_GetKBPermissions_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KBService_GetKBConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetKBConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).GetKBConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_GetKBConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).GetKBConfig(ctx, req.(*GetKBConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KBService_UpdateKBConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateKBConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).UpdateKBConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_UpdateKBConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).UpdateKBConfig(ctx, req.(*UpdateKBConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KBService_ListDocumentChunks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListDocumentChunksRequest)
 	if err := dec(in); err != nil {
@@ -820,6 +925,24 @@ func _KBService_ReparseDocument_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(KBServiceServer).ReparseDocument(ctx, req.(*ReparseDocumentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KBService_RebuildKB_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RebuildKBRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).RebuildKB(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_RebuildKB_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).RebuildKB(ctx, req.(*RebuildKBRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -910,6 +1033,14 @@ var KBService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KBService_GetKBPermissions_Handler,
 		},
 		{
+			MethodName: "GetKBConfig",
+			Handler:    _KBService_GetKBConfig_Handler,
+		},
+		{
+			MethodName: "UpdateKBConfig",
+			Handler:    _KBService_UpdateKBConfig_Handler,
+		},
+		{
 			MethodName: "ListDocumentChunks",
 			Handler:    _KBService_ListDocumentChunks_Handler,
 		},
@@ -924,6 +1055,10 @@ var KBService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReparseDocument",
 			Handler:    _KBService_ReparseDocument_Handler,
+		},
+		{
+			MethodName: "RebuildKB",
+			Handler:    _KBService_RebuildKB_Handler,
 		},
 		{
 			MethodName: "ListKBAuditLogs",

@@ -97,6 +97,10 @@ type storageVolumeOSInitCompleteRequest struct {
 type storageFilesystemExpandRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	SizeGiB        int64  `json:"size_gib"`
+	// Capacity is a transitional alias kept for the Console, which still posts
+	// {"capacity": N} instead of the contract field size_gib. Remove once the
+	// Console migrates to size_gib.
+	Capacity int64 `json:"capacity"`
 }
 
 type storageFilesystemMountTargetCreateRequest struct {
@@ -123,6 +127,7 @@ type storageCreateBucketRequest struct {
 	Name           string `json:"name"`
 	Region         string `json:"region,omitempty"`
 	AccessMode     string `json:"access_mode,omitempty"`
+	StorageClass   string `json:"storage_class,omitempty"`
 }
 
 type storageObjectUploadRequest struct {
@@ -477,6 +482,7 @@ func registerStorageResourcesWithServiceAndTasksAndStore(v1 *route.RouterGroup, 
 
 	v1.GET("/buckets", api.listStorageBuckets)
 	v1.POST("/buckets", api.createStorageBucket)
+	v1.DELETE("/buckets/:bucket_id", api.deleteStorageBucket)
 	v1.GET("/buckets/:bucket_id/objects", api.listBucketObjects)
 	v1.DELETE("/buckets/:bucket_id/objects", api.deleteBucketObject)
 	v1.POST("/buckets/:bucket_id/objects/upload", api.uploadBucketObject)
@@ -539,6 +545,54 @@ func tagFilesystemConsumers(resp *storageFilesystemResponse, consumers []runtime
 	resp.UsedBy = storageConsumersToResponse(consumers)
 }
 
+// stringListFilterSpec is a normalized list-filter description shared by the
+// storage list handlers. searchField forces keyword to match a specific field
+// ("id" or "name"); an empty searchField keeps the legacy nameParts matching.
+type stringListFilterSpec struct {
+	status        string
+	keyword       string
+	searchFieldID bool
+}
+
+// storageListFilters parses the optional status + search_field + keyword query
+// parameters. keyword is lower-cased here so the per-record match in
+// storageMatchesFilters can compare against the same folded value.
+func storageListFilters(c *app.RequestContext) stringListFilterSpec {
+	spec := stringListFilterSpec{
+		status:  c.Query("state"),
+		keyword: strings.ToLower(strings.TrimSpace(c.Query("keyword"))),
+	}
+	switch strings.TrimSpace(c.Query("search_field")) {
+	case "id":
+		spec.searchFieldID = true
+	case "name":
+		spec.searchFieldID = false
+	}
+	return spec
+}
+
+// storageMatchesFilters reports whether a storage record survives the status,
+// search_field and keyword list filters. When spec.searchFieldID is true the
+// supplied idPart must contain keyword; otherwise keyword matches any
+// supplied name segment (e.g. volume name, or an object's bucket/key).
+func storageMatchesFilters(recordState ports.StorageResourceState, spec stringListFilterSpec, idPart string, nameParts ...string) bool {
+	if spec.status != "" && string(recordState) != spec.status {
+		return false
+	}
+	if spec.keyword == "" {
+		return true
+	}
+	if spec.searchFieldID {
+		return strings.Contains(strings.ToLower(idPart), spec.keyword)
+	}
+	for _, part := range nameParts {
+		if strings.Contains(strings.ToLower(part), spec.keyword) {
+			return true
+		}
+	}
+	return false
+}
+
 // storageInUseFilter parses the optional in_use query parameter. The first
 // return reports whether filtering was requested; an invalid value returns
 // an error so handlers can reject with 400 instead of silently ignoring it.
@@ -594,6 +648,7 @@ func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
+	filterSpec := storageListFilters(c)
 	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
 	if err != nil {
 		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
@@ -601,6 +656,9 @@ func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
 	}
 	items := make([]storageVolumeResponse, 0, len(records))
 	for _, record := range records {
+		if !storageMatchesFilters(record.State, filterSpec, record.VolumeID, record.Name) {
+			continue
+		}
 		item := storageVolumeFromRecord(record)
 		tagVolumeConsumers(&item, consumerIndex[storageVolumeConsumerKey(record.VolumeID)])
 		if filterSet && item.InUse != wantInUse {
@@ -798,6 +856,7 @@ func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContex
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
+	filterSpec := storageListFilters(c)
 	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
 	if err != nil {
 		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
@@ -805,6 +864,9 @@ func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContex
 	}
 	items := make([]storageFilesystemResponse, 0, len(records))
 	for _, record := range records {
+		if !storageMatchesFilters(record.State, filterSpec, record.FilesystemID, record.Name) {
+			continue
+		}
 		item := storageFilesystemFromRecord(record)
 		tagFilesystemConsumers(&item, consumerIndex[storageFilesystemConsumerKey(record.FilesystemID)])
 		if filterSet && item.InUse != wantInUse {
@@ -845,6 +907,9 @@ func (api *storageAPI) expandFilesystem(ctx context.Context, c *app.RequestConte
 	if err := c.BindJSON(&req); err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid filesystem expand request")
 		return
+	}
+	if req.SizeGiB == 0 && req.Capacity > 0 {
+		req.SizeGiB = req.Capacity
 	}
 	record, err := api.service.ExpandFilesystem(ctx, ports.StorageFilesystemExpandRequest{
 		TenantID:       instanceTenantID(c),
@@ -1191,8 +1256,12 @@ func (api *storageAPI) listObjects(ctx context.Context, c *app.RequestContext) {
 		writeStorageError(c, err)
 		return
 	}
+	filterSpec := storageListFilters(c)
 	items := make([]storageObjectResponse, 0, len(records))
 	for _, record := range records {
+		if !storageMatchesFilters(record.State, filterSpec, record.ObjectID, record.Bucket, record.Key) {
+			continue
+		}
 		items = append(items, storageObjectFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
@@ -1228,6 +1297,7 @@ func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestCo
 		Name:           req.Name,
 		Region:         req.Region,
 		AccessMode:     req.AccessMode,
+		StorageClass:   req.StorageClass,
 	})
 	if err != nil {
 		writeStorageError(c, err)
@@ -1237,16 +1307,29 @@ func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestCo
 }
 
 func (api *storageAPI) listStorageBuckets(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{
-		TenantID: instanceTenantID(c),
-		Limit:    queryInt(c, "limit", 20),
-		Cursor:   c.Query("cursor"),
-	})
+	records, err := api.service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, storageBucketListFromRecords(records))
+	filterSpec := storageListFilters(c)
+	items := make([]storageBucketResponse, 0, len(records))
+	for _, record := range records {
+		if !storageMatchesFilters(record.State, filterSpec, record.BucketID, record.Name) {
+			continue
+		}
+		items = append(items, storageBucketFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *storageAPI) deleteStorageBucket(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.DeleteStorageBucket(ctx, ports.StorageResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("bucket_id")})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, storageBucketFromRecord(record))
 }
 
 func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestContext) {

@@ -164,7 +164,7 @@ func (api *registryAPI) getOverview(ctx context.Context, c *app.RequestContext) 
 }
 
 func (api *registryAPI) listImages(ctx context.Context, c *app.RequestContext) {
-	result, err := api.service.ListImages(ctx, ports.RegistryImageListRequest{TenantID: instanceTenantID(c), Project: c.Query("project"), Repository: c.Query("repository"), Tag: c.Query("tag"), Purpose: c.Query("purpose"), ScanStatus: ports.RegistryScanState(c.Query("scan_status")), Limit: queryInt(c, "limit", 20), Cursor: c.Query("cursor")})
+	result, err := api.service.ListImages(ctx, ports.RegistryImageListRequest{TenantID: instanceTenantID(c), Project: c.Query("project"), Repository: c.Query("repository"), Tag: c.Query("tag"), Purpose: c.Query("purpose"), Keyword: c.Query("keyword"), ScanStatus: ports.RegistryScanState(c.Query("scan_status")), Limit: queryInt(c, "limit", 20), Cursor: c.Query("cursor")})
 	if err != nil {
 		writeRegistryError(c, err)
 		return

@@ -213,6 +213,10 @@ type WorkloadSecretBinding struct {
 	SecretID  string
 	MountPath string
 	EnvPrefix string
+	// EnvName is the per-key env binding produced by the bind_secret lifecycle
+	// action (the secret key equals the env var name); create-time bindings
+	// inject whole secrets via EnvPrefix instead.
+	EnvName string
 }
 
 type InstanceDiskSpec struct {
@@ -316,6 +320,13 @@ type ContainerInstanceStatus struct {
 	Revision      string
 	RolloutStatus string
 	History       []ContainerRevisionHistory
+	// Env 回显创建时设定的环境变量（name/value/secret_ref，语义同创建请求），
+	// 供实例详情 API 返回给租户；不包含 secret_ref 指向的 secret 内容。
+	Env []InstanceEnvVar
+	// SecretBindings 回显实例当前持有的密钥绑定（创建时来自 spec.SecretBindings，
+	// 运行期 bind_secret/unbind_secret 生命周期会同步增删），语义同创建请求的
+	// secret_bindings；不包含 secret 内容。
+	SecretBindings []WorkloadSecretBinding
 }
 
 type GPUInstanceStatus struct {
@@ -538,15 +549,24 @@ type WorkloadInstanceGetRequest struct {
 }
 
 type WorkloadInstanceListRequest struct {
-	TenantID        string
-	Kind            WorkloadKind
-	State           WorkloadState
+	TenantID string
+	Kind     WorkloadKind
+	State    WorkloadState
+	// Kinds 是 kind 的逗号多值集合（OR 语义）：记录命中任一即通过；空 = 不过滤。
+	// 非空时优先于单值 Kind 字段。
+	Kinds []WorkloadKind
+	// States 是 state 的逗号多值集合（OR 语义）：记录命中任一即通过；空 = 不过滤
+	// （维持默认排除 deleted 终态语义）。非空时优先于单值 State 字段。
+	States          []WorkloadState
 	Keyword         string
+	SearchField     string // "id"/"name" 限定 target，空 = 全部字段（InstanceID+Name+Description）
 	CreatedAfter    time.Time
 	CreatedBefore   time.Time
 	SpecID          string
 	ImageID         string
 	NodeName        string
+	VPCID           string // 按所属 VPC 过滤（VPC 详情「关联资源」场景）
+	SubnetID        string // 按所属子网过滤（子网详情「关联资源」场景）
 	RolloutStatus   string
 	GPUModel        string
 	QueueName       string
@@ -579,6 +599,11 @@ type WorkloadInstanceLifecycleRequest struct {
 	Revision         string
 	Replicas         *int32
 	ImageID          string
+	// ImageRef carries the registry ref resolved from ImageID for update_image.
+	// It is filled in by the service layer before fingerprinting so retries keep
+	// a stable intent fingerprint, and the lifecycle executor patches the
+	// workload with this ref.
+	ImageRef         string
 	Strategy         string
 	SecretID         string
 	BindingType      string
@@ -771,6 +796,7 @@ type WorkloadOperationListRequest struct {
 
 type WorkloadOperationListResult struct {
 	Items      []WorkloadOperationRecord
+	Total      int // 全量操作记录数（未分页前）
 	NextCursor string
 }
 

@@ -16,6 +16,7 @@ type LocalNetworkService struct {
 	mu                 sync.RWMutex
 	now                func() time.Time
 	store              ports.NetworkResourceStore
+	instances          ports.WorkloadInstanceStore
 	providerRenderer   ports.NetworkProviderRenderer
 	providerDryRun     ports.NetworkProviderDryRun
 	providerApply      ports.NetworkProviderApply
@@ -55,6 +56,15 @@ func WithNetworkServiceClock(now func() time.Time) NetworkServiceOption {
 func WithNetworkResourceStore(store ports.NetworkResourceStore) NetworkServiceOption {
 	return func(service *LocalNetworkService) {
 		service.store = store
+	}
+}
+
+// WithNetworkInstanceStore 注入实例记录存储，用于安全组绑定派生视图：
+// 实例侧"更换安全组"只更新实例自身记录，不写独立绑定表，安全组详情的
+// 绑定查询必须按实例记录反查才能与真实绑定一致（测试缺陷 安全组-5）。
+func WithNetworkInstanceStore(instances ports.WorkloadInstanceStore) NetworkServiceOption {
+	return func(service *LocalNetworkService) {
+		service.instances = instances
 	}
 }
 
@@ -232,6 +242,15 @@ func (s *LocalNetworkService) ListVPCs(ctx context.Context, request ports.Networ
 			}
 			items = filtered
 		}
+		if strings.TrimSpace(request.Keyword) != "" {
+			filtered := make([]ports.NetworkVPCRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.VPCID, strings.TrimSpace(request.Keyword)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
 		if request.State != "" {
 			filtered := make([]ports.NetworkVPCRecord, 0, len(items))
 			for _, record := range items {
@@ -252,6 +271,9 @@ func (s *LocalNetworkService) ListVPCs(ctx context.Context, request ports.Networ
 			continue
 		}
 		if strings.TrimSpace(request.Name) != "" && !strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+			continue
+		}
+		if strings.TrimSpace(request.Keyword) != "" && !strings.HasPrefix(record.VPCID, strings.TrimSpace(request.Keyword)) {
 			continue
 		}
 		if request.State != "" && record.State != request.State {
@@ -277,11 +299,42 @@ func (s *LocalNetworkService) GetVPC(ctx context.Context, request ports.NetworkR
 }
 
 func (s *LocalNetworkService) DeleteVPC(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkVPCRecord, error) {
+	if s.store != nil {
+		// store 模式下内存 map 可能为空（网关重启后），VPC 与关联资源都以持久层为准。
+		record, err := s.store.GetVPC(ctx, request.TenantID, request.ResourceID)
+		if err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
+		counts, err := s.vpcAssociationCounts(ctx, request.TenantID, request.ResourceID)
+		if err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
+		if err := vpcAssociationConflict(request.ResourceID, counts); err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
+		now := s.now().UTC()
+		record.State = ports.NetworkResourceDeleted
+		record.Reason = "deleted by local network profile"
+		record.UpdatedAt = now
+		if err := s.upsertVPC(ctx, record); err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
+		s.mu.Lock()
+		if existing, ok := s.vpcs[record.VPCID]; ok && existing.TenantID == record.TenantID {
+			s.vpcs[record.VPCID] = record
+		}
+		s.mu.Unlock()
+		return record, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.vpcs[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkVPCRecord{}, ports.ErrNotFound
+	}
+	counts := s.vpcAssociationCountsMemory(request.TenantID, request.ResourceID)
+	if err := vpcAssociationConflict(request.ResourceID, counts); err != nil {
+		return ports.NetworkVPCRecord{}, err
 	}
 	now := s.now().UTC()
 	record.State = ports.NetworkResourceDeleted
@@ -292,6 +345,101 @@ func (s *LocalNetworkService) DeleteVPC(ctx context.Context, request ports.Netwo
 		return ports.NetworkVPCRecord{}, err
 	}
 	return record, nil
+}
+
+// networkVPCAssociationCounts 汇总 VPC 下各类存活关联资源数量（VPC-4 删除保护）。
+type networkVPCAssociationCounts struct {
+	Subnets        int
+	SecurityGroups int
+	LoadBalancers  int
+	Routes         int
+}
+
+func (c networkVPCAssociationCounts) total() int {
+	return c.Subnets + c.SecurityGroups + c.LoadBalancers + c.Routes
+}
+
+// vpcAssociationCounts 统计 VPC 下的存活关联资源；store 模式查持久层
+// （内存 map 重启后为空，不能作为判断依据），与 resolveVPCForValidation 同模式。
+func (s *LocalNetworkService) vpcAssociationCounts(ctx context.Context, tenantID string, vpcID string) (networkVPCAssociationCounts, error) {
+	if s.store == nil {
+		return s.vpcAssociationCountsMemory(tenantID, vpcID), nil
+	}
+	counts := networkVPCAssociationCounts{}
+	subnets, err := s.store.ListSubnets(ctx, tenantID)
+	if err != nil {
+		return counts, err
+	}
+	for _, record := range subnets {
+		if record.VPCID == vpcID {
+			counts.Subnets++
+		}
+	}
+	groups, err := s.store.ListSecurityGroups(ctx, tenantID)
+	if err != nil {
+		return counts, err
+	}
+	for _, record := range groups {
+		if record.VPCID == vpcID {
+			counts.SecurityGroups++
+		}
+	}
+	balancers, err := s.store.ListLoadBalancers(ctx, tenantID)
+	if err != nil {
+		return counts, err
+	}
+	for _, record := range balancers {
+		if record.VPCID == vpcID {
+			counts.LoadBalancers++
+		}
+	}
+	routes, err := s.store.ListRoutes(ctx, tenantID)
+	if err != nil {
+		return counts, err
+	}
+	for _, record := range routes {
+		if record.VPCID == vpcID {
+			counts.Routes++
+		}
+	}
+	return counts, nil
+}
+
+// vpcAssociationCountsMemory 内存模式下的关联计数（须在持锁状态下调用）。
+func (s *LocalNetworkService) vpcAssociationCountsMemory(tenantID string, vpcID string) networkVPCAssociationCounts {
+	counts := networkVPCAssociationCounts{}
+	for _, record := range s.subnets {
+		if record.TenantID == tenantID && record.VPCID == vpcID && record.State != ports.NetworkResourceDeleted {
+			counts.Subnets++
+		}
+	}
+	for _, record := range s.securityGroup {
+		if record.TenantID == tenantID && record.VPCID == vpcID && record.State != ports.NetworkResourceDeleted {
+			counts.SecurityGroups++
+		}
+	}
+	for _, record := range s.loadBalancers {
+		if record.TenantID == tenantID && record.VPCID == vpcID && record.State != ports.NetworkResourceDeleted {
+			counts.LoadBalancers++
+		}
+	}
+	for _, record := range s.routes {
+		if record.TenantID == tenantID && record.VPCID == vpcID && record.State != ports.NetworkResourceDeleted {
+			counts.Routes++
+		}
+	}
+	return counts
+}
+
+// vpcAssociationConflict 存在存活关联资源时禁止删除 VPC（方案 A：防御式保护），
+// 错误消息列出各类数量，前端据此提示先清理下级资源。
+func vpcAssociationConflict(vpcID string, counts networkVPCAssociationCounts) error {
+	if counts.total() == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: cannot delete VPC %s: %d subnet(s), %d security group(s), %d load balancer(s), %d route(s) still exist; delete them first",
+		ports.ErrConflict, vpcID, counts.Subnets, counts.SecurityGroups, counts.LoadBalancers, counts.Routes)
 }
 
 func (s *LocalNetworkService) CreateSubnet(ctx context.Context, request ports.NetworkSubnetCreateRequest) (ports.NetworkSubnetRecord, error) {
@@ -326,8 +474,10 @@ func (s *LocalNetworkService) CreateSubnet(ctx context.Context, request ports.Ne
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	vpc, ok := s.vpcs[record.VPCID]
-	if !ok || vpc.TenantID != request.TenantID || vpc.State == ports.NetworkResourceDeleted {
+	// store 模式必须查持久层：网关重启后内存 map 不含历史 VPC，
+	// 只查内存会把已存在的 VPC 误判为 not found（同 CreateSecurityGroup）。
+	vpc, ok := s.resolveVPCForValidation(ctx, request.TenantID, record.VPCID)
+	if !ok || vpc.State == ports.NetworkResourceDeleted {
 		s.mu.Unlock()
 		return ports.NetworkSubnetRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
 	}
@@ -374,6 +524,24 @@ func (s *LocalNetworkService) ListSubnets(ctx context.Context, request ports.Net
 			}
 			items = filtered
 		}
+		if strings.TrimSpace(request.Name) != "" {
+			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if strings.TrimSpace(request.Keyword) != "" {
+			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.SubnetID, strings.TrimSpace(request.Keyword)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
 		if request.State != "" {
 			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
 			for _, record := range items {
@@ -394,6 +562,12 @@ func (s *LocalNetworkService) ListSubnets(ctx context.Context, request ports.Net
 			continue
 		}
 		if strings.TrimSpace(request.VPCID) != "" && record.VPCID != strings.TrimSpace(request.VPCID) {
+			continue
+		}
+		if strings.TrimSpace(request.Name) != "" && !strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+			continue
+		}
+		if strings.TrimSpace(request.Keyword) != "" && !strings.HasPrefix(record.SubnetID, strings.TrimSpace(request.Keyword)) {
 			continue
 		}
 		if request.State != "" && record.State != request.State {
@@ -465,6 +639,7 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 	record := ports.NetworkSecurityGroupRecord{
 		TenantID:        request.TenantID,
 		SecurityGroupID: "sg_" + uuid.NewString(),
+		VPCID:           strings.TrimSpace(request.VPCID),
 		Name:            strings.TrimSpace(request.Name),
 		Description:     strings.TrimSpace(request.Description),
 		Rules:           append([]ports.NetworkSecurityGroupRule(nil), request.Rules...),
@@ -473,15 +648,26 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+	// vpc_id 契约上可空（历史资源可为空），但一旦提供必须校验归属与存活状态，
+	// 语义对齐 CreateSubnet 的 VPC 校验。store 模式必须查持久层：网关重启后
+	// 内存 map 不含历史 VPC，只查内存会把已存在的 VPC 误判为 not found。
+	if record.VPCID != "" {
+		vpc, ok := s.resolveVPCForValidation(ctx, request.TenantID, record.VPCID)
+		if !ok || vpc.State == ports.NetworkResourceDeleted {
+			s.mu.Unlock()
+			return ports.NetworkSecurityGroupRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
+		}
+	}
 	if providerConfigured {
 		record.State = ports.NetworkResourcePending
 		record.Reason = "pending provider apply"
 	}
 	s.securityGroup[record.SecurityGroupID] = record
 	s.securityGroupIdem[idemKey] = record.SecurityGroupID
+	ruleRecords := make([]ports.NetworkSecurityGroupRuleRecord, 0, len(record.Rules))
 	for _, rule := range record.Rules {
 		ruleID := "sgr_" + uuid.NewString()
-		s.securityGroupRules[ruleID] = ports.NetworkSecurityGroupRuleRecord{
+		ruleRecord := ports.NetworkSecurityGroupRuleRecord{
 			TenantID:        request.TenantID,
 			RuleID:          ruleID,
 			SecurityGroupID: record.SecurityGroupID,
@@ -494,10 +680,22 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
+		s.securityGroupRules[ruleID] = ruleRecord
+		ruleRecords = append(ruleRecords, ruleRecord)
 	}
 	s.mu.Unlock()
 	if err := s.upsertSecurityGroup(ctx, record); err != nil {
 		return ports.NetworkSecurityGroupRecord{}, err
+	}
+	// 创建时携带的预设规则（如 Console「常用远程端口」模板）在 store 模式下必须
+	// 同步写规则明细表：详情页规则列表读明细表，只写摘要 JSONB 会导致规则不可见
+	// （安全组-7 同源缺陷的最后一块写路径）。
+	if s.store != nil {
+		for _, ruleRecord := range ruleRecords {
+			if err := s.store.UpsertSecurityGroupRule(ctx, ruleRecord); err != nil {
+				return ports.NetworkSecurityGroupRecord{}, err
+			}
+		}
 	}
 	if !providerConfigured {
 		return record, nil
@@ -517,7 +715,59 @@ func (s *LocalNetworkService) CreateSecurityGroup(ctx context.Context, request p
 	return applied, nil
 }
 
-func (s *LocalNetworkService) ListSecurityGroups(_ context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkSecurityGroupRecord, error) {
+func (s *LocalNetworkService) ListSecurityGroups(ctx context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkSecurityGroupRecord, error) {
+	if s.store != nil {
+		items, err := s.store.ListSecurityGroups(ctx, request.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(request.VPCID) != "" {
+			filtered := make([]ports.NetworkSecurityGroupRecord, 0, len(items))
+			for _, record := range items {
+				if record.VPCID == strings.TrimSpace(request.VPCID) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if strings.TrimSpace(request.Name) != "" {
+			filtered := make([]ports.NetworkSecurityGroupRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if strings.TrimSpace(request.Keyword) != "" {
+			filtered := make([]ports.NetworkSecurityGroupRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.SecurityGroupID, strings.TrimSpace(request.Keyword)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if request.State != "" {
+			filtered := make([]ports.NetworkSecurityGroupRecord, 0, len(items))
+			for _, record := range items {
+				if record.State == request.State {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		// 绑定计数以实例记录派生视图为准（安全组-5），一次查询服务整个列表。
+		derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)
+		s.mu.RLock()
+		for i := range items {
+			items[i].BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(items[i].SecurityGroupID, derived[items[i].SecurityGroupID])
+		}
+		s.mu.RUnlock()
+		sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+		return items, nil
+	}
+	derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]ports.NetworkSecurityGroupRecord, 0, len(s.securityGroup))
@@ -525,32 +775,158 @@ func (s *LocalNetworkService) ListSecurityGroups(_ context.Context, request port
 		if record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 			continue
 		}
+		if strings.TrimSpace(request.VPCID) != "" && record.VPCID != strings.TrimSpace(request.VPCID) {
+			continue
+		}
 		if strings.TrimSpace(request.Name) != "" && !strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+			continue
+		}
+		if strings.TrimSpace(request.Keyword) != "" && !strings.HasPrefix(record.SecurityGroupID, strings.TrimSpace(request.Keyword)) {
 			continue
 		}
 		if request.State != "" && record.State != request.State {
 			continue
 		}
+		record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID, derived[record.SecurityGroupID])
 		items = append(items, record)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 	return items, nil
 }
 
+// derivedSecurityGroupBindings 从实例记录派生安全组绑定视图：
+// map[securityGroupID] -> 该安全组当前真实绑定的实例 binding 记录。
+// 实例侧"更换安全组"只写实例自身 record.Network.SecurityGroups（持久化于
+// workload_instances.network_summary），不写 securityGroupBinds 内存 map，
+// 因此绑定查询必须以实例记录为真实来源反查（测试缺陷 安全组-5）。
+// 终态（deleting/deleted）实例不计入绑定。未注入实例 store 时返回 nil。
+func (s *LocalNetworkService) derivedSecurityGroupBindings(ctx context.Context, tenantID string) map[string][]ports.NetworkSecurityGroupBindingRecord {
+	if s.instances == nil || strings.TrimSpace(tenantID) == "" {
+		return nil
+	}
+	records, err := s.instances.List(ctx, tenantID, "")
+	if err != nil {
+		return nil
+	}
+	derived := map[string][]ports.NetworkSecurityGroupBindingRecord{}
+	for _, record := range records {
+		if record.Status.State == ports.WorkloadStateDeleting || record.Status.State == ports.WorkloadStateDeleted {
+			continue
+		}
+		for _, sg := range record.Network.SecurityGroups {
+			sgID := strings.TrimSpace(sg.ID)
+			if sgID == "" {
+				continue
+			}
+			derived[sgID] = append(derived[sgID], ports.NetworkSecurityGroupBindingRecord{
+				TenantID:        record.TenantID,
+				BindingID:       "sgb-inst-" + record.InstanceID + "-" + sgID,
+				SecurityGroupID: sgID,
+				TargetType:      "instance",
+				TargetID:        record.InstanceID,
+				CreatedAt:       record.CreatedAt,
+			})
+		}
+	}
+	return derived
+}
+
+// securityGroupBoundInstanceCountLocked 统计指定安全组当前绑定的实例数（聚合字段
+// bound_instance_count 的数据源）：实例绑定以派生视图 derived（来自实例记录）为准，
+// 显式 bindings API 写入的记录补充派生未覆盖的目标，按 target_id 去重。
+// derived 为 nil 时（未注入实例 store）退化为纯显式绑定计数。
+// 调用方必须已持有 s.mu 读锁或写锁。
+func (s *LocalNetworkService) securityGroupBoundInstanceCountLocked(securityGroupID string, derived []ports.NetworkSecurityGroupBindingRecord) int {
+	derivedTargets := map[string]struct{}{}
+	for _, bind := range derived {
+		derivedTargets[bind.TargetID] = struct{}{}
+	}
+	count := 0
+	for _, bind := range s.securityGroupBinds {
+		if bind.SecurityGroupID != securityGroupID || bind.TargetType != "instance" {
+			continue
+		}
+		if _, covered := derivedTargets[bind.TargetID]; covered {
+			continue
+		}
+		count++
+	}
+	return count + len(derivedTargets)
+}
+
+// resolveVPCForValidation 解析用于创建校验（安全组/子网等绑定 VPC）的 VPC 记录：
+// store 模式优先查持久层（进程重启后内存 map 不含历史 VPC），否则回退内存 map；
+// 租户归属校验两条路径各自完成（store SQL 按 tenant_id 过滤，内存分支显式比对）。
+// 返回 (record, true) 表示 VPC 存在且属于该租户；存活状态由调用方判断。
+func (s *LocalNetworkService) resolveVPCForValidation(ctx context.Context, tenantID string, vpcID string) (ports.NetworkVPCRecord, bool) {
+	if s.store != nil {
+		record, err := s.store.GetVPC(ctx, tenantID, vpcID)
+		return record, err == nil
+	}
+	record, ok := s.vpcs[vpcID]
+	if !ok || record.TenantID != tenantID {
+		return ports.NetworkVPCRecord{}, false
+	}
+	return record, true
+}
+
 func (s *LocalNetworkService) GetSecurityGroup(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSecurityGroupRecord, error) {
 	if s.store != nil {
-		return s.store.GetSecurityGroup(ctx, request.TenantID, request.ResourceID)
+		record, err := s.store.GetSecurityGroup(ctx, request.TenantID, request.ResourceID)
+		if err != nil {
+			return ports.NetworkSecurityGroupRecord{}, err
+		}
+		derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)
+		s.mu.RLock()
+		record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID, derived[record.SecurityGroupID])
+		s.mu.RUnlock()
+		return record, nil
 	}
+	derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record, ok := s.securityGroup[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkSecurityGroupRecord{}, ports.ErrNotFound
 	}
+	record.BoundInstanceCount = s.securityGroupBoundInstanceCountLocked(record.SecurityGroupID, derived[record.SecurityGroupID])
 	return record, nil
 }
 
 func (s *LocalNetworkService) DeleteSecurityGroup(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSecurityGroupRecord, error) {
+	if s.store != nil {
+		// 存在性校验走持久层，避免网关重启后内存 map 为空导致删除历史安全组误报 404；
+		// 明细表已持久化，删除时级联清理规则明细并重建摘要，防孤儿累积。
+		record, err := s.store.GetSecurityGroup(ctx, request.TenantID, strings.TrimSpace(request.ResourceID))
+		if err != nil {
+			return ports.NetworkSecurityGroupRecord{}, ports.ErrNotFound
+		}
+		if err := s.store.DeleteSecurityGroupRules(ctx, request.TenantID, record.SecurityGroupID); err != nil {
+			return ports.NetworkSecurityGroupRecord{}, err
+		}
+		record.Rules = []ports.NetworkSecurityGroupRule{}
+		record.State = ports.NetworkResourceDeleted
+		record.Reason = "deleted by local network profile"
+		record.UpdatedAt = s.now().UTC()
+		if err := s.store.UpsertSecurityGroup(ctx, record); err != nil {
+			return ports.NetworkSecurityGroupRecord{}, err
+		}
+		s.mu.Lock()
+		if mem, ok := s.securityGroup[record.SecurityGroupID]; ok && mem.TenantID == request.TenantID {
+			mem.Rules = record.Rules
+			mem.State = record.State
+			mem.Reason = record.Reason
+			mem.UpdatedAt = record.UpdatedAt
+			s.securityGroup[mem.SecurityGroupID] = mem
+		}
+		for id, rule := range s.securityGroupRules {
+			if rule.TenantID == request.TenantID && rule.SecurityGroupID == record.SecurityGroupID {
+				delete(s.securityGroupRules, id)
+			}
+		}
+		s.mu.Unlock()
+		return record, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.securityGroup[request.ResourceID]
@@ -567,15 +943,42 @@ func (s *LocalNetworkService) DeleteSecurityGroup(ctx context.Context, request p
 	return record, nil
 }
 
-func (s *LocalNetworkService) ListSecurityGroupRules(_ context.Context, request ports.NetworkSecurityGroupRuleListRequest) ([]ports.NetworkSecurityGroupRuleRecord, error) {
+func (s *LocalNetworkService) ListSecurityGroupRules(ctx context.Context, request ports.NetworkSecurityGroupRuleListRequest) ([]ports.NetworkSecurityGroupRuleRecord, error) {
+	securityGroupID := strings.TrimSpace(request.SecurityGroupID)
+	if s.store != nil {
+		// 规则明细已持久化；安全组存在性校验走持久层，避免网关重启后内存 map 为空导致误报 404。
+		if _, ok := s.resolveSecurityGroupExists(ctx, request.TenantID, securityGroupID); !ok {
+			return nil, ports.ErrNotFound
+		}
+		items, err := s.store.ListSecurityGroupRules(ctx, request.TenantID, securityGroupID)
+		if err != nil {
+			return nil, err
+		}
+		direction := strings.TrimSpace(request.Direction)
+		protocol := strings.TrimSpace(request.Protocol)
+		if direction == "" && protocol == "" {
+			return items, nil
+		}
+		filtered := make([]ports.NetworkSecurityGroupRuleRecord, 0, len(items))
+		for _, record := range items {
+			if direction != "" && record.Direction != direction {
+				continue
+			}
+			if protocol != "" && record.Protocol != protocol {
+				continue
+			}
+			filtered = append(filtered, record)
+		}
+		return filtered, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+	if !s.securityGroupExistsLocked(request.TenantID, securityGroupID) {
 		return nil, ports.ErrNotFound
 	}
 	items := make([]ports.NetworkSecurityGroupRuleRecord, 0, len(s.securityGroupRules))
 	for _, record := range s.securityGroupRules {
-		if record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
+		if record.TenantID != request.TenantID || record.SecurityGroupID != securityGroupID {
 			continue
 		}
 		if strings.TrimSpace(request.Direction) != "" && record.Direction != strings.TrimSpace(request.Direction) {
@@ -603,6 +1006,40 @@ func (s *LocalNetworkService) CreateSecurityGroupRule(ctx context.Context, reque
 	if err := validateSecurityGroupRuleFields(request.Priority, request.Direction, request.Protocol, request.PortRange, request.CIDR, request.Action); err != nil {
 		return ports.NetworkSecurityGroupRuleRecord{}, err
 	}
+	securityGroupID := strings.TrimSpace(request.SecurityGroupID)
+	if s.store != nil {
+		// 安全组存在性走持久层（重启后内存 map 为空，历史安全组只在库里）。
+		sg, err := s.store.GetSecurityGroup(ctx, request.TenantID, securityGroupID)
+		if err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+		}
+		now := s.now().UTC()
+		record := ports.NetworkSecurityGroupRuleRecord{
+			TenantID:        request.TenantID,
+			RuleID:          "sgr_" + uuid.NewString(),
+			SecurityGroupID: sg.SecurityGroupID,
+			Priority:        request.Priority,
+			Direction:       strings.TrimSpace(request.Direction),
+			Protocol:        strings.TrimSpace(request.Protocol),
+			PortRange:       strings.TrimSpace(request.PortRange),
+			CIDR:            strings.TrimSpace(request.CIDR),
+			Action:          strings.TrimSpace(request.Action),
+			Description:     strings.TrimSpace(request.Description),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if err := s.store.UpsertSecurityGroupRule(ctx, record); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		s.mu.Lock()
+		s.securityGroupRules[record.RuleID] = record
+		s.securityRuleIdem[idemKey] = record.RuleID
+		s.mu.Unlock()
+		if err := s.syncSecurityGroupRulesStore(ctx, request.TenantID, sg.SecurityGroupID); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		return record, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if id, ok := s.securityRuleIdem[idemKey]; ok {
@@ -610,7 +1047,7 @@ func (s *LocalNetworkService) CreateSecurityGroupRule(ctx context.Context, reque
 			return record, nil
 		}
 	}
-	sg, ok := s.securityGroup[strings.TrimSpace(request.SecurityGroupID)]
+	sg, ok := s.securityGroup[securityGroupID]
 	if !ok || sg.TenantID != request.TenantID || sg.State == ports.NetworkResourceDeleted {
 		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
 	}
@@ -640,7 +1077,13 @@ func (s *LocalNetworkService) CreateSecurityGroupRule(ctx context.Context, reque
 	return record, nil
 }
 
-func (s *LocalNetworkService) GetSecurityGroupRule(_ context.Context, request ports.NetworkSecurityGroupRuleGetRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+func (s *LocalNetworkService) GetSecurityGroupRule(ctx context.Context, request ports.NetworkSecurityGroupRuleGetRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+	if s.store != nil {
+		if _, ok := s.resolveSecurityGroupExists(ctx, request.TenantID, strings.TrimSpace(request.SecurityGroupID)); !ok {
+			return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+		}
+		return s.store.GetSecurityGroupRule(ctx, request.TenantID, strings.TrimSpace(request.SecurityGroupID), strings.TrimSpace(request.RuleID))
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record, ok := s.securityGroupRules[strings.TrimSpace(request.RuleID)]
@@ -653,16 +1096,42 @@ func (s *LocalNetworkService) GetSecurityGroupRule(_ context.Context, request po
 	return record, nil
 }
 
-func (s *LocalNetworkService) UpdateSecurityGroupRule(ctx context.Context, request ports.NetworkSecurityGroupRuleUpdateRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+// syncSecurityGroupRulesStore 在 store 模式下从规则明细重建安全组的规则摘要，
+// 持久化回 network_security_groups.rules 并同步内存缓存（若存在），
+// 保持 Get/ListSecurityGroup 返回的 record.Rules 与明细一致。
+func (s *LocalNetworkService) syncSecurityGroupRulesStore(ctx context.Context, tenantID string, securityGroupID string) error {
+	if s.store == nil {
+		return nil
+	}
+	rules, err := s.store.ListSecurityGroupRules(ctx, tenantID, securityGroupID)
+	if err != nil {
+		return err
+	}
+	summaries := make([]ports.NetworkSecurityGroupRule, 0, len(rules))
+	for _, rule := range rules {
+		summaries = append(summaries, securityGroupRuleSummary(rule))
+	}
+	sg, err := s.store.GetSecurityGroup(ctx, tenantID, securityGroupID)
+	if err != nil {
+		return err
+	}
+	sg.Rules = summaries
+	sg.UpdatedAt = s.now().UTC()
+	if err := s.store.UpsertSecurityGroup(ctx, sg); err != nil {
+		return err
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.securityGroupRules[strings.TrimSpace(request.RuleID)]
-	if !ok || record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
-		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+	if mem, ok := s.securityGroup[sg.SecurityGroupID]; ok && mem.TenantID == tenantID {
+		mem.Rules = summaries
+		mem.UpdatedAt = sg.UpdatedAt
+		s.securityGroup[mem.SecurityGroupID] = mem
 	}
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
-		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
-	}
+	s.mu.Unlock()
+	return nil
+}
+
+// applySecurityGroupRuleUpdate 按请求合并规则字段并校验，内存与 store 分支共用。
+func applySecurityGroupRuleUpdate(record ports.NetworkSecurityGroupRuleRecord, request ports.NetworkSecurityGroupRuleUpdateRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
 	if request.Priority != 0 {
 		if request.Priority < 1 || request.Priority > 32766 {
 			return ports.NetworkSecurityGroupRuleRecord{}, fmt.Errorf("%w: priority must be between 1 and 32766", ports.ErrInvalid)
@@ -690,6 +1159,44 @@ func (s *LocalNetworkService) UpdateSecurityGroupRule(ctx context.Context, reque
 	if err := validateSecurityGroupRuleFields(record.Priority, record.Direction, record.Protocol, record.PortRange, record.CIDR, record.Action); err != nil {
 		return ports.NetworkSecurityGroupRuleRecord{}, err
 	}
+	return record, nil
+}
+
+func (s *LocalNetworkService) UpdateSecurityGroupRule(ctx context.Context, request ports.NetworkSecurityGroupRuleUpdateRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+	if s.store != nil {
+		record, err := s.store.GetSecurityGroupRule(ctx, request.TenantID, strings.TrimSpace(request.SecurityGroupID), strings.TrimSpace(request.RuleID))
+		if err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+		}
+		record, err = applySecurityGroupRuleUpdate(record, request)
+		if err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		record.UpdatedAt = s.now().UTC()
+		if err := s.store.UpsertSecurityGroupRule(ctx, record); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		s.mu.Lock()
+		s.securityGroupRules[record.RuleID] = record
+		s.mu.Unlock()
+		if err := s.syncSecurityGroupRulesStore(ctx, request.TenantID, record.SecurityGroupID); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		return record, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.securityGroupRules[strings.TrimSpace(request.RuleID)]
+	if !ok || record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
+		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+	}
+	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+		return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+	}
+	record, err := applySecurityGroupRuleUpdate(record, request)
+	if err != nil {
+		return ports.NetworkSecurityGroupRuleRecord{}, err
+	}
 	record.UpdatedAt = s.now().UTC()
 	s.securityGroupRules[record.RuleID] = record
 	s.syncSecurityGroupRulesLocked(record.SecurityGroupID)
@@ -702,6 +1209,22 @@ func (s *LocalNetworkService) UpdateSecurityGroupRule(ctx context.Context, reque
 }
 
 func (s *LocalNetworkService) DeleteSecurityGroupRule(ctx context.Context, request ports.NetworkSecurityGroupRuleGetRequest) (ports.NetworkSecurityGroupRuleRecord, error) {
+	if s.store != nil {
+		record, err := s.store.GetSecurityGroupRule(ctx, request.TenantID, strings.TrimSpace(request.SecurityGroupID), strings.TrimSpace(request.RuleID))
+		if err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, ports.ErrNotFound
+		}
+		if err := s.store.DeleteSecurityGroupRule(ctx, request.TenantID, record.SecurityGroupID, record.RuleID); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		s.mu.Lock()
+		delete(s.securityGroupRules, record.RuleID)
+		s.mu.Unlock()
+		if err := s.syncSecurityGroupRulesStore(ctx, request.TenantID, record.SecurityGroupID); err != nil {
+			return ports.NetworkSecurityGroupRuleRecord{}, err
+		}
+		return record, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.securityGroupRules[strings.TrimSpace(request.RuleID)]
@@ -721,17 +1244,66 @@ func (s *LocalNetworkService) DeleteSecurityGroupRule(ctx context.Context, reque
 	return record, nil
 }
 
-func (s *LocalNetworkService) ListSecurityGroupBindings(_ context.Context, request ports.NetworkSecurityGroupBindingListRequest) ([]ports.NetworkSecurityGroupBindingRecord, error) {
+// resolveSecurityGroupExists 解析安全组是否存在且属于该租户：
+// store 模式优先查持久层（进程重启后内存 map 不含历史安全组），否则回退内存 map。
+// 返回 (record, true) 表示安全组存在且属于该租户。
+func (s *LocalNetworkService) resolveSecurityGroupExists(ctx context.Context, tenantID string, securityGroupID string) (ports.NetworkSecurityGroupRecord, bool) {
+	if s.store != nil {
+		record, err := s.store.GetSecurityGroup(ctx, tenantID, securityGroupID)
+		return record, err == nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+	record, ok := s.securityGroup[strings.TrimSpace(securityGroupID)]
+	if !ok || record.TenantID != tenantID || record.State == ports.NetworkResourceDeleted {
+		return ports.NetworkSecurityGroupRecord{}, false
+	}
+	return record, true
+}
+
+// storeBackedSecurityGroupExists 仅查持久层确认安全组存在且属于该租户。
+// 供已持有 s.mu 锁的调用方使用（不得在此再加锁）；store 未配置时恒为 false。
+func (s *LocalNetworkService) storeBackedSecurityGroupExists(ctx context.Context, tenantID string, securityGroupID string) bool {
+	if s.store == nil {
+		return false
+	}
+	_, err := s.store.GetSecurityGroup(ctx, tenantID, securityGroupID)
+	return err == nil
+}
+
+func (s *LocalNetworkService) ListSecurityGroupBindings(ctx context.Context, request ports.NetworkSecurityGroupBindingListRequest) ([]ports.NetworkSecurityGroupBindingRecord, error) {
+	if _, ok := s.resolveSecurityGroupExists(ctx, request.TenantID, request.SecurityGroupID); !ok {
 		return nil, ports.ErrNotFound
 	}
-	items := make([]ports.NetworkSecurityGroupBindingRecord, 0, len(s.securityGroupBinds))
+	// 实例绑定以实例记录派生视图为准（安全组-5）：实例侧"更换安全组"只更新
+	// 实例自身记录，不写 securityGroupBinds，显式绑定无法反映真实绑定关系。
+	derived := s.derivedSecurityGroupBindings(ctx, request.TenantID)[strings.TrimSpace(request.SecurityGroupID)]
+	derivedTargets := make(map[string]struct{}, len(derived))
+	for _, bind := range derived {
+		derivedTargets[bind.TargetID] = struct{}{}
+	}
+	s.mu.RLock()
+	items := make([]ports.NetworkSecurityGroupBindingRecord, 0, len(s.securityGroupBinds)+len(derived))
 	for _, record := range s.securityGroupBinds {
+		// 同一实例已被派生视图覆盖时跳过显式记录，避免重复展示。
+		if record.TargetType == "instance" {
+			if _, covered := derivedTargets[record.TargetID]; covered {
+				continue
+			}
+		}
 		if record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
 			continue
 		}
+		if strings.TrimSpace(request.TargetType) != "" && record.TargetType != strings.TrimSpace(request.TargetType) {
+			continue
+		}
+		if strings.TrimSpace(request.TargetID) != "" && record.TargetID != strings.TrimSpace(request.TargetID) {
+			continue
+		}
+		items = append(items, record)
+	}
+	s.mu.RUnlock()
+	for _, record := range derived {
 		if strings.TrimSpace(request.TargetType) != "" && record.TargetType != strings.TrimSpace(request.TargetType) {
 			continue
 		}
@@ -744,7 +1316,7 @@ func (s *LocalNetworkService) ListSecurityGroupBindings(_ context.Context, reque
 	return items, nil
 }
 
-func (s *LocalNetworkService) CreateSecurityGroupBinding(_ context.Context, request ports.NetworkSecurityGroupBindingCreateRequest) (ports.NetworkSecurityGroupBindingRecord, error) {
+func (s *LocalNetworkService) CreateSecurityGroupBinding(ctx context.Context, request ports.NetworkSecurityGroupBindingCreateRequest) (ports.NetworkSecurityGroupBindingRecord, error) {
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
 	if err != nil {
 		return ports.NetworkSecurityGroupBindingRecord{}, err
@@ -763,7 +1335,7 @@ func (s *LocalNetworkService) CreateSecurityGroupBinding(_ context.Context, requ
 			return record, nil
 		}
 	}
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) && !s.storeBackedSecurityGroupExists(ctx, request.TenantID, request.SecurityGroupID) {
 		return ports.NetworkSecurityGroupBindingRecord{}, ports.ErrNotFound
 	}
 	record := ports.NetworkSecurityGroupBindingRecord{
@@ -779,14 +1351,14 @@ func (s *LocalNetworkService) CreateSecurityGroupBinding(_ context.Context, requ
 	return record, nil
 }
 
-func (s *LocalNetworkService) DeleteSecurityGroupBinding(_ context.Context, request ports.NetworkSecurityGroupBindingDeleteRequest) (ports.NetworkSecurityGroupBindingRecord, error) {
+func (s *LocalNetworkService) DeleteSecurityGroupBinding(ctx context.Context, request ports.NetworkSecurityGroupBindingDeleteRequest) (ports.NetworkSecurityGroupBindingRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.securityGroupBinds[strings.TrimSpace(request.BindingID)]
 	if !ok || record.TenantID != request.TenantID || record.SecurityGroupID != strings.TrimSpace(request.SecurityGroupID) {
 		return ports.NetworkSecurityGroupBindingRecord{}, ports.ErrNotFound
 	}
-	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) {
+	if !s.securityGroupExistsLocked(request.TenantID, request.SecurityGroupID) && !s.storeBackedSecurityGroupExists(ctx, request.TenantID, request.SecurityGroupID) {
 		return ports.NetworkSecurityGroupBindingRecord{}, ports.ErrNotFound
 	}
 	delete(s.securityGroupBinds, record.BindingID)
@@ -827,8 +1399,10 @@ func (s *LocalNetworkService) CreateLoadBalancer(ctx context.Context, request po
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	vpc, ok := s.vpcs[record.VPCID]
-	if !ok || vpc.TenantID != request.TenantID || vpc.State == ports.NetworkResourceDeleted {
+	// store 模式必须查持久层：网关重启后内存 map 不含历史 VPC，
+	// 只查内存会把已存在的 VPC 误判为 not found（同 CreateSecurityGroup）。
+	vpc, ok := s.resolveVPCForValidation(ctx, request.TenantID, record.VPCID)
+	if !ok || vpc.State == ports.NetworkResourceDeleted {
 		s.mu.Unlock()
 		return ports.NetworkLoadBalancerRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
 	}
@@ -932,8 +1506,10 @@ func (s *LocalNetworkService) CreateRoute(ctx context.Context, request ports.Net
 			return record, nil
 		}
 	}
-	vpc, ok := s.vpcs[strings.TrimSpace(request.VPCID)]
-	if !ok || vpc.TenantID != request.TenantID || vpc.State == ports.NetworkResourceDeleted {
+	// store 模式必须查持久层：网关重启后内存 map 不含历史 VPC，
+	// 只查内存会把已存在的 VPC 误判为 not found（同 CreateSecurityGroup）。
+	vpc, ok := s.resolveVPCForValidation(ctx, request.TenantID, strings.TrimSpace(request.VPCID))
+	if !ok || vpc.State == ports.NetworkResourceDeleted {
 		s.mu.Unlock()
 		return ports.NetworkRouteRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
 	}

@@ -352,6 +352,7 @@ type StorageBucketCreateRequest struct {
 	Name           string
 	Region         string
 	AccessMode     string
+	StorageClass   string
 }
 
 type StorageObjectUploadRequest struct {
@@ -474,6 +475,8 @@ type StorageResourceListRequest struct {
 	TenantID string
 	Limit    int
 	Cursor   string
+	Status   StorageResourceState
+	Keyword  string
 }
 
 type VolumeSnapshotListRequest struct {
@@ -522,6 +525,7 @@ type StorageService interface {
 	CreateStorageBucket(ctx context.Context, request StorageBucketCreateRequest) (StorageBucketRecord, error)
 	ListStorageBuckets(ctx context.Context, request StorageResourceListRequest) ([]StorageBucketRecord, error)
 	GetStorageBucket(ctx context.Context, request StorageResourceGetRequest) (StorageBucketRecord, error)
+	DeleteStorageBucket(ctx context.Context, request StorageResourceGetRequest) (StorageBucketRecord, error)
 	ListBucketObjects(ctx context.Context, request StorageBucketObjectListRequest) (StorageBucketObjectListResult, error)
 	DeleteBucketObject(ctx context.Context, request StorageBucketObjectDeleteRequest) (StorageBucketObjectDeleteResult, error)
 	CreateBucketPrefix(ctx context.Context, request StorageBucketPrefixCreateRequest) (StorageBucketObjectEntry, error)

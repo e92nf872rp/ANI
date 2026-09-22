@@ -39,7 +39,7 @@ PINNED_COMPONENT_VERSIONS = {
     "go.opentelemetry.io/otel/exporters/prometheus": "v0.66.0",
     "github.com/prometheus/client_golang": "v1.24.1",
     "github.com/prometheus/otlptranslator": "v1.0.0",
-    "google.golang.org/grpc": "v1.82.1",
+    "google.golang.org/grpc": "v1.83.2",
     "github.com/zhangzhe-ctrl/ani-session-gateway/api": "v0.1.0",
 }
 
@@ -62,6 +62,15 @@ def generate_sboms(root: Path, output_dir: Path, tool_version: str) -> None:
         output = output_dir / sbom_filename(module_path)
         env = base_env.copy()
         env["GOWORK"] = "off"
+        # cyclonedx-gomod hashes each module's source dir. Modules that only
+        # have .mod metadata in the module cache report an empty Dir, which
+        # crashes dirhash. Materialize the module graph sources first.
+        _run(
+            ["go", "mod", "download", "all"],
+            cwd=root / module_path,
+            env=env,
+            label=f"{module_path} go mod download",
+        )
         _run(
             [
                 "go",

@@ -68,10 +68,29 @@ type KBGRPCClient interface {
 	// an error; a missing KB surfaces NOT_FOUND. Single-passthrough shape,
 	// aligned with GetKB.
 	GetKBPermissions(ctx context.Context, tenantID string, kbID string) (*kbv1.KBPermissions, error)
+	// GetKBConfig reads the KB ingest/query configuration (SPEC §4.3 #22,
+	// kb-p1-plan §3.5): embedding_model / chunk_size / ocr_enabled on the
+	// ingest side and top_k / score_threshold / retrieval_mode on the query
+	// side. Single-passthrough shape, aligned with GetKBPermissions.
+	GetKBConfig(ctx context.Context, tenantID string, kbID string) (*kbv1.KBConfig, error)
 	// ReparseDocument re-queues an already-ingested document for parsing
 	// (SPEC §5.1 reparse 事件流). It returns an AsyncTaskRef because reparse
 	// is asynchronous; the client polls the task via the tasks API.
 	ReparseDocument(ctx context.Context, tenantID string, kbID string, docID string, idempotencyKey string) (*commonv1.AsyncTaskRef, error)
+	// RebuildKB queues a full-KB rebuild (SPEC §4.3 #24, kb-p1-plan §2.7):
+	// every eligible document is reset and re-parsed by the rebuild consumer.
+	// It returns an AsyncTaskRef because rebuild is asynchronous; the client
+	// polls the task via the tasks API, mirroring ReparseDocument.
+	RebuildKB(ctx context.Context, tenantID string, kbID string, idempotencyKey string) (*commonv1.AsyncTaskRef, error)
+	// UpdateKBConfig applies an explicit-partial config update (SPEC §4.3
+	// #23, kb-p1-plan §5): only the six config fields carried in the
+	// request are change candidates (tri-state via proto3 optional +
+	// BoolValue); absent fields keep their current values. An
+	// embedding_model or chunk_size change pairs the UPDATE with a full-KB
+	// rebuild in the same kb-service transaction, so the response carries
+	// the new KBConfig plus a rebuild_task ref (unset when the change did
+	// not touch the embedding settings — the contract's nullable field).
+	UpdateKBConfig(ctx context.Context, tenantID string, kbID string, idempotencyKey string, req *kbv1.UpdateKBConfigRequest) (*kbv1.UpdateKBConfigResponse, error)
 	// ListKBAuditLogs reads the KB management-plane audit trail (SPEC §4.1 #21,
 	// kb-p1-plan §6.4): cursor-paginated entries ordered created_at DESC,
 	// id DESC. Flat items+next_cursor shape, aligned with ListKBCitations.
@@ -365,6 +384,15 @@ func (c *kbGRPCClient) GetKBPermissions(ctx context.Context, tenantID, kbID stri
 	return c.client.GetKBPermissions(callCtx, &kbv1.GetKBPermissionsRequest{TenantId: tenantID, KbId: kbID})
 }
 
+// GetKBConfig reads the KB ingest/query configuration (SPEC §4.3 #22).
+// The tenant id comes from the Auth middleware; a missing KB surfaces
+// NOT_FOUND from kb-service, mapped by writeKBError.
+func (c *kbGRPCClient) GetKBConfig(ctx context.Context, tenantID, kbID string) (*kbv1.KBConfig, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.GetKBConfig(callCtx, &kbv1.GetKBConfigRequest{TenantId: tenantID, KbId: kbID})
+}
+
 // ReparseDocument re-queues an already-ingested document for parsing
 // (SPEC §5.1 reparse 事件流). The tenant id comes from the Auth middleware,
 // and the idempotency key is client-generated for replay safety, mirroring
@@ -380,6 +408,20 @@ func (c *kbGRPCClient) ReparseDocument(ctx context.Context, tenantID, kbID, docI
 	})
 }
 
+// RebuildKB queues a full-KB rebuild (SPEC §4.3 #24, kb-p1-plan §2.7). The
+// tenant id comes from the Auth middleware, and the idempotency key is
+// client-generated for replay safety, mirroring the ReparseDocument
+// async-task pattern.
+func (c *kbGRPCClient) RebuildKB(ctx context.Context, tenantID, kbID, idempotencyKey string) (*commonv1.AsyncTaskRef, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.RebuildKB(callCtx, &kbv1.RebuildKBRequest{
+		TenantId:       tenantID,
+		KbId:           kbID,
+		IdempotencyKey: idempotencyKey,
+	})
+}
+
 // ListKBAuditLogs reads the KB management-plane audit trail (SPEC §4.1 #21).
 // The tenant id comes from the Auth middleware; kb-service enforces the
 // keyset pagination (created_at DESC, id DESC) and the cursor shape.
@@ -391,6 +433,24 @@ func (c *kbGRPCClient) ListKBAuditLogs(ctx context.Context, tenantID, kbID strin
 		KbId:     kbID,
 		Page:     &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor},
 	})
+}
+
+// UpdateKBConfig applies an explicit-partial config update (SPEC §4.3 #23,
+// kb-p1-plan §5). The tenant id comes from the Auth middleware and the
+// idempotency key is client-generated for replay safety, mirroring
+// UpdateKBPermissions. Tri-state request fields are passed through as
+// pointers (nil = keep current) — the change detection and the paired
+// rebuild live in kb-service.
+func (c *kbGRPCClient) UpdateKBConfig(ctx context.Context, tenantID, kbID, idempotencyKey string, req *kbv1.UpdateKBConfigRequest) (*kbv1.UpdateKBConfigResponse, error) {
+	if req == nil {
+		req = &kbv1.UpdateKBConfigRequest{}
+	}
+	req.TenantId = tenantID
+	req.KbId = kbID
+	req.IdempotencyKey = idempotencyKey
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.UpdateKBConfig(callCtx, req)
 }
 
 // kbError is the structured error produced by mapGRPCError. Handlers convert

@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>247</dd></div>
-          <div><dt>Schemas</dt><dd>341</dd></div>
+          <div><dt>Operations</dt><dd>250</dd></div>
+          <div><dt>Schemas</dt><dd>352</dd></div>
         </dl>
       </section>
 
@@ -600,6 +600,14 @@
           <td>201, 400, 401, 403, 409</td>
         </tr>
         <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/buckets/{bucket_id}</code></td>
+          <td><code>deleteStorageBucket</code></td>
+          <td>删除对象存储桶</td>
+          <td><code>scope:objects:delete</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
           <td><span class="method method-put">PUT</span></td>
           <td><code>/buckets/{bucket_id}/acl</code></td>
           <td><code>setStorageBucketACL</code></td>
@@ -840,6 +848,14 @@
           <td>200, 401, 403</td>
         </tr>
         <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-inventory/events</code></td>
+          <td><code>listGPUDeviceEvents</code></td>
+          <td>查询 GPU 设备台账事件流</td>
+          <td><code>scope:gpu-inventory:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/gpu-inventory/gpu-partitions</code></td>
           <td><code>createGPUPartition</code></td>
@@ -861,7 +877,7 @@
           <td><code>updateGPUDeviceStatus</code></td>
           <td>翻转 GPU 设备状态</td>
           <td><code>scope:gpu-inventory:write</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1633,6 +1649,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/overview</code></td>
+          <td><code>getConsoleOverview</code></td>
+          <td>查询 Console 首页概览统计</td>
+          <td><code>scope:instances:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/platform-workload-capabilities</code></td>
           <td><code>getPlatformWorkloadCapabilities</code></td>
           <td>查询平台工作负载能力</td>
@@ -2154,6 +2178,15 @@
         <li><code>BucketPrefixCreateRequest</code></li>
         <li><code>CloneSandboxCheckpointRequest</code></li>
         <li><code>CompleteOIDCLoginRequest</code></li>
+        <li><code>ConsoleInferenceServiceOverview</code></li>
+        <li><code>ConsoleInferenceServiceStatusDistribution</code></li>
+        <li><code>ConsoleInstanceOverview</code></li>
+        <li><code>ConsoleInstanceStateDistribution</code></li>
+        <li><code>ConsoleKnowledgeBaseOverview</code></li>
+        <li><code>ConsoleKnowledgeBaseStatusDistribution</code></li>
+        <li><code>ConsoleModelOverview</code></li>
+        <li><code>ConsoleModelStatusDistribution</code></li>
+        <li><code>ConsoleOverviewResponse</code></li>
         <li><code>CoreDevProfileInfo</code></li>
         <li><code>CreateAPIKeyRequest</code></li>
         <li><code>CreateAPIKeyResponse</code></li>
@@ -2202,6 +2235,8 @@
         <li><code>FilesystemMountTarget</code></li>
         <li><code>FilesystemMountTargetCreateRequest</code></li>
         <li><code>FilesystemMountTargetListResponse</code></li>
+        <li><code>GPUDeviceEvent</code></li>
+        <li><code>GPUDeviceEventListResponse</code></li>
         <li><code>GPUDeviceStatusUpdateRequest</code></li>
         <li><code>GPUInventoryListResponse</code></li>
         <li><code>GPUInventoryRecord</code></li>

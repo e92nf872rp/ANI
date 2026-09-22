@@ -819,3 +819,91 @@ func TestVectorStoreAPIDeleteDocumentsSuccessReturnsDeletedCount(t *testing.T) {
 		t.Fatalf("deleted_count = %d, want 7", body.DeletedCount)
 	}
 }
+
+// listableVectorStoreService returns a fixed set of vector stores, used to
+// verify the list handler applies status/keyword filtering.
+type listableVectorStoreService struct {
+	recordingVectorStoreService
+}
+
+func (s *listableVectorStoreService) ListVectorStores(context.Context, ports.VectorStoreResourceListRequest) ([]ports.VectorStoreRecord, error) {
+	return []ports.VectorStoreRecord{
+		{TenantID: "tenant-a", StoreID: "vs-a", Name: "test-ly-vec-ready", State: ports.VectorStoreReady},
+		{TenantID: "tenant-a", StoreID: "vs-b", Name: "test-ly-vec-pending", State: ports.VectorStorePending},
+		{TenantID: "tenant-a", StoreID: "vs-c", Name: "kb-main-ready", State: ports.VectorStoreReady},
+	}, nil
+}
+
+// vectorStoreListItems performs a list request and returns the parsed items.
+func vectorStoreListItems(t *testing.T, query string) []map[string]any {
+	t.Helper()
+	h := setupVectorStoreTestServer(&listableVectorStoreService{})
+	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/vector-stores"+query,
+		nil, ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-a"}).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("list status = %d body=%s, want 200", resp.StatusCode(), resp.Body())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(resp.Body(), &decoded); err != nil {
+		t.Fatalf("decode list body: %v", err)
+	}
+	raw, _ := decoded["items"].([]any)
+	items := make([]map[string]any, 0, len(raw))
+	for _, r := range raw {
+		items = append(items, r.(map[string]any))
+	}
+	return items
+}
+
+func TestVectorStoreListFiltersByState(t *testing.T) {
+	items := vectorStoreListItems(t, "?state=ready")
+	if len(items) != 2 {
+		t.Fatalf("state=ready items = %d, want 2", len(items))
+	}
+	for _, it := range items {
+		if it["state"] != "ready" {
+			t.Fatalf("item state = %v, want ready", it["state"])
+		}
+	}
+}
+
+func TestVectorStoreListFiltersByKeyword(t *testing.T) {
+	items := vectorStoreListItems(t, "?keyword=test-ly-vec")
+	if len(items) != 2 {
+		t.Fatalf("keyword=test-ly-vec items = %d, want 2", len(items))
+	}
+	for _, it := range items {
+		name, _ := it["name"].(string)
+		if !strings.Contains(strings.ToLower(name), "test-ly-vec") {
+			t.Fatalf("item name = %q, want contains test-ly-vec", name)
+		}
+	}
+}
+
+func TestVectorStoreListFiltersByStateAndKeyword(t *testing.T) {
+	items := vectorStoreListItems(t, "?state=ready&keyword=test-ly-vec")
+	if len(items) != 1 {
+		t.Fatalf("state=ready&keyword=test-ly-vec items = %d, want 1", len(items))
+	}
+	if items[0]["id"] != "vs-a" || items[0]["state"] != "ready" {
+		t.Fatalf("item = %v, want vs-a ready", items[0])
+	}
+}
+
+func TestVectorStoreListFiltersById(t *testing.T) {
+	items := vectorStoreListItems(t, "?search_field=id&keyword=vs-b")
+	if len(items) != 1 {
+		t.Fatalf("search_field=id&keyword=vs-b items = %d, want 1", len(items))
+	}
+	if items[0]["id"] != "vs-b" {
+		t.Fatalf("item = %v, want vs-b", items[0])
+	}
+}
+
+func TestVectorStoreListFiltersByNameViaSearchField(t *testing.T) {
+	// search_field=name 应与缺省 keyword 行为一致（按 name 模糊匹配）。
+	items := vectorStoreListItems(t, "?search_field=name&keyword=test-ly-vec")
+	if len(items) != 2 {
+		t.Fatalf("search_field=name&keyword=test-ly-vec items = %d, want 2", len(items))
+	}
+}

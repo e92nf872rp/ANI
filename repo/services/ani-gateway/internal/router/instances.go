@@ -90,6 +90,7 @@ type instanceAPI struct {
 	tasks                         ports.AsyncTaskStore
 	realProvider                  bool
 	providerName                  string
+	templates                     ports.SandboxTemplateCatalog
 }
 
 type InstanceRuntime struct {
@@ -503,7 +504,14 @@ type instanceContainerResponse struct {
 	ReadyReplicas int32                             `json:"ready_replicas"`
 	Revision      string                            `json:"revision,omitempty"`
 	RolloutStatus string                            `json:"rollout_status,omitempty"`
+	Env           []instanceEnvResponse             `json:"env,omitempty"`
 	History       []instanceContainerChangeResponse `json:"history,omitempty"`
+}
+
+type instanceEnvResponse struct {
+	Name      string  `json:"name"`
+	Value     *string `json:"value,omitempty"`
+	SecretRef string  `json:"secret_ref,omitempty"`
 }
 
 type instanceContainerChangeResponse struct {
@@ -518,6 +526,7 @@ type instanceGPUResponse struct {
 	Count              int     `json:"count"`
 	ResourceName       string  `json:"resource_name,omitempty"`
 	QueueName          string  `json:"queue_name,omitempty"`
+	SchedulingState    string  `json:"scheduling_state"`
 	SchedulingReason   string  `json:"scheduling_reason,omitempty"`
 	UtilizationPercent float64 `json:"utilization_percent"`
 }
@@ -526,6 +535,7 @@ type instanceSandboxResponse struct {
 	RuntimeClass        string                        `json:"runtime_class"`
 	SessionTimeout      string                        `json:"session_timeout"`
 	NetworkEgressPolicy string                        `json:"network_egress_policy"`
+	EgressAllowlist     []string                      `json:"egress_allowlist,omitempty"`
 	SessionState        string                        `json:"session_state"`
 	Ports               []instanceSandboxPortResponse `json:"ports,omitempty"`
 	DevProfile          coreDevProfileResponse        `json:"dev_profile"`
@@ -783,6 +793,7 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 		store:                         store,
 		sandboxRuntime:                sandboxRuntime,
 		tasks:                         defaultTaskStore,
+		templates:                     runtimeadapter.NewLocalSandboxTemplateCatalog(),
 	}
 }
 
@@ -845,6 +856,9 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 	v1.POST("/demo/instances/:instance_id/console", api.console)
 	v1.POST("/demo/instances/:instance_id/console/exec", api.consoleExec)
 	v1.GET("/instance-operations/:operation_id", api.getOperation)
+	// Console 首页概览统计（GET /overview）：复用实例链路做实例计数，
+	// handler 定义在 console_overview.go。
+	registerConsoleOverview(v1, api)
 	return api.service, api.observeInstance
 }
 
@@ -862,6 +876,28 @@ func (api *instanceAPI) create(ctx context.Context, c *app.RequestContext) {
 	if err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
+	}
+	// If creating a sandbox with template_id and no explicit image ref, take image from the template catalog
+	if spec.Kind == ports.WorkloadKindSandbox &&
+		strings.TrimSpace(req.SandboxConfig.TemplateID) != "" &&
+		strings.TrimSpace(spec.Image) == "docker.io/nvidia/cuda:12.4.1-base-ubuntu22.04" {
+		// List templates to find the matching template id
+		listReq := ports.SandboxTemplateListRequest{
+			TenantID: spec.TenantID,
+			Limit:    100,
+		}
+		listResp, err := api.templates.ListSandboxTemplates(ctx, listReq)
+		if err == nil {
+			for _, tmpl := range listResp.Items {
+				if tmpl.ID == req.SandboxConfig.TemplateID {
+					if strings.TrimSpace(tmpl.Image) != "" {
+						// Replace the default cuda image with the template's image
+						spec.Image = tmpl.Image
+						break
+					}
+				}
+			}
+		}
 	}
 	result, err := api.service.Create(ctx, ports.WorkloadInstanceCreateRequest{
 		IdempotencyKey:  req.IdempotencyKey,
@@ -1472,6 +1508,7 @@ func (api *instanceAPI) observeOrphan(ctx context.Context, tenantID string, depN
 			CreationTimestamp time.Time `json:"creationTimestamp"`
 		} `json:"metadata"`
 		Spec struct {
+			Replicas *int32 `json:"replicas"`
 			Template struct {
 				Spec struct {
 					Containers []struct {
@@ -1498,11 +1535,29 @@ func (api *instanceAPI) observeOrphan(ctx context.Context, tenantID string, depN
 		return obs
 	}
 	obs.CreatedAt = dep.Metadata.CreationTimestamp
-	if dep.Status.AvailableReplicas > 0 {
+	// Progressing=False means the rollout hit a terminal failure (e.g.
+	// ProgressDeadlineExceeded): surface Failed instead of a stale
+	// Provisioning/Pending so state filters can find failed orphans.
+	progressingFalse := false
+	for _, condition := range dep.Status.Conditions {
+		if strings.EqualFold(condition.Type, "Progressing") && strings.EqualFold(condition.Status, "False") {
+			progressingFalse = true
+			break
+		}
+	}
+	switch {
+	case dep.Status.AvailableReplicas > 0:
 		obs.Phase = "Running"
-	} else if dep.Status.Replicas > 0 {
+	case dep.Spec.Replicas != nil && *dep.Spec.Replicas == 0:
+		// Intentionally scaled to 0 by a lifecycle stop: a stopped orphan,
+		// not a never-started pending one. spec.replicas is the intent
+		// contract (mirrors refreshOneStoreStatus).
+		obs.Phase = "Stopped"
+	case progressingFalse:
+		obs.Phase = "Failed"
+	case dep.Status.Replicas > 0:
 		obs.Phase = "Provisioning"
-	} else {
+	default:
 		obs.Phase = "Pending"
 	}
 	for _, condition := range dep.Status.Conditions {
@@ -1650,6 +1705,8 @@ func orphanState(phase string) ports.WorkloadState {
 		return ports.WorkloadStateRunning
 	case "provisioning", "starting":
 		return ports.WorkloadStateProvisioning
+	case "stopped":
+		return ports.WorkloadStateStopped
 	case "failed":
 		return ports.WorkloadStateFailed
 	case "pending":
@@ -1717,8 +1774,8 @@ func (api *instanceAPI) get(ctx context.Context, c *app.RequestContext) {
 
 func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 	tenantID := instanceTenantID(c)
-	kind := ports.WorkloadKind(c.Query("kind"))
-	listReq, err := instanceListRequestFromQuery(c, tenantID, kind)
+	kinds := parseMultiValueQuery(c.Query("kind"))
+	listReq, err := instanceListRequestFromQuery(c, tenantID, kinds)
 	if err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
@@ -1728,7 +1785,13 @@ func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 	// "provisioning" captured at create time. This is an on-demand refresh
 	// triggered by the list request; there is no background reconcile loop
 	// data from the in-memory store.
-	api.refreshStoreStatuses(ctx, tenantID, kind)
+	// 单值 kind 时把过滤下推给 store 精准刷新；多值时刷新租户全量记录，
+	// kind 多值 OR 语义由 MatchesInstanceList/MatchesInstanceKind 承担。
+	refreshKind := ports.WorkloadKind("")
+	if len(kinds) == 1 {
+		refreshKind = ports.WorkloadKind(kinds[0])
+	}
+	api.refreshStoreStatuses(ctx, tenantID, refreshKind)
 	records, err := api.service.List(ctx, listReq)
 	if err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "INSTANCE_LIST_FAILED", err.Error())
@@ -1748,7 +1811,14 @@ func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 		if _, found := existing[orphan.InstanceID]; found {
 			continue
 		}
-		if kind != "" && orphan.Kind != kind {
+		// 孤儿实例同样要遵循请求里的**全部**过滤语义，否则与 store 记录不一致，
+		// live Kubernetes 实例会无条件返回（Bug-2：keyword/search_field 不生效；
+		// Bug-6：state 过滤不生效；VPC-3/子网-3：vpc_id/subnet_id 归属过滤不生效；
+		// 多值：kind/state 逗号多值 OR 过滤）。
+		// 复用 store 记录同一条 MatchesInstanceList，避免 scheduling_state /
+		// rollout_status / gpu_model / queue_name / template_id / session_state
+		// 这些条件被静默跳过（表现为有孤儿的集群上这些筛选"没效果"）。
+		if !runtimeadapter.MatchesInstanceList(orphan, listReq) {
 			continue
 		}
 		records = append(records, orphan)
@@ -1767,7 +1837,45 @@ func (api *instanceAPI) list(ctx context.Context, c *app.RequestContext) {
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": total, "next_cursor": optionalString(nextCursor)})
 }
 
-func instanceListRequestFromQuery(c *app.RequestContext, tenantID string, kind ports.WorkloadKind) (ports.WorkloadInstanceListRequest, error) {
+// parseMultiValueQuery 把逗号分隔的查询参数拆成集合（OR 语义过滤）。
+// 去除每项首尾空白并丢弃空白项；空串或全空白返回 nil 表示"不过滤"。
+func parseMultiValueQuery(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func toWorkloadKinds(values []string) []ports.WorkloadKind {
+	if len(values) == 0 {
+		return nil
+	}
+	kinds := make([]ports.WorkloadKind, 0, len(values))
+	for _, value := range values {
+		kinds = append(kinds, ports.WorkloadKind(value))
+	}
+	return kinds
+}
+
+func toWorkloadStates(values []string) []ports.WorkloadState {
+	if len(values) == 0 {
+		return nil
+	}
+	states := make([]ports.WorkloadState, 0, len(values))
+	for _, value := range values {
+		states = append(states, ports.WorkloadState(value))
+	}
+	return states
+}
+
+func instanceListRequestFromQuery(c *app.RequestContext, tenantID string, kinds []string) (ports.WorkloadInstanceListRequest, error) {
 	createdAfter, err := optionalRFC3339Query(c, "created_after")
 	if err != nil {
 		return ports.WorkloadInstanceListRequest{}, err
@@ -1778,14 +1886,17 @@ func instanceListRequestFromQuery(c *app.RequestContext, tenantID string, kind p
 	}
 	return ports.WorkloadInstanceListRequest{
 		TenantID:        tenantID,
-		Kind:            kind,
-		State:           ports.WorkloadState(c.Query("state")),
+		Kinds:           toWorkloadKinds(kinds),
+		States:          toWorkloadStates(parseMultiValueQuery(c.Query("state"))),
 		Keyword:         c.Query("keyword"),
+		SearchField:     c.Query("search_field"),
 		CreatedAfter:    createdAfter,
 		CreatedBefore:   createdBefore,
 		SpecID:          c.Query("spec_id"),
 		ImageID:         c.Query("image_id"),
 		NodeName:        c.Query("node_name"),
+		VPCID:           c.Query("vpc_id"),
+		SubnetID:        c.Query("subnet_id"),
 		RolloutStatus:   c.Query("rollout_status"),
 		GPUModel:        c.Query("gpu_model"),
 		QueueName:       c.Query("queue_name"),
@@ -2003,7 +2114,7 @@ func (api *instanceAPI) listOperations(ctx context.Context, c *app.RequestContex
 	for _, item := range result.Items {
 		items = append(items, operationResponseFromRecord(item))
 	}
-	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": result.NextCursor})
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": result.Total, "next_cursor": result.NextCursor})
 }
 
 func (api *instanceAPI) listLogs(ctx context.Context, c *app.RequestContext) {
@@ -3713,11 +3824,20 @@ func containerResponseFromRecord(record ports.WorkloadInstanceRecord) *instanceC
 			CreatedAt: item.CreatedAt.Format(time.RFC3339),
 		})
 	}
+	env := make([]instanceEnvResponse, 0, len(record.Container.Env))
+	for _, item := range record.Container.Env {
+		env = append(env, instanceEnvResponse{
+			Name:      item.Name,
+			Value:     item.Value,
+			SecretRef: item.SecretRef,
+		})
+	}
 	return &instanceContainerResponse{
 		Replicas:      record.Container.Replicas,
 		ReadyReplicas: record.Container.ReadyReplicas,
 		Revision:      record.Container.Revision,
 		RolloutStatus: record.Container.RolloutStatus,
+		Env:           env,
 		History:       history,
 	}
 }
@@ -3727,11 +3847,17 @@ func gpuResponseFromRecord(record ports.WorkloadInstanceRecord) *instanceGPUResp
 		return nil
 	}
 	return &instanceGPUResponse{
-		Vendor:             string(record.GPU.Vendor),
-		Model:              record.GPU.Model,
-		Count:              record.GPU.Count,
-		ResourceName:       record.GPU.ResourceName,
-		QueueName:          record.GPU.QueueName,
+		Vendor:       string(record.GPU.Vendor),
+		Model:        record.GPU.Model,
+		Count:        record.GPU.Count,
+		ResourceName: record.GPU.ResourceName,
+		QueueName:    record.GPU.QueueName,
+		// Derived from the record's live status, not from the snapshot stored in
+		// record.GPU.SchedulingState: the list-time read-repair refreshes
+		// Status/Container/Network but never GPU, so the stored snapshot goes
+		// stale. Keeping this derived also keeps the response consistent with the
+		// `scheduling_state` query filter (MatchesInstanceList).
+		SchedulingState:    runtimeadapter.GPUSchedulingState(record.Status),
 		SchedulingReason:   record.GPU.SchedulingReason,
 		UtilizationPercent: record.GPU.UtilizationPercent,
 	}
@@ -3745,6 +3871,7 @@ func sandboxResponseFromRecord(record ports.WorkloadInstanceRecord) *instanceSan
 		RuntimeClass:        record.Sandbox.Config.RuntimeClass,
 		SessionTimeout:      record.Sandbox.Config.SessionTimeout.String(),
 		NetworkEgressPolicy: string(record.Sandbox.Config.NetworkEgressPolicy),
+		EgressAllowlist:     append([]string(nil), record.Sandbox.Config.EgressAllowlist...),
 		SessionState:        string(record.Sandbox.State),
 		DevProfile: coreDevProfileResponse{
 			Mode:         record.Sandbox.DevProfile.Mode,

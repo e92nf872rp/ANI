@@ -515,6 +515,18 @@ func TestMinIOObjectStoreUsesPublicEndpointOnlyForSignedURLs(t *testing.T) {
 		t.Fatalf("SignedUploadURL() error = %v", err)
 	}
 	assertSignedURL(t, upload.URL, "http://minio-public.example:30900/models-a/tenant-a/live.txt", "60")
+
+	// Downloads are opened by the end user's browser, so they must be signed
+	// against the same browser-reachable endpoint as uploads.
+	download, err := store.SignedDownloadURL(context.Background(), ports.ObjectRef{
+		TenantID:    "tenant-a",
+		BucketClass: ports.BucketClass("models-a"),
+		ObjectKey:   "live.txt",
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("SignedDownloadURL() error = %v", err)
+	}
+	assertSignedURL(t, download.URL, "http://minio-public.example:30900/models-a/tenant-a/live.txt", "60")
 }
 
 func TestMinIOObjectStoreRejectsInvalidPresignInput(t *testing.T) {
@@ -631,6 +643,67 @@ func TestMinIOObjectStoreBucketUsageAggregatesTenantScopedListing(t *testing.T) 
 
 	if _, err := store.BucketUsage(context.Background(), ports.BucketClass("test2"), ""); err == nil {
 		t.Fatal("BucketUsage() with empty tenant error = nil, want invalid")
+	}
+}
+
+func TestMinIOObjectStoreApplyBucketPolicyScopesReadsToTenantPrefix(t *testing.T) {
+	t.Parallel()
+
+	type recorded struct {
+		method string
+		bucket string
+		query  string
+		body   string
+	}
+	var requests []recorded
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		payload := ""
+		if r.Body != nil {
+			body, _ := io.ReadAll(r.Body)
+			payload = string(body)
+		}
+		requests = append(requests, recorded{method: r.Method, bucket: r.URL.Path, query: r.URL.RawQuery, body: payload})
+		return minIOTestResponse(http.StatusNoContent), nil
+	})}
+
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{
+		Endpoint:        "http://minio.test",
+		AccessKeyID:     "minio",
+		SecretAccessKey: "secret",
+		HTTPClient:      client,
+		Now:             fixedMinIOTestClock,
+	})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+
+	if err := store.ApplyBucketPolicy(context.Background(), ports.BucketClass("datasets"), "tenant-a", ports.BucketACLPolicyTenantRead); err != nil {
+		t.Fatalf("ApplyBucketPolicy(tenant_read) error = %v", err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("requests = %v, want one policy PUT", requests)
+	}
+	if requests[0].method != http.MethodPut || requests[0].bucket != "/datasets" || requests[0].query != "policy=" {
+		t.Fatalf("policy request = %#v, want PUT /datasets?policy=", requests[0])
+	}
+	// The policy must be scoped to the tenant prefix, otherwise a shared bucket
+	// would expose every tenant's objects to anonymous readers.
+	if !strings.Contains(requests[0].body, "arn:aws:s3:::datasets/tenant-a/*") {
+		t.Fatalf("policy body = %s, want tenant-scoped resource arn", requests[0].body)
+	}
+	if strings.Contains(requests[0].body, "arn:aws:s3:::datasets/*") {
+		t.Fatalf("policy body = %s, want no bucket-wide read grant", requests[0].body)
+	}
+
+	if err := store.ApplyBucketPolicy(context.Background(), ports.BucketClass("datasets"), "tenant-a", ports.BucketACLPolicyPrivate); err != nil {
+		t.Fatalf("ApplyBucketPolicy(private) error = %v", err)
+	}
+	if len(requests) != 2 || requests[1].method != http.MethodDelete || requests[1].bucket != "/datasets" {
+		t.Fatalf("private policy request = %#v, want DELETE /datasets", requests[1])
+	}
+
+	if err := store.ApplyBucketPolicy(context.Background(), ports.BucketClass("datasets"), "", ports.BucketACLPolicyTenantRead); err == nil {
+		t.Fatal("ApplyBucketPolicy(tenant_read) without tenant error = nil, want invalid")
 	}
 }
 

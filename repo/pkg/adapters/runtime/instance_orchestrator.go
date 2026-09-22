@@ -636,7 +636,7 @@ func containerStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus, c
 		readyReplicas = replicas
 	}
 	revision := containerRevision(spec)
-	return &ports.ContainerInstanceStatus{
+	containerStatus := &ports.ContainerInstanceStatus{
 		Replicas:      replicas,
 		ReadyReplicas: readyReplicas,
 		Revision:      revision,
@@ -649,6 +649,13 @@ func containerStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus, c
 			},
 		},
 	}
+	if spec.Container != nil && len(spec.Container.Env) > 0 {
+		containerStatus.Env = append([]ports.InstanceEnvVar(nil), spec.Container.Env...)
+	}
+	if len(spec.SecretBindings) > 0 {
+		containerStatus.SecretBindings = append([]ports.WorkloadSecretBinding(nil), spec.SecretBindings...)
+	}
+	return containerStatus
 }
 
 func containerRolloutStatus(state ports.WorkloadState) string {
@@ -691,7 +698,7 @@ func gpuStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus) *ports.
 		Vendor:             firstGPUVendor(spec.Resources.GPU.PreferredVendors),
 		Model:              resolvedGPUModel(spec),
 		Count:              count,
-		SchedulingState:    gpuSchedulingState(status),
+		SchedulingState:    GPUSchedulingState(status),
 		SchedulingReason:   gpuSchedulingReason(spec),
 		UtilizationPercent: gpuUtilizationPercent(status.State),
 		ResourceName:       annotationValue(spec, gpuResourceNameAnnotation),
@@ -706,7 +713,15 @@ func gpuStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus) *ports.
 	return result
 }
 
-func gpuSchedulingState(status ports.WorkloadStatus) string {
+// GPUSchedulingState derives the GPU scheduling state that
+// GET /instances exposes as `gpu.scheduling_state` and that the
+// `scheduling_state` query filter matches against. It is deliberately derived
+// from the record's *live* status rather than read back from
+// GPUInstanceStatus.SchedulingState, which is only a snapshot captured when the
+// record was first materialised and would otherwise go stale (a stopped
+// instance kept reporting "pending" forever). Exported so both the instance
+// list filter and the gateway response mapping can derive it on the fly.
+func GPUSchedulingState(status ports.WorkloadStatus) string {
 	switch status.State {
 	case ports.WorkloadStateRunning:
 		return "running"

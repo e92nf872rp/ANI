@@ -117,15 +117,22 @@ class RagEngineGRPCClient:
             })
         return out
 
-    async def embed(self, *, texts: list[str]) -> tuple[list[list[float]], int]:
+    async def embed(
+        self, *, texts: list[str], model: str = ""
+    ) -> tuple[list[list[float]], int]:
         """Call Embed RPC and deserialize the flattened vectors array.
 
         EmbedResponse stores a 1-D ``vectors_flat`` array + ``dimension`` +
         ``count``. This method reconstructs the per-text vectors:
             vectors[i] = list(vectors_flat[i*dim:(i+1)*dim])
         Returns (vectors, dimension).
+
+        Args:
+            texts: Texts to embed.
+            model: Per-KB embedding model name (``EmbedRequest.model``);
+                empty uses the rag-engine server default.
         """
-        request = rag_pb2.EmbedRequest(texts=texts)
+        request = rag_pb2.EmbedRequest(texts=texts, model=model)
         self._ensure_channel()
         resp: rag_pb2.EmbedResponse = await self._stub.Embed(request, timeout=self._timeout)
         dim = resp.dimension

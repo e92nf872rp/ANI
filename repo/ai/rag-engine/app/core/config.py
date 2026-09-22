@@ -1,6 +1,19 @@
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Embedding model context limits — module-level constants (not Settings
+# fields: they are model-intrinsic hard limits, not deployment knobs).
+# The embedding endpoint (OpenAI-compatible /v1/embeddings) exposes no
+# max_seq_tokens field, so the limit is hard-coded per the current model
+# (bge-small: 512 tokens). When the model changes, update these together.
+# EMBED_MAX_SEQ_TOKENS: hard token limit of the embedding model.
+EMBED_MAX_SEQ_TOKENS = 512
+# EMBED_SAFE_CHARS: single-choke-point char cap applied to every text at the
+# Embed RPC entry (Bug B fix, layer 2). ~2 chars/token with margin below
+# EMBED_MAX_SEQ_TOKENS. Aligned with kb-service SUMMARY_SAFE_CHARS=460 (the
+# summary budget stays under this cap even after generation overshoot).
+EMBED_SAFE_CHARS = 480
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -13,11 +26,12 @@ class Settings(BaseSettings):
     # Embedding model served by the AI inference service (OpenAI compatible
     # /v1/embeddings). US-013: rag-engine calls the remote endpoint instead of
     # loading a local HuggingFace model. ``embedding_model`` is the model name
-    # passed to the remote service (e.g. ``Qwen3-Embedding-0.6B``);
-    # ``embedding_api_base`` is the OpenAI-compatible base URL; the temporary
-    # default points to the interim embedding service and will be replaced by
-    # the formal inference-service address once it deploys an embedding model.
-    embedding_model: str = "Qwen3-Embedding-0.6B"
+    # passed to the remote service; the default matches the .env EMBEDDING_MODEL
+    # (SiliconFlow requires the full prefixed name "BAAI/bge-m3" — the bare
+    # "bge-m3" alias is NOT recognised by the remote endpoint).
+    # ``embedding_api_base`` is the OpenAI-compatible base URL, overridden by
+    # .env (EMBEDDING_API_BASE).
+    embedding_model: str = "BAAI/bge-m3"
     embedding_api_base: str = "http://10.10.20.197:8006/v1"
     # API key for the remote embedding service. Empty means no auth (the
     # interim service has no api_key); the formal inference-service may set one.

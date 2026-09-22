@@ -22,6 +22,11 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        # helm and the vcluster CLI write to HOME (Helm repository cache and
+        # vcluster state). The image HOME is /home/ani, which is owned by root
+        # and therefore not writable by uid 65532; fsGroup plus the emptyDir
+        # mounted at /home/ani below makes that path writable.
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -126,12 +131,24 @@ spec:
               value: /usr/local/bin/helm
             - name: VCLUSTER_BINARY
               value: /usr/local/bin/vcluster
+            # vCluster chart is distributed through the internal Harbor OCI
+            # registry. charts.loft.sh is not reachable from the cluster, so a
+            # remote HTTP repository cannot be used here. VCLUSTER_CHART_REPO
+            # = none tells the provider to omit --repo for OCI references.
             - name: VCLUSTER_CHART_NAME
-              value: vcluster
+              value: oci://docker.changqingyun.cn/ani/charts/vcluster
             - name: VCLUSTER_CHART_REPO
-              value: https://charts.loft.sh
+              value: none
+            - name: VCLUSTER_CHART_VERSION
+              value: 0.34.1
+            # Tenant namespaces are bound to per-tenant kube-ovn VPC subnets,
+            # which have no route to the cluster service CIDR. The vCluster
+            # control plane pod must therefore be pinned to the cluster default
+            # overlay, the same way PlatformWorkload pods are; otherwise the
+            # syncer cannot reach the host API server and crashes with
+            # "dial tcp <service-cidr>: i/o timeout".
             - name: VCLUSTER_HELM_SET_VALUES
-              value: controlPlane.statefulSet.persistence.volumeClaim.storageClass=ani-rbd-ssd
+              value: 'controlPlane.statefulSet.persistence.volumeClaim.storageClass=ani-rbd-ssd,controlPlane.statefulSet.pods.annotations.ovn\.kubernetes\.io/logical_switch=ovn-default,controlPlane.statefulSet.pods.annotations.ovn\.kubernetes\.io/vpc=ovn-cluster'
             - name: VCLUSTER_PROXY_SERVER_TEMPLATE
               value: https://{cluster_id}.{namespace}:443
             - name: VCLUSTER_KUBECONFIG_SERVER_TEMPLATE
@@ -219,11 +236,15 @@ spec:
             - name: ani-gateway-bin
               mountPath: /opt/ani/bin
               readOnly: true
+            - name: ani-gateway-helm-cache
+              mountPath: /home/ani
       volumes:
         - name: ani-gateway-bin
           hostPath:
             path: /opt/ani/bin
             type: Directory
+        - name: ani-gateway-helm-cache
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

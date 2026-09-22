@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +17,10 @@ import (
 )
 
 type instanceStorageBinder interface {
+	CreateVolume(ctx context.Context, request ports.StorageVolumeCreateRequest) (ports.StorageVolumeRecord, error)
+	GetVolume(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageVolumeRecord, error)
 	MountVolume(ctx context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error)
+	UnmountVolume(ctx context.Context, request ports.StorageVolumeUnmountRequest) (ports.StorageVolumeRecord, error)
 	MountFilesystem(ctx context.Context, request ports.StorageFilesystemMountRequest) (ports.StorageFilesystemRecord, error)
 }
 
@@ -180,6 +184,11 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		resolvedResourceRefs = append([]string(nil), resolved.ResourceRefs...)
 	}
 	if err := validateCreateIntent(request.Spec); err != nil {
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
+	// Provision after validateCreateIntent: a provisioned disk carries both
+	// volume_id and name/size, which only the post-validation state allows.
+	if err := s.provisionVMDataDisks(ctx, &request); err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
 	requestFingerprint, err := createIntentFingerprint(request.Spec)
@@ -605,13 +614,13 @@ func (s *LocalInstanceService) List(ctx context.Context, request ports.WorkloadI
 	if !validInstanceListSort(request.Sort) {
 		return nil, fmt.Errorf("%w: unsupported instance sort %q", ports.ErrInvalid, request.Sort)
 	}
-	records, err := s.store.List(ctx, request.TenantID, request.Kind)
+	records, err := s.store.List(ctx, request.TenantID, kindForStoreQuery(request))
 	if err != nil {
 		return nil, err
 	}
 	filtered := make([]ports.WorkloadInstanceRecord, 0, len(records))
 	for _, record := range records {
-		if !matchesInstanceList(record, request) {
+		if !MatchesInstanceList(record, request) {
 			continue
 		}
 		filtered = append(filtered, s.withIdentity(ctx, record))
@@ -632,15 +641,112 @@ func validInstanceListSort(value string) bool {
 	}
 }
 
-func matchesInstanceList(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
-	if request.State != "" && record.Status.State != request.State {
+// MatchesInstanceKeyword 判断单条实例记录是否命中 keyword/searchField 搜索条件。
+// 抽成导出函数，使 store 记录与 live Kubernetes 孤儿实例（router 层合并）共用同一
+// search_field 过滤语义，避免孤儿实例绕过 keyword 过滤（Bug-2 真实缺陷）。
+func MatchesInstanceKeyword(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	keyword := strings.ToLower(strings.TrimSpace(request.Keyword))
+	if keyword == "" {
+		return true
+	}
+	// SearchField 非空时只对指定字段做模糊匹配；空时保持原有多字段匹配。
+	var haystack string
+	switch request.SearchField {
+	case "id":
+		haystack = record.InstanceID
+	case "name":
+		haystack = record.Name
+	default:
+		haystack = record.InstanceID + "\n" + record.Name + "\n" + record.Description
+	}
+	return strings.Contains(strings.ToLower(haystack), keyword)
+}
+
+// MatchesInstanceState 判断单条实例记录是否命中 request 的 state 过滤。
+// 导出使 router 层合并的 live Kubernetes 孤儿实例与 store 记录共用同一 state 语义：
+//   - States 多值集合（逗号分隔 OR 语义）非空时，命中任一状态即通过；
+//   - 显式传单值 state 时精确匹配该状态（孤儿、store 一致）；
+//   - 未传 state 时默认排除 deleted 终态（Bug-6），孤儿为活跃 Deployment 不含 deleted，
+//     无副作用；但 state=running 等显式过滤必须对孤儿生效。
+func MatchesInstanceState(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if len(request.States) > 0 {
+		for _, state := range request.States {
+			if record.Status.State == state {
+				return true
+			}
+		}
 		return false
 	}
-	if keyword := strings.ToLower(strings.TrimSpace(request.Keyword)); keyword != "" {
-		haystack := strings.ToLower(record.InstanceID + "\n" + record.Name + "\n" + record.Description)
-		if !strings.Contains(haystack, keyword) {
-			return false
+	if request.State != "" {
+		return record.Status.State == request.State
+	}
+	return record.Status.State != ports.WorkloadStateDeleted
+}
+
+// MatchesInstanceKind 判断单条实例记录是否命中 request 的 kind 过滤。
+// 导出使 router 层合并的 live Kubernetes 孤儿实例与 store 记录共用同一 kind 语义：
+//   - Kinds 多值集合（逗号分隔 OR 语义）非空时，命中任一 kind 即通过；
+//   - 显式传单值 kind 时精确匹配该 kind；
+//   - 未传时不过滤。
+func MatchesInstanceKind(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if len(request.Kinds) > 0 {
+		for _, kind := range request.Kinds {
+			if record.Kind == kind {
+				return true
+			}
 		}
+		return false
+	}
+	if request.Kind != "" {
+		return record.Kind == request.Kind
+	}
+	return true
+}
+
+// kindForStoreQuery 推导传给 store 的单值 kind 过滤：单值请求（含多值集合只含
+// 一项时）下推到 store SQL 精确过滤；多值或未指定时返回空串，由内存过滤
+// （MatchesInstanceList → MatchesInstanceKind）承担多值 OR 语义。
+func kindForStoreQuery(request ports.WorkloadInstanceListRequest) ports.WorkloadKind {
+	if request.Kind != "" {
+		return request.Kind
+	}
+	if len(request.Kinds) == 1 {
+		return request.Kinds[0]
+	}
+	return ""
+}
+
+// MatchesInstanceNetwork 判断单条实例记录是否命中 request 的 VPC/Subnet 归属过滤。
+// 导出使 router 层合并的 live Kubernetes 孤儿实例与 store 记录共用同一语义：
+// 显式传 vpc_id/subnet_id 时按 record.Network 归属精确匹配，未传时不过滤。
+func MatchesInstanceNetwork(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if vpcID := strings.TrimSpace(request.VPCID); vpcID != "" && record.Network.VPCID != vpcID {
+		return false
+	}
+	if subnetID := strings.TrimSpace(request.SubnetID); subnetID != "" && record.Network.SubnetID != subnetID {
+		return false
+	}
+	return true
+}
+
+// MatchesInstanceList 判断单条实例记录是否命中列表请求的全部过滤条件（kind/state/
+// keyword/network/时间窗/spec/image/node/rollout/gpu/调度/模板/会话）。
+// 导出使 router 层合并的 live Kubernetes 孤儿实例与 store 记录共用同一套过滤语义：
+// 此前孤儿只做 kind/state/network 三项，scheduling_state、rollout_status、gpu_model、
+// queue_name、template_id、session_state 等条件被静默跳过，导致这些筛选在存在孤儿的
+// 集群上"看着没效果"。
+func MatchesInstanceList(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if !MatchesInstanceKind(record, request) {
+		return false
+	}
+	if !MatchesInstanceState(record, request) {
+		return false
+	}
+	if !MatchesInstanceKeyword(record, request) {
+		return false
+	}
+	if !MatchesInstanceNetwork(record, request) {
+		return false
 	}
 	if !request.CreatedAfter.IsZero() && !record.CreatedAt.After(request.CreatedAfter) {
 		return false
@@ -666,8 +772,17 @@ func matchesInstanceList(record ports.WorkloadInstanceRecord, request ports.Work
 	if request.QueueName != "" && (record.GPU == nil || record.GPU.QueueName != request.QueueName) {
 		return false
 	}
-	if request.SchedulingState != "" && (record.GPU == nil || record.GPU.SchedulingState != request.SchedulingState) {
-		return false
+	if request.SchedulingState != "" {
+		// scheduling_state 只对 GPU 容器实例有意义。匹配值必须由 live status 现算，
+		// 不能读 record.GPU.SchedulingState —— 那只是记录物质化时的快照，
+		// 列表期读修复（refreshOneStoreStatus）不会更新它，会导致过滤命中陈旧值
+		// （已 stopped 的实例永远命中 pending、failed 实例命中 running）。
+		if record.Kind != ports.WorkloadKindGPUContainer {
+			return false
+		}
+		if GPUSchedulingState(record.Status) != request.SchedulingState {
+			return false
+		}
 	}
 	if request.TemplateID != "" && (record.Sandbox == nil || record.Sandbox.TemplateID != request.TemplateID) {
 		return false
@@ -851,6 +966,19 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
+	// Resolve the update_image target before fingerprinting: ImageRef is part
+	// of the intent fingerprint, so it must be derived deterministically from
+	// image_id on both the first request and replays. Resolution reuses the
+	// create path (tenant project check, purpose validation, scan gate).
+	var updatedImage *ports.InstanceImageSummary
+	if request.Action == ports.WorkloadLifecycleUpdateImage && s.resources != nil {
+		summary, err := s.resolveLifecycleImage(ctx, record, request)
+		if err != nil {
+			return ports.WorkloadInstanceRecord{}, err
+		}
+		request.ImageRef = summary.Ref
+		updatedImage = &summary
+	}
 	requestFingerprint := ""
 	if s.operations != nil {
 		requestFingerprint, err = lifecycleIntentFingerprint(request)
@@ -876,11 +1004,17 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		return ports.WorkloadInstanceRecord{}, err
 	}
 	previousState := record.Status.State
-	precheck := lifecyclePrecheck(record, request, next, s.volumeOccupancyConflict(ctx, record, request))
+	volumeSideAttached := s.volumeMountedToInstance(ctx, request)
+	precheck := lifecyclePrecheck(record, request, next, s.volumeOccupancyConflict(ctx, record, request), volumeSideAttached)
 	if requestFingerprint != "" {
 		precheck.details["request_fingerprint"] = requestFingerprint
 	}
 	snapshot := vmSnapshotFor(record, request)
+	if snapshot != nil {
+		// Canonical snapshot ID shared with the provider CR name so rollback
+		// can map the record to its KubeVirt VirtualMachineSnapshot.
+		request.SnapshotID = snapshot.ID
+	}
 	volume := volumeAttachmentFor(record.Kind, request)
 	rollback := containerRollbackFor(record, request)
 	opID := ""
@@ -1010,10 +1144,40 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	}
 	record.Status.Storage = applyVolumeBinding(record.Status.Storage, request.Action, volume, request.VolumeID)
 	record.StorageAttachments = applyVolumeBinding(record.StorageAttachments, request.Action, volume, request.VolumeID)
+	if request.Action == ports.WorkloadLifecycleDetachVolume && volumeSideAttached {
+		// The volume-side mount fields are the Console's "attached" fact source:
+		// clear them together with the instance-side attachment so both views
+		// roll back consistently (block storage bug 4).
+		if err := s.unmountVolumeSide(ctx, request); err != nil {
+			if opID != "" {
+				_, _ = s.operations.AddOperationStep(ctx, opID, ports.WorkloadOperationStep{
+					StepName: "detach_volume",
+					Status:   ports.WorkloadOperationStepFailed,
+					Message:  err.Error(),
+				})
+				_, _ = s.operations.UpdateOperation(ctx, opID, ports.WorkloadOperationUpdate{
+					Status:         ports.WorkloadOperationFailed,
+					FailureReason:  classifiedLifecycleFailureReason("volume_unmount_failed", err),
+					FailureMessage: err.Error(),
+					RetryEligible:  true,
+					UpdatedAt:      request.RequestedAt,
+				})
+			}
+			return ports.WorkloadInstanceRecord{}, err
+		}
+	}
 	if rollback != nil {
 		record.Container = rollback
 	}
 	applyApprovedLifecycleSummary(&record, request)
+	if updatedImage != nil {
+		record.Image = *updatedImage
+		if record.Container != nil {
+			// Mirror the scale behaviour: the reconciler observes the Deployment
+			// rollout and flips this to completed/failed.
+			record.Container.RolloutStatus = "progressing"
+		}
+	}
 	if resizeGPUSpec != nil {
 		record.Compute.SpecID = resizeGPUSpec.ID
 		record.Compute.GPUType = resizeGPUSpec.GPUType
@@ -1514,6 +1678,25 @@ func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request
 		}
 	case ports.WorkloadLifecycleUpdateImage:
 		record.Image = ports.InstanceImageSummary{ID: strings.TrimSpace(request.ImageID)}
+	case ports.WorkloadLifecycleBindSecret:
+		if record.Container != nil {
+			binding := ports.WorkloadSecretBinding{SecretID: strings.TrimSpace(request.SecretID)}
+			switch strings.TrimSpace(request.BindingType) {
+			case "env":
+				binding.EnvName = strings.TrimSpace(request.EnvName)
+			case "file":
+				binding.MountPath = strings.TrimSpace(request.MountPath)
+			}
+			record.Container.SecretBindings = append(record.Container.SecretBindings, binding)
+			// Mirror scale/update_image: the reconciler observes the Deployment
+			// rollout and flips this to completed/failed.
+			record.Container.RolloutStatus = "progressing"
+		}
+	case ports.WorkloadLifecycleUnbindSecret:
+		if record.Container != nil {
+			record.Container.SecretBindings = removeSecretBinding(record.Container.SecretBindings, strings.TrimSpace(request.SecretID))
+			record.Container.RolloutStatus = "progressing"
+		}
 	case ports.WorkloadLifecycleAttachFilesystem:
 		attachment := ports.WorkloadStorageAttachment{
 			Name:         strings.TrimSpace(request.FilesystemID),
@@ -1541,6 +1724,31 @@ func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request
 	case ports.WorkloadLifecycleSetTerminationProtection:
 		record.Lifecycle.TerminationProtection = *request.Enabled
 	}
+}
+
+// resolveLifecycleImage resolves an update_image target through the create
+// resource resolver so tenant project checks, image purpose validation and the
+// vulnerability scan gate apply exactly as on instance create. The minimal
+// spec only carries Kind + ImageID so no network/storage resolution runs.
+func (s *LocalInstanceService) resolveLifecycleImage(ctx context.Context, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) (ports.InstanceImageSummary, error) {
+	resolved, err := s.resources.ResolveCreate(ctx, ports.WorkloadResourceResolveRequest{
+		TenantID: request.TenantID,
+		UserID:   request.UserID,
+		Spec: ports.WorkloadSpec{
+			TenantID: record.TenantID,
+			Name:     record.Name,
+			Kind:     record.Kind,
+			ImageID:  strings.TrimSpace(request.ImageID),
+		},
+	})
+	if err != nil {
+		return ports.InstanceImageSummary{}, err
+	}
+	summary := resolved.Spec.ImageSummary
+	if strings.TrimSpace(summary.Ref) == "" {
+		return ports.InstanceImageSummary{}, fmt.Errorf("%w: resolved image %q has no registry ref", ports.ErrInvalid, request.ImageID)
+	}
+	return summary, nil
 }
 
 // resolveResizeGPUSpec validates the resize spec_id against the configured GPU
@@ -1594,6 +1802,22 @@ func specUnavailableForTenant(inventory ports.GPUInventory, ctx context.Context,
 	return ""
 }
 
+// removeSecretBinding drops every binding of the given secret from the
+// instance's container status (unbind_secret lifecycle bookkeeping).
+func removeSecretBinding(bindings []ports.WorkloadSecretBinding, secretID string) []ports.WorkloadSecretBinding {
+	if len(bindings) == 0 {
+		return bindings
+	}
+	next := make([]ports.WorkloadSecretBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.SecretID == secretID {
+			continue
+		}
+		next = append(next, binding)
+	}
+	return next
+}
+
 func removeStorageResource(items []ports.WorkloadStorageAttachment, resourceType, resourceID string) []ports.WorkloadStorageAttachment {
 	resourceID = strings.TrimSpace(resourceID)
 	next := make([]ports.WorkloadStorageAttachment, 0, len(items))
@@ -1614,6 +1838,40 @@ func hasStorageResource(items []ports.WorkloadStorageAttachment, resourceType, r
 		}
 	}
 	return false
+}
+
+// provisionVMDataDisks creates Storage volumes for VM data disks declared in
+// "new disk" mode (name+size, no volume_id) so the rendered VM references a
+// real provider PVC instead of a nonexistent claim (ErrorPvcNotFound). Existing
+// volume refs and size-less specs pass through unchanged.
+func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request *ports.WorkloadInstanceCreateRequest) error {
+	if s.storage == nil || request.Spec.VM == nil {
+		return nil
+	}
+	for i := range request.Spec.VM.DataDiskSpecs {
+		disk := &request.Spec.VM.DataDiskSpecs[i]
+		if strings.TrimSpace(disk.VolumeID) != "" || disk.SizeGiB <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(disk.Name)
+		if name == "" {
+			name = request.Spec.Name + "-data-" + strconv.Itoa(i+1)
+		}
+		record, err := s.storage.CreateVolume(ctx, ports.StorageVolumeCreateRequest{
+			TenantID:       request.Spec.TenantID,
+			IdempotencyKey: request.IdempotencyKey + ":vm-data-disk:" + name,
+			Name:           name,
+			SizeGiB:        disk.SizeGiB,
+			StorageClass:   disk.StorageClass,
+			VolumeType:     disk.VolumeType,
+			Encrypted:      disk.Encrypted,
+		})
+		if err != nil {
+			return fmt.Errorf("provision vm data disk %q: %w", name, err)
+		}
+		disk.VolumeID = record.VolumeID
+	}
+	return nil
 }
 
 func (s *LocalInstanceService) bindCreateStorage(ctx context.Context, request ports.WorkloadInstanceCreateRequest, result ports.WorkloadInstanceCreateResult) error {
@@ -1817,7 +2075,7 @@ type lifecyclePrecheckResult struct {
 	details       map[string]any
 }
 
-func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest, next ports.WorkloadState, occupancy *volumeOccupancy) lifecyclePrecheckResult {
+func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest, next ports.WorkloadState, occupancy *volumeOccupancy, volumeSideAttached bool) lifecyclePrecheckResult {
 	details := map[string]any{
 		"allowed":                true,
 		"action":                 string(request.Action),
@@ -1850,6 +2108,7 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 			return blockedLifecyclePrecheck(details, "volume_id_required", "volume_id is required for volume binding")
 		}
 		attached := hasVolume(record.Status.Storage, volumeID)
+		details["volume_side_attached"] = volumeSideAttached
 		if request.Action == ports.WorkloadLifecycleAttachVolume && attached {
 			return blockedLifecyclePrecheck(details, "volume_already_attached", "volume is already attached")
 		}
@@ -1857,7 +2116,12 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 			if isRootVolume(record.Status.Storage, volumeID) {
 				return blockedLifecyclePrecheck(details, "root_volume_detach_forbidden", "root disk cannot be detached")
 			}
-			if !attached {
+			// A volume whose control-plane record still points at this instance
+			// counts as attached even when instance-side storage_attachments
+			// lost the entry: the Console renders "attached" from the volume
+			// record, so refusing here would leave the volume permanently
+			// stuck on 卸载 (block storage bug 4).
+			if !attached && !volumeSideAttached {
 				return blockedLifecyclePrecheck(details, "volume_not_attached", "volume is not attached")
 			}
 		}
@@ -1977,6 +2241,50 @@ func (s *LocalInstanceService) volumeOccupancyConflict(ctx context.Context, reco
 	return nil
 }
 
+// volumeMountedToInstance reports whether the volume-side control-plane record
+// still points at this instance. The Console derives "attached" from a non-empty
+// mount_instance_id on the volume, while instance-side storage_attachments can
+// lose the entry independently (status recompute, gateway restart, legacy data),
+// so detach must accept either fact source. Errors fail closed: an unreadable
+// volume keeps the previous "not attached" rejection.
+func (s *LocalInstanceService) volumeMountedToInstance(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest) bool {
+	if s.storage == nil || request.Action != ports.WorkloadLifecycleDetachVolume {
+		return false
+	}
+	volumeID := strings.TrimSpace(request.VolumeID)
+	instanceID := strings.TrimSpace(request.InstanceID)
+	if volumeID == "" || instanceID == "" {
+		return false
+	}
+	volume, err := s.storage.GetVolume(ctx, ports.StorageResourceGetRequest{
+		TenantID:   request.TenantID,
+		ResourceID: volumeID,
+	})
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(volume.MountInstanceID) == instanceID
+}
+
+// unmountVolumeSide clears the volume-side mount fields after a successful
+// instance detach. A volume that no longer exists is not an error: the instance
+// side is already detached and there is nothing left to roll back.
+func (s *LocalInstanceService) unmountVolumeSide(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest) error {
+	if s.storage == nil {
+		return nil
+	}
+	volumeID := strings.TrimSpace(request.VolumeID)
+	_, err := s.storage.UnmountVolume(ctx, ports.StorageVolumeUnmountRequest{
+		TenantID:       request.TenantID,
+		VolumeID:       volumeID,
+		IdempotencyKey: request.IdempotencyKey + ":unmount-volume:" + volumeID,
+	})
+	if errors.Is(err, ports.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 // recordVolumeIDs collects the distinct block-volume IDs referenced by the
 // record's status storage and requested storage attachments.
 func recordVolumeIDs(record ports.WorkloadInstanceRecord) []string {
@@ -2012,9 +2320,12 @@ func terminationProtectedAction(action ports.WorkloadLifecycleAction) bool {
 
 func usesProviderLifecycle(kind ports.WorkloadKind, action ports.WorkloadLifecycleAction) bool {
 	switch action {
-	case ports.WorkloadLifecycleSnapshot,
-		ports.WorkloadLifecycleSetTerminationProtection:
+	case ports.WorkloadLifecycleSetTerminationProtection:
 		return false
+	case ports.WorkloadLifecycleSnapshot:
+		// VM snapshots are backed by a real KubeVirt VirtualMachineSnapshot CR;
+		// non-VM kinds keep metadata-only snapshots.
+		return kind == ports.WorkloadKindVM
 	case ports.WorkloadLifecycleAttachVolume,
 		ports.WorkloadLifecycleDetachVolume:
 		return kind == ports.WorkloadKindVM
@@ -2084,20 +2395,22 @@ func vmSnapshotFor(record ports.WorkloadInstanceRecord, request ports.WorkloadIn
 	name := firstNonEmpty(request.SnapshotName, "snapshot-"+now.Format("20060102150405"))
 	idSeed := firstNonEmpty(request.IdempotencyKey, record.InstanceID+"-"+name+"-"+now.Format("20060102150405"))
 	return &ports.VMInstanceSnapshot{
-		ID:               "snap_" + sanitizeSnapshotID(idSeed),
+		ID:               "snap-" + sanitizeSnapshotID(idSeed),
 		Name:             name,
 		SourceInstanceID: record.InstanceID,
 		State:            "ready",
-		Reason:           "snapshot metadata recorded by local profile; provider snapshot execution is a follow-up capability",
+		Reason:           "snapshot backed by KubeVirt VirtualMachineSnapshot CR",
 		CreatedAt:        now,
 		ReadyAt:          now,
 	}
 }
 
-var snapshotIDPattern = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
+var snapshotIDPattern = regexp.MustCompile(`[^a-zA-Z0-9-]+`)
 
+// sanitizeSnapshotID produces a DNS-1123-safe segment: KubeVirt snapshot CR
+// names double as instance snapshot record IDs, so underscores are not allowed.
 func sanitizeSnapshotID(value string) string {
-	value = strings.Trim(snapshotIDPattern.ReplaceAllString(value, "_"), "_")
+	value = strings.Trim(snapshotIDPattern.ReplaceAllString(value, "-"), "-")
 	if value == "" {
 		return "local"
 	}

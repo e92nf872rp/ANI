@@ -44,6 +44,27 @@ def test_core_api_base_url_derived_from_gateway_internal_url():
     assert s2.core_api_base_url == "http://gw:8080/api/v1"
 
 
+def test_settings_default_embedding_model_is_full_prefixed_name():
+    """No env override → the hardcoded fallback mirrors .env EMBEDDING_MODEL
+    (SiliconFlow only recognises the full prefixed name)."""
+    # _env_file=None 只禁 .env 文件，os.environ 仍会被 pydantic-settings 读取；
+    # 显式清除 EMBEDDING_*（宿主机/CI 若导出过会让默认值断言假阳性失败）。
+    with _patch_env({"EMBEDDING_MODEL": None, "EMBEDDING_DIM": None}):
+        s = Settings(_env_file=None)
+    assert s.embedding_model == "BAAI/bge-m3"
+    assert s.embedding_dim == 1024
+
+
+def test_settings_embedding_keys_follow_env():
+    """EMBEDDING_MODEL / EMBEDDING_DIM env vars must override the defaults —
+    CreateKB's fallback and the vector-store dimension follow .env."""
+    env = {"EMBEDDING_MODEL": "Qwen/Qwen3-Embedding-4B", "EMBEDDING_DIM": "2560"}
+    with _patch_env(env):
+        s = Settings(_env_file=None)
+    assert s.embedding_model == "Qwen/Qwen3-Embedding-4B"
+    assert s.embedding_dim == 2560
+
+
 def test_default_core_api_base_url_points_to_core_api_v1():
     s = Settings()
     assert s.core_api_base_url.endswith("/api/v1")
@@ -55,10 +76,14 @@ import contextlib
 
 @contextlib.contextmanager
 def _patch_env(env):
+    """Set env vars from ``env``; a None value clears (pops) the var."""
     old = {}
     for k, v in env.items():
         old[k] = os.environ.get(k)
-        os.environ[k] = v
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
     try:
         yield
     finally:

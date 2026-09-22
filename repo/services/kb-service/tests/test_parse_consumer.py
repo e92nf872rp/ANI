@@ -12,22 +12,38 @@ Covers all Acceptance Criteria:
 - Mock NATS + orchestrator + DB pool — no real services required.
 - Message payload validation: missing required fields are dropped.
 - file_type / vector_store_id resolution from the database.
-- start/stop lifecycle (subscribe + unsubscribe + drain in-flight).
+- start/stop lifecycle (durable JetStream bind + unsubscribe + drain in-flight).
+- JetStream transport: start() ensures the ANI_TASKS WorkQueue stream
+  idempotently and binds a durable push consumer (queue == durable,
+  ManualAck, AckWait 30m, MaxDeliver 3, MaxAckPending == concurrency).
+  Ack semantics in _handle: invalid payload → Ack (poison pill), any
+  normal return of process_message → Ack, unhandled crash → neither
+  Ack nor Nak (silent for ack_wait redelivery — the redelivery re-runs
+  the pipeline from the top, which self-heals via the orchestrator's
+  ready-skip and re-entrant chunk cleanup).
 """
 import asyncio
 import json
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Any
 
 import pytest
+from nats.js.api import RetentionPolicy
+from nats.js.errors import NotFoundError
 
 _SERVICE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, _SERVICE_ROOT)
 sys.path.insert(0, os.path.join(_SERVICE_ROOT, "app", "generated"))
 
-from app.consumers.parse_consumer import ParseConsumer, build_parse_consumer
+from app.consumers.parse_consumer import (
+    DEFAULT_MAX_CONCURRENCY,
+    PARSE_ACK_WAIT,
+    PARSE_DURABLE,
+    PARSE_MAX_DELIVER,
+    ParseConsumer,
+    build_parse_consumer,
+)
 
 
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
@@ -51,35 +67,89 @@ class _FakeSubscription:
         self.unsubscribed = True
 
 
-class _FakeNATS:
-    """Records subscribe calls and stores the callback for message injection."""
+class _FakeJS:
+    """JetStream context mock: stream_info (absent until add_stream) +
+    subscribe capturing the durable-binding kwargs."""
 
     def __init__(self):
-        self.subscriptions: list[tuple[str, Any]] = []
+        self.stream_info_calls: list[str] = []
+        self.streams: list[dict] = []
+        self.subscriptions: list[dict] = []
         self._subscription_objs: list[_FakeSubscription] = []
 
-    async def subscribe(self, subject: str, cb=None):
+    async def stream_info(self, name: str):
+        self.stream_info_calls.append(name)
+        if not any(s["name"] == name for s in self.streams):
+            raise NotFoundError()
+        return {"name": name}
+
+    async def add_stream(self, config):
+        self.streams.append(
+            {
+                "name": config.name,
+                "subjects": list(config.subjects),
+                "retention": config.retention,
+                "max_age": config.max_age,
+            }
+        )
+
+    async def subscribe(self, subject, queue=None, cb=None, durable=None,
+                        manual_ack=False, config=None):
         sub = _FakeSubscription()
-        self.subscriptions.append((subject, cb))
+        self.subscriptions.append(
+            {
+                "subject": subject,
+                "queue": queue,
+                "cb": cb,
+                "durable": durable,
+                "manual_ack": manual_ack,
+                "config": config,
+            }
+        )
         self._subscription_objs.append(sub)
         return sub
 
+
+class _FakeNATS:
+    """NATS client mock: jetstream() → _FakeJS. The callback/subscription
+    properties keep the message-injection / inspection surface."""
+
+    def __init__(self):
+        self.js = _FakeJS()
+
+    def jetstream(self):
+        return self.js
+
     @property
     def callback(self):
-        assert self.subscriptions, "no subscription registered"
-        return self.subscriptions[-1][1]
+        assert self.js.subscriptions, "no subscription registered"
+        return self.js.subscriptions[-1]["cb"]
 
     @property
     def subscription(self) -> _FakeSubscription:
-        assert self._subscription_objs, "no subscription registered"
-        return self._subscription_objs[-1]
+        assert self.js._subscription_objs, "no subscription registered"
+        return self.js._subscription_objs[-1]
 
 
 class _FakeMsg:
-    """NATS message with JSON-encodable data."""
+    """JetStream Msg mock: JSON-encodable dict (or raw bytes) + recorded
+    ack/nak/in_progress calls."""
 
-    def __init__(self, data: dict):
-        self.data = json.dumps(data).encode("utf-8")
+    def __init__(self, data: dict | bytes):
+        if isinstance(data, bytes):
+            self.data = data
+        else:
+            self.data = json.dumps(data).encode("utf-8")
+        self.events: list[str] = []  # "ack" / "nak" / "in_progress"
+
+    async def ack(self):
+        self.events.append("ack")
+
+    async def nak(self, delay=None):
+        self.events.append("nak")
+
+    async def in_progress(self):
+        self.events.append("in_progress")
 
 
 class _FakeOrchestrator:
@@ -103,17 +173,27 @@ class _MockConn:
     """Minimal asyncpg.Connection mock for doc_repo + kb_repo lookups.
 
     Records execute() calls so tests can assert async_tasks close-out
-    statements (complete_task_in_tx's UPDATE)."""
+    statements (complete_task_in_tx's UPDATE) and the kb_audit_log
+    in-place result UPDATE, plus kb_audit_log INSERTs (the fallback
+    result row) so tests can assert the parse-result audit outcome."""
 
     def __init__(
         self,
         *,
         doc_row: dict | None = None,
         kb_row: dict | None = None,
+        task_row: dict | None = None,
+        task_update: str = "UPDATE 1",
+        audit_update_status: str = "UPDATE 1",
     ):
         self._doc_row = doc_row
         self._kb_row = kb_row
+        self._task_row = task_row
+        self._task_update = task_update
+        self._audit_update_status = audit_update_status
         self.executes: list[tuple[str, tuple]] = []
+        self.audit_updates: list[tuple] = []
+        self.audit_inserts: list[tuple] = []
 
     @asynccontextmanager
     async def transaction(self):
@@ -125,6 +205,11 @@ class _MockConn:
         # doc_count), so check the outer "FROM knowledge_bases" first.
         if "FROM knowledge_bases" in sql:
             return self._kb_row
+        if "FROM async_tasks" in sql:
+            return self._task_row
+        if "INSERT INTO kb_audit_log" in sql:
+            self.audit_inserts.append(args)
+            return {"id": AUDIT_LOG_ID}
         if "FROM kb_documents" in sql:
             return self._doc_row
         return None
@@ -133,7 +218,10 @@ class _MockConn:
         self.executes.append((sql, args))
         # complete_task_in_tx checks "UPDATE 1"
         if "UPDATE async_tasks" in sql:
-            return "UPDATE 1"
+            return self._task_update
+        if "UPDATE kb_audit_log" in sql:
+            self.audit_updates.append((sql, args))
+            return self._audit_update_status
         # set_tenant_context / set_config calls
         return None
 
@@ -141,14 +229,22 @@ class _MockConn:
 class _MockPool:
     """Returns _MockConn instances from acquire()."""
 
-    def __init__(self, *, doc_row=None, kb_row=None):
+    def __init__(self, *, doc_row=None, kb_row=None, task_row=None,
+                 task_update="UPDATE 1", audit_update_status="UPDATE 1"):
         self._doc_row = doc_row
         self._kb_row = kb_row
+        self._task_row = task_row
+        self._task_update = task_update
+        self._audit_update_status = audit_update_status
         self._conns: list[_MockConn] = []
 
     @asynccontextmanager
     async def acquire(self):
-        conn = _MockConn(doc_row=self._doc_row, kb_row=self._kb_row)
+        conn = _MockConn(
+            doc_row=self._doc_row, kb_row=self._kb_row,
+            task_row=self._task_row, task_update=self._task_update,
+            audit_update_status=self._audit_update_status,
+        )
         self._conns.append(conn)
         yield conn
 
@@ -163,10 +259,11 @@ def _make_doc_row(file_type="pdf", file_name="test.pdf"):
     }
 
 
-def _make_kb_row(vector_store_id=VECTOR_STORE_ID):
+def _make_kb_row(vector_store_id=VECTOR_STORE_ID, embedding_model="bge-m3"):
     return {
         "id": KB_ID,
         "vector_store_id": vector_store_id,
+        "embedding_model": embedding_model,
         "chunk_size": 1024,
     }
 
@@ -207,9 +304,13 @@ def test_build_parse_consumer_returns_consumer():
 
 
 @pytest.mark.asyncio
-async def test_start_subscribes_to_v2_subject():
+async def test_start_ensures_stream_and_binds_durable():
+    """start() creates the ANI_TASKS WorkQueue stream when absent and
+    binds a durable push consumer on the v2 subject: queue == durable
+    (nats-py rule), ManualAck, AckWait 30m, MaxDeliver 3, MaxAckPending
+    == the default concurrency."""
     nats = _FakeNATS()
-    pool = _MockPool()
+    pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
     orchestrator = _FakeOrchestrator()
     consumer = ParseConsumer(
         nats_client=nats,
@@ -218,10 +319,53 @@ async def test_start_subscribes_to_v2_subject():
         subject=SUBJECT_V2,
     )
     await consumer.start()
-    assert len(nats.subscriptions) == 1
-    assert nats.subscriptions[0][0] == SUBJECT_V2
+
+    js = nats.js
+    # ANI_TASKS created with WorkQueue retention and the ani.tasks.> filter.
+    assert js.stream_info_calls == ["ANI_TASKS"]
+    assert len(js.streams) == 1
+    stream = js.streams[0]
+    assert stream["name"] == "ANI_TASKS"
+    assert stream["subjects"] == ["ani.tasks.>"]
+    assert stream["retention"] == RetentionPolicy.WORK_QUEUE
+
+    # Durable push binding on the v2 subject.
+    assert len(js.subscriptions) == 1
+    sub = js.subscriptions[0]
+    assert sub["subject"] == SUBJECT_V2
+    assert sub["queue"] == PARSE_DURABLE
+    assert sub["durable"] == PARSE_DURABLE
+    assert sub["cb"] == consumer._on_msg
+    assert sub["manual_ack"] is True
+    cfg = sub["config"]
+    assert cfg.durable_name == PARSE_DURABLE
+    assert cfg.filter_subject == SUBJECT_V2
+    assert cfg.ack_wait == PARSE_ACK_WAIT
+    assert cfg.max_deliver == PARSE_MAX_DELIVER
+    assert cfg.max_ack_pending == DEFAULT_MAX_CONCURRENCY
     await consumer.stop()
     assert nats.subscription.unsubscribed
+
+
+@pytest.mark.asyncio
+async def test_start_stream_ensure_is_idempotent():
+    """A pre-existing ANI_TASKS stream (production: created by the Go
+    bootstrap) makes start() a pure no-op ensure — no add_stream."""
+    nats = _FakeNATS()
+    # Pre-seed the stream so stream_info succeeds on the first call.
+    nats.js.streams.append({"name": "ANI_TASKS", "subjects": ["ani.tasks.>"],
+                            "retention": "workqueue", "max_age": 86400})
+    pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.start()
+    assert len(nats.js.streams) == 1  # nothing re-added
+    await consumer.stop()
 
 
 @pytest.mark.asyncio
@@ -316,6 +460,7 @@ async def test_process_message_dispatches_to_orchestrator():
     assert call["file_type"] == "pdf"
     assert call["chunk_size"] == 1024
     assert call["vector_store_id"] == VECTOR_STORE_ID
+    assert call["embedding_model"] == "bge-m3"
 
 
 @pytest.mark.asyncio
@@ -570,7 +715,92 @@ async def test_orchestrator_exception_does_not_crash_consumer():
 
 @pytest.mark.asyncio
 async def test_invalid_json_payload_dropped():
-    """A message with invalid JSON is dropped (not dispatched)."""
+    """A message with invalid JSON is a poison pill: dropped (not
+    dispatched) AND Acked — it can never succeed on redelivery; the
+    durable outbox row keeps the audit trail."""
+    nats = _FakeNATS()
+    pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.start()
+    msg = _FakeMsg(b"not valid json")
+    await consumer._handle(msg)
+    assert msg.events == ["ack"]
+    # No DB round-trip — the payload never reached process_message.
+    assert pool._conns == []
+    await consumer.stop()
+    assert len(orchestrator.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_non_dict_json_payload_is_acked():
+    """Valid JSON that is not an object (e.g. a bare array) is the same
+    poison pill: Ack it — letting it through to ``payload.get`` would
+    raise AttributeError and land in the crash-silent branch, wasting
+    MaxDeliver redeliveries on a message that can never parse."""
+    nats = _FakeNATS()
+    pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.start()
+    msg = _FakeMsg(b"[1, 2, 3]")
+    await consumer._handle(msg)
+    assert msg.events == ["ack"]
+    assert pool._conns == []
+    await consumer.stop()
+    assert len(orchestrator.calls) == 0
+
+
+# ── _handle: JetStream ack semantics ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_handle_acks_on_success():
+    """A completed parse dispatch is Acked — even one the orchestrator
+    finished with parse_status='failed' (that is a normal return of
+    process_message: the consumer itself swallowed the orchestrator's
+    exception and closed the task row accordingly). The doc/task rows
+    are the source of truth; a redelivery would just re-check and skip."""
+    nats = _FakeNATS()
+    pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.start()
+    msg = _FakeMsg(_make_payload())
+    await consumer._handle(msg)
+    assert msg.events == ["ack"]
+    assert len(orchestrator.calls) == 1
+    await consumer.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_crash_is_silent_no_ack_no_nak():
+    """An unhandled crash leaves the message unacked and un-nak'd:
+    JetStream redelivers after ack_wait (30 min); the redelivery re-runs
+    the pipeline from the top, which self-heals (the orchestrator's
+    pending→parsing UPDATE has no status gate, its chunk cleanup is
+    re-entrant, and the ready-skip covers docs the first pass finished).
+    A Nak instead would hammer the backend with immediate retries of a
+    parse that may be failing for a load-related reason.
+
+    process_message swallows its own recoverable errors, so the crash
+    here stands in for a genuine bug (unexpected exception escaping the
+    guarded blocks)."""
     nats = _FakeNATS()
     pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
     orchestrator = _FakeOrchestrator()
@@ -582,13 +812,44 @@ async def test_invalid_json_payload_dropped():
     )
     await consumer.start()
 
-    class _BadMsg:
-        data = b"not valid json"
+    async def _crash(payload):
+        raise RuntimeError("unexpected crash mid-parse")
 
-    await nats.callback(_BadMsg())
-    await asyncio.sleep(0.05)
-    await consumer.stop(timeout=2.0)
-    assert len(orchestrator.calls) == 0
+    consumer.process_message = _crash
+    msg = _FakeMsg(_make_payload())
+    # The crash is contained by _handle (logged, not raised) — the
+    # consumer stays alive for the ack_wait redelivery.
+    await consumer._handle(msg)
+    assert msg.events == []  # neither ack nor nak — silent for ack_wait
+    await consumer.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_heartbeat_renewed_then_cancelled():
+    """The InProgress heartbeat is cancelled once the outcome is final —
+    on crash paths that is what lets JetStream schedule the ack_wait
+    redelivery at all (a stray renewal would keep pushing it out)."""
+    nats = _FakeNATS()
+    pool = _MockPool(doc_row=_make_doc_row(), kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.start()
+    msg = _FakeMsg(_make_payload())
+    await consumer._handle(msg)
+    # ack_wait/3 == 600s — far beyond the test run, so the loop never
+    # fired in_progress; only the final ack happened, and no heartbeat
+    # task was left behind.
+    assert msg.events == ["ack"]
+    assert not any(
+        t.get_coro().__name__ == "heartbeat_loop"
+        for t in asyncio.all_tasks()
+    )
+    await consumer.stop()
 
 
 # ── concurrency bound ─────────────────────────────────────────────────────
@@ -621,6 +882,7 @@ async def test_max_concurrency_bounds_in_flight_tasks():
 
 
 TASK_ID = "55555555-5555-5555-5555-555555555555"
+AUDIT_LOG_ID = "66666666-6666-6666-6666-666666666666"
 
 
 def _async_task_updates(pool: _MockPool) -> list[tuple[str, tuple]]:
@@ -633,6 +895,52 @@ def _async_task_updates(pool: _MockPool) -> list[tuple[str, tuple]]:
     ]
 
 
+def _audit_rows(pool: _MockPool) -> list[tuple]:
+    """Collect INSERT INTO kb_audit_log arg tuples across all pooled conns."""
+    return [
+        args
+        for conn in pool._conns
+        for args in conn.audit_inserts
+    ]
+
+
+def _audit_updates(pool: _MockPool) -> list[tuple]:
+    """Collect the in-place kb_audit_log result UPDATEs across pooled conns.
+
+    Each entry is the (sql, args) of update_parse_result_in_tx's UPDATE:
+    args = (tenant, kb, overlay_json, error_code, error_msg, action, task_id).
+    """
+    return [
+        (sql, args)
+        for conn in pool._conns
+        for (sql, args) in conn.audit_updates
+        if "UPDATE kb_audit_log" in sql
+    ]
+
+
+def _assert_result_update(pool: _MockPool, *, action, error_code,
+                          error_msg=None, parse_status=None,
+                          chunk_count=None):
+    """Assert exactly one in-place result UPDATE with the given outcome."""
+    updates = _audit_updates(pool)
+    assert len(updates) == 1
+    sql, args = updates[0]
+    assert "after_state = COALESCE(after_state, '{}'::jsonb) || $3::jsonb" in sql
+    assert "after_state->>'task_id' = $7" in sql
+    assert args[5] == action
+    assert args[6] == TASK_ID
+    assert args[3] == error_code
+    assert args[4] == error_msg
+    import json as _json
+    overlay = _json.loads(args[2])
+    assert overlay["task_id"] == TASK_ID
+    if parse_status is not None:
+        assert overlay["parse_status"] == parse_status
+    if chunk_count is not None:
+        assert overlay["chunk_count"] == chunk_count
+    return overlay
+
+
 def _assert_complete(update, *, status):
     sql, args = update
     assert "SET status = $2" in sql
@@ -643,10 +951,12 @@ def _assert_complete(update, *, status):
 @pytest.mark.asyncio
 async def test_closes_task_completed_when_doc_ready():
     """With task_id in the payload, a ready doc closes the task as
-    completed (UPDATE async_tasks SET status='completed')."""
+    completed (UPDATE async_tasks SET status='completed') and flips the
+    intent audit row in place (error_code NULL)."""
     nats = _FakeNATS()
     doc_row = _make_doc_row()
     doc_row["parse_status"] = "ready"
+    doc_row["chunk_count"] = 7
     pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
     orchestrator = _FakeOrchestrator()
     consumer = ParseConsumer(
@@ -662,13 +972,24 @@ async def test_closes_task_completed_when_doc_ready():
     # The UPDATE targeted the payload's task_id
     assert str(updates[0][1][0]) == TASK_ID
 
+    # Result audit: the intent row flipped in place (doc.parse, error_code
+    # NULL), overlay carrying the terminal doc state + task link.
+    _assert_result_update(
+        pool, action="doc.parse", error_code=None,
+        parse_status="ready", chunk_count=7,
+    )
+    # No fallback INSERT when the intent row was found.
+    assert _audit_rows(pool) == []
+
 
 @pytest.mark.asyncio
 async def test_closes_task_failed_when_doc_failed():
-    """A failed doc closes the task as failed."""
+    """A failed doc closes the task as failed and flips the intent audit
+    row in place: error_code PARSE_FAILED + the doc's sanitized message."""
     nats = _FakeNATS()
     doc_row = _make_doc_row()
     doc_row["parse_status"] = "failed"
+    doc_row["error_message"] = "embedding service unavailable"
     pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
     orchestrator = _FakeOrchestrator()
     consumer = ParseConsumer(
@@ -681,6 +1002,12 @@ async def test_closes_task_failed_when_doc_failed():
     updates = _async_task_updates(pool)
     assert len(updates) == 1
     _assert_complete(updates[0], status="failed")
+
+    _assert_result_update(
+        pool, action="doc.parse", error_code="PARSE_FAILED",
+        error_msg="embedding service unavailable", parse_status="failed",
+    )
+    assert _audit_rows(pool) == []
 
 
 @pytest.mark.asyncio
@@ -742,6 +1069,139 @@ async def test_non_terminal_status_leaves_task_open():
     )
     await consumer.process_message(_make_payload(task_id=TASK_ID))
     assert _async_task_updates(pool) == []
+
+
+@pytest.mark.asyncio
+async def test_close_out_uses_terminal_state_guard():
+    """complete_task_in_tx ships a terminal-state guard (status NOT IN
+    completed/failed/cancelled/dead_letter) so an interleaved redelivery
+    can never overwrite a task another delivery already closed — mirrors
+    the gateway's async_task_store. The consumer's UPDATE must carry
+    the guard (SQL-level contract; mock conns can't simulate row state)."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "ready"
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    updates = _async_task_updates(pool)
+    assert len(updates) == 1
+    sql, _ = updates[0]
+    assert "status NOT IN" in sql
+    for terminal in ("'completed'", "'failed'", "'cancelled'",
+                     "'dead_letter'"):
+        assert terminal in sql
+
+
+@pytest.mark.asyncio
+async def test_result_audit_action_follows_task_type():
+    """A kb.reparse task flips a doc.reparse intent row; a task row with an
+    unknown/missing task_type falls back to doc.parse."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "ready"
+    pool = _MockPool(
+        doc_row=doc_row, kb_row=_make_kb_row(),
+        task_row={"task_type": "kb.reparse"},
+    )
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    _assert_result_update(pool, action="doc.reparse", error_code=None)
+
+
+@pytest.mark.asyncio
+async def test_result_audit_falls_back_to_insert_without_task_id_link():
+    """An intent row predating the task_id link (older build, or the audit
+    was skipped at notify time) doesn't match the in-place UPDATE — the
+    consumer falls back to a separate result INSERT so the outcome is
+    still recorded."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "failed"
+    doc_row["error_message"] = "boom"
+    pool = _MockPool(
+        doc_row=doc_row, kb_row=_make_kb_row(),
+        audit_update_status="UPDATE 0",
+    )
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    updates = _audit_updates(pool)
+    assert len(updates) == 1  # attempted in place first
+    audits = _audit_rows(pool)
+    assert len(audits) == 1
+    # args: (tenant, kb, actor, action, before, after, error_code, error_msg)
+    assert audits[0][3] == "doc.parse"
+    assert audits[0][2] is None  # NULL actor = internal system consumer
+    assert audits[0][6] == "PARSE_FAILED"
+    assert audits[0][7] == "boom"
+    import json as _json
+    after = _json.loads(audits[0][5])
+    assert after["doc_id"] == DOC_ID
+    assert after["parse_status"] == "failed"
+    assert after["task_id"] == TASK_ID
+
+
+@pytest.mark.asyncio
+async def test_result_audit_skipped_when_task_already_terminal():
+    """complete_task_in_tx's terminal-state guard returns UPDATE 0 (task
+    already closed by a redelivery race) — no duplicate audit write."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "ready"
+    pool = _MockPool(
+        doc_row=doc_row, kb_row=_make_kb_row(), task_update="UPDATE 0",
+    )
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    assert _audit_updates(pool) == []
+    assert _audit_rows(pool) == []
+
+
+@pytest.mark.asyncio
+async def test_result_audit_error_msg_truncated():
+    """A very long sanitized error message is truncated in the flipped
+    audit row's error_msg (512-char cap)."""
+    nats = _FakeNATS()
+    doc_row = _make_doc_row()
+    doc_row["parse_status"] = "failed"
+    doc_row["error_message"] = "x" * 5000
+    pool = _MockPool(doc_row=doc_row, kb_row=_make_kb_row())
+    orchestrator = _FakeOrchestrator()
+    consumer = ParseConsumer(
+        nats_client=nats,
+        db_pool=pool,
+        orchestrator=orchestrator,
+        subject=SUBJECT_V2,
+    )
+    await consumer.process_message(_make_payload(task_id=TASK_ID))
+    _assert_result_update(
+        pool, action="doc.parse", error_code="PARSE_FAILED",
+        error_msg="x" * 512, parse_status="failed",
+    )
 
 
 @pytest.mark.asyncio

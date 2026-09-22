@@ -996,7 +996,7 @@ validate-network-alpha:
 validate-storage-alpha:
 	@echo "→ 校验 Sprint 3 存储资源 Core API 契约..."
 	python scripts/validate_storage_alpha_contract.py
-	$(GO_CACHE_ENV) go test ./pkg/adapters/runtime ./services/ani-gateway/internal/router -run 'TestLocalStorageService|TestMetadataStorageStore|TestLocalStorageStatusReconciler|TestKubernetesStorageRenderer|TestKubernetesStorageProvider|TestKubernetesRESTClientObservesStorage|TestKubernetesRESTClientMapsStorage|TestStorageAPI' -v
+	$(GO_CACHE_ENV) go test ./pkg/adapters/runtime ./services/ani-gateway/internal/router -run 'TestLocalStorageService|TestMetadataStorageStore|TestLocalStorageStatusReconciler|TestKubernetesStorageRenderer|TestKubernetesStorageProvider|TestKubernetesRESTClientObservesStorage|TestKubernetesRESTClientMapsStorage|TestStorageAPI|TestStorageHTTP' -v
 	@echo "✅ storage Core API contract valid"
 
 validate-vector-alpha:

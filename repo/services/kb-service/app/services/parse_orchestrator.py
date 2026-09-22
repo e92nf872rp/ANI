@@ -61,7 +61,13 @@ SUMMARY_PARENT_COUNT = 3
 # Summary length bounds in characters (PRD US-012 / SPEC §5.1: "200-500 字").
 # Matches rag-engine SummaryService.SUMMARY_MIN_CHARS / SUMMARY_MAX_CHARS.
 SUMMARY_MIN_CHARS = 200
-SUMMARY_MAX_CHARS = 500
+# Hard budget for the generated summary. The summary is embedded in the same
+# batch as child chunks, so it must stay within the embedding model's context
+# limit (bge-small: EMBED_MAX_SEQ_TOKENS=512 tokens in rag-engine config.py,
+# ~2 chars/token ⇒ ≤1024 chars; 460 keeps margin under the legacy 500-char
+# target). LLM output is non-deterministic across runs, so we clamp both the
+# prompt target and the final text to this budget (Bug B fix, layer 1).
+SUMMARY_SAFE_CHARS = 460
 
 # Summary prompt template — mirrors rag-engine SummaryService._SUMMARY_PROMPT_TEMPLATE
 # (summary_service.py lines 53-56). The prompt is in English and instructs the
@@ -135,7 +141,9 @@ class _RagEngineClient(Protocol):
         chunk_size: int = 1024,
     ) -> list[dict[str, Any]]: ...
 
-    async def embed(self, *, texts: list[str]) -> tuple[list[list[float]], int]: ...
+    async def embed(
+        self, *, texts: list[str], model: str = ""
+    ) -> tuple[list[list[float]], int]: ...
 
     async def generate(
         self,
@@ -190,12 +198,19 @@ class ParseOrchestrator:
         file_type: str,
         chunk_size: int,
         vector_store_id: str,
+        embedding_model: str = "",
     ) -> None:
         """Process a single document end-to-end through the parse pipeline.
 
         State machine: pending → parsing → indexing → ready | failed.
         On exception the document is marked ``failed`` with a sanitized
         error_message (mirrors rag-engine parse_worker, Plan §0.1).
+
+        Args:
+            embedding_model: Per-KB embedding model name (from the KB row's
+                ``embedding_model`` column); empty uses the rag-engine
+                server default. Passed through to the Embed RPC so write
+                and read sides of the same KB always use the same model.
         """
         if not tenant_id:
             raise ValueError("tenant_id must not be empty for RLS-scoped write")
@@ -354,7 +369,9 @@ class ParseOrchestrator:
             texts = [c["content"] for c in embed_chunks]
             vectors: list[list[float]] = []
             if texts:
-                vectors, _dim = await self._rag_engine.embed(texts=texts)
+                vectors, _dim = await self._rag_engine.embed(
+                    texts=texts, model=embedding_model
+                )
                 if len(vectors) != len(embed_chunks):
                     raise RuntimeError(
                         f"embed returned {len(vectors)} vectors for "
@@ -389,6 +406,14 @@ class ParseOrchestrator:
                     for c, v in zip(embed_chunks, vectors)
                 ]
                 batch_size = 100
+                # Bug A fix: a per-run id makes the idempotency key unique per
+                # parse run ("parse-{doc}-{run}-b{n}"). Reparse regenerates all
+                # chunk_ids (uuid4), so reusing the old fixed "parse-{doc}-b{n}"
+                # key hit the gateway fingerprint cache → 409
+                # IDEMPOTENCY_KEY_REUSED. Network retries within the SAME run
+                # still dedupe correctly (same run_id); stale keys expire after
+                # the gateway's 24h cache window.
+                run_id = uuid.uuid4().hex
                 for batch_idx in range(0, len(documents), batch_size):
                     batch = documents[batch_idx:batch_idx + batch_size]
                     # Batch suffix on every key (even batch 0): the gateway
@@ -400,7 +425,7 @@ class ParseOrchestrator:
                     await core.insert_vector_documents(
                         vector_store_id=vector_store_id,
                         documents=batch,
-                        idempotency_key=f"parse-{doc_id}-b{batch_no}",
+                        idempotency_key=f"parse-{doc_id}-{run_id}-b{batch_no}",
                     )
 
             # 8. Write kb_chunks: parents + children + summaries SEPARATELY
@@ -493,7 +518,7 @@ class ParseOrchestrator:
             # the LLM to match the content's language, achieving language
             # adaptation without explicit language detection.
             prompt = _SUMMARY_PROMPT_TEMPLATE.format(
-                lo=SUMMARY_MIN_CHARS, hi=SUMMARY_MAX_CHARS, content=combined,
+                lo=SUMMARY_MIN_CHARS, hi=SUMMARY_SAFE_CHARS, content=combined,
             )
             result = await self._rag_engine.generate(
                 question=prompt,
@@ -501,11 +526,15 @@ class ParseOrchestrator:
                 context=[],
                 history=[],
                 inference_service_name="",
-                max_tokens=500,
+                max_tokens=SUMMARY_SAFE_CHARS,
             )
             summary = (result.get("answer") or "").strip()
             if not summary:
                 return None
+            # Bug B fix, layer 1: the 0.5B LLM may overshoot the prompt target
+            # across runs — hard-clamp before the summary is embedded.
+            if len(summary) > SUMMARY_SAFE_CHARS:
+                summary = summary[:SUMMARY_SAFE_CHARS]
             # Build a summary chunk dict matching the shape write_chunks
             # expects for summaries (chunk_id, content, content_type,
             # page_number, parent_chunk_id, parent_content, token_count,

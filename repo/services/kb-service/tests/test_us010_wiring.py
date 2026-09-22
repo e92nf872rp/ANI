@@ -337,8 +337,11 @@ class _QueryMockConn:
         # get_kb (KB existence check) → return a KB row with defaults
         if "FROM knowledge_bases" in sql:
             return {"top_k": 5, "score_threshold": 0.3, "retrieval_mode": "hybrid",
-                    "vector_store_id": "vs-test-001"}
+                    "vector_store_id": "vs-test-001", "embedding_model": "bge-m3"}
         # create_session returns id; insert_message returns a row
+        if "kb_audit_log" in sql:
+            self.events.append(("insert_audit", args))
+            return {"id": uuid.uuid4()}
         if "kb_sessions" in sql:
             self.events.append(("create_session", args))
             return {"id": uuid.uuid4()}
@@ -490,6 +493,228 @@ def test_query_persists_user_and_assistant_messages_and_caches():
     assert resp.sources[0].doc_id == "d1"
 
 
+def test_query_writes_qa_audit_row():
+    """操作历史 bug fix: a successful Query records the Q&A turn into
+    kb_audit_log (action kb.query) with the question/answer content and
+    token usage — the operation history previously never showed Q&A."""
+    pool = _QueryMockPool()
+    servicer, _ = _make_query_servicer(pool=pool)
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="什么是 ANI？",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    resp = asyncio.new_event_loop().run_until_complete(
+        servicer._query(req, ctx)
+    )
+
+    import json as _json
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert len(audits) == 1
+    # insert_audit_in_tx args: (tenant, kb, actor, action, before, after,
+    # error_code, error_msg)
+    args = audits[0][1]
+    assert str(args[0]) == TENANT_ID
+    assert str(args[1]) == KB_ID
+    assert args[3] == "kb.query"
+    assert args[4] is None  # creation-type: no before_state
+    assert args[6] is None  # success → error_code NULL
+    after = _json.loads(args[5])
+    assert after["question"] == "什么是 ANI？"
+    assert after["answer"] == "hello"
+    assert after["source_count"] == 1
+    assert after["input_tokens"] == 10
+    assert after["output_tokens"] == 5
+    assert after["session_id"] == resp.session_id
+
+
+def test_query_audit_truncates_long_content():
+    """Question/answer longer than the 500-char audit cap are truncated so
+    a long Q&A turn cannot bloat kb_audit_log rows."""
+    pool = _QueryMockPool()
+    servicer, _ = _make_query_servicer(
+        pool=pool, rag_grpc=_MockRagGrpcClient(answer="a" * 2000),
+    )
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="q" * 2000,
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
+
+    import json as _json
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert len(audits) == 1
+    after = _json.loads(audits[0][1][5])
+    assert after["question"] == "q" * 500
+    assert after["answer"] == "a" * 500
+
+
+def test_query_audit_failure_does_not_fail_query():
+    """Best-effort audit: if the kb_audit_log INSERT fails, the Query
+    response still returns normally (audit write is swallowed)."""
+
+    class _AuditFailingConn(_QueryMockConn):
+        async def fetchrow(self, sql, *args):
+            if "kb_audit_log" in sql:
+                raise RuntimeError("audit insert exploded")
+            return await super().fetchrow(sql, *args)
+
+    class _AuditFailingPool:
+        def __init__(self):
+            self.conns: list = []
+
+        @asynccontextmanager
+        async def acquire(self):
+            conn = _AuditFailingConn()
+            self.conns.append(conn)
+            yield conn
+
+    pool = _AuditFailingPool()
+    servicer, _ = _make_query_servicer(pool=pool)
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    resp = asyncio.new_event_loop().run_until_complete(
+        servicer._query(req, ctx)
+    )
+    assert resp.answer == "hello"
+
+
+class _FailingGenerateRag(_MockRagGrpcClient):
+    """generate() raises — simulates rag-engine/AI-Gateway failures."""
+
+    def __init__(self, error_text="Error code: 404"):
+        super().__init__()
+        self._error_text = error_text
+
+    async def generate(self, **kwargs):
+        raise RuntimeError(self._error_text)
+
+
+class _FailingStreamRag(_MockRagGrpcClient):
+    """generate_stream() raises — mid-stream failure for Retrieve."""
+
+    def __init__(self, error_text="Error code: 404"):
+        super().__init__()
+        self._error_text = error_text
+
+    async def generate_stream(self, **kwargs):
+        raise RuntimeError(self._error_text)
+        yield  # pragma: no cover — makes this an async generator
+
+
+def test_query_failure_persists_placeholder_and_failed_audit():
+    """失败问答不再是无痕半记录：用户消息已落库（步骤 3-4）而生成失败时，
+    需补 1) assistant 错误占位消息（会话详情可见失败原因）+
+    2) kb.query 失败审计行（QA_FAILED，操作历史可见）；原异常语义不变。"""
+    pool = _QueryMockPool()
+    servicer, cache = _make_query_servicer(
+        pool=pool, rag_grpc=_FailingGenerateRag())
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="什么是 ANI？",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    with pytest.raises(RuntimeError, match="404"):
+        asyncio.new_event_loop().run_until_complete(
+            servicer._query(req, ctx)
+        )
+
+    # 1) assistant error placeholder: DB (3rd conn) + Redis cache
+    placeholder_conn = pool.conns[2]
+    assert "insert_message" in [e[0] for e in placeholder_conn.events]
+    asst = [a for a in cache.appended if a.get("role") == "assistant"]
+    assert len(asst) == 1
+    assert asst[0]["content"].startswith("回答生成失败：")
+    assert "Error code: 404" in asst[0]["content"]
+
+    # 2) failed kb.query audit row: QA_FAILED + error text, answer empty
+    import json as _json
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert len(audits) == 1
+    args = audits[0][1]
+    assert args[3] == "kb.query"
+    assert args[6] == "QA_FAILED"
+    assert "Error code: 404" in str(args[7])
+    after = _json.loads(args[5])
+    assert after["question"] == "什么是 ANI？"
+    assert after["answer"] == ""
+    assert after["source_count"] == 0
+
+
+def test_query_failure_truncates_error_text():
+    """Error text (e.g. a multi-line AioRpcError repr) is capped at the
+    500-char audit limit in BOTH the placeholder content and error_msg."""
+
+    class _LongErrorRag(_FailingGenerateRag):
+        async def generate(self, **kwargs):
+            raise RuntimeError("E" * 2000)
+
+    pool = _QueryMockPool()
+    servicer, cache = _make_query_servicer(
+        pool=pool, rag_grpc=_LongErrorRag())
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="q",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    with pytest.raises(RuntimeError):
+        asyncio.new_event_loop().run_until_complete(
+            servicer._query(req, ctx)
+        )
+
+    asst = [a for a in cache.appended if a.get("role") == "assistant"]
+    assert asst[0]["content"] == "回答生成失败：" + "E" * 500
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert audits[0][1][7] == "E" * 500
+
+
+def test_retrieve_stream_failure_persists_placeholder_and_failed_audit():
+    """SSE 流式路径：流开始前/流中失败同样补占位消息 + 失败审计行。"""
+    pool = _QueryMockPool()
+    servicer, cache = _make_query_servicer(
+        pool=pool, rag_grpc=_FailingStreamRag())
+    ctx = _make_context()
+    req = kb_pb.RetrieveRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+
+    async def _drain():
+        async for _ev in servicer._retrieve_stream(req, ctx):
+            pass
+
+    with pytest.raises(RuntimeError, match="404"):
+        asyncio.new_event_loop().run_until_complete(_drain())
+
+    asst = [a for a in cache.appended if a.get("role") == "assistant"]
+    assert len(asst) == 1
+    assert asst[0]["content"].startswith("回答生成失败：")
+    assert "Error code: 404" in asst[0]["content"]
+    audits = [
+        e for c in pool.conns for e in c.events if e[0] == "insert_audit"
+    ]
+    assert len(audits) == 1
+    assert audits[0][1][6] == "QA_FAILED"
+
+
 def test_query_missing_idempotency_key_returns_invalid_argument():
     pool = _QueryMockPool()
     servicer, _ = _make_query_servicer(pool=pool)
@@ -569,9 +794,9 @@ def test_query_works_without_cache_factory_returning_none():
     import asyncio
     resp = asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
     # Still persists both messages to DB (cache is best-effort).
-    # 4 connections: KB existence check + user msg + history load (no
-    # cache, so _load_history falls back to DB) + assistant msg.
-    assert len(pool.conns) == 4
+    # 5 connections: KB existence check + user msg + history load (no
+    # cache, so _load_history falls back to DB) + assistant msg + Q&A audit.
+    assert len(pool.conns) == 5
     assert resp.answer == "hello"
 
 
@@ -609,7 +834,189 @@ def test_query_rag_engine_error_returns_unavailable():
     # the exception (grpc abort raises ValueError/RuntimeError in test).
 
 
+# ── M3: inference_service_name 三级回落（request → KB 行 → ""）──────────
+
+
+class _RecordingRagGrpcClient:
+    """Records the kwargs of every generate/generate_stream call so tests
+    can assert which inference_service_name the servicer resolved."""
+
+    def __init__(self, stream=False):
+        self.generate_kwargs: list[dict] = []
+        self.generate_stream_kwargs: list[dict] = []
+        self._stream = stream
+
+    async def generate(self, **kwargs):
+        self.generate_kwargs.append(kwargs)
+        return {"answer": "hello", "input_tokens": 10, "output_tokens": 5,
+                "session_id": kwargs.get("session_id", "")}
+
+    async def generate_stream(self, **kwargs):
+        self.generate_stream_kwargs.append(kwargs)
+        yield {"content": "he"}
+        yield {"content": "llo"}
+        yield {"done": True, "input_tokens": 10, "output_tokens": 5,
+               "session_id": kwargs.get("session_id", "")}
+
+    async def aclose(self):
+        pass
+
+
+class _KBDefaultConn:
+    """Conn whose get_kb row carries a default_inference_service value."""
+
+    def __init__(self, default_inference_service=None):
+        self._default = default_inference_service
+
+    def transaction(self):
+        @asynccontextmanager
+        async def _tx():
+            yield self
+        return _tx()
+
+    async def execute(self, sql, *args):
+        return "UPDATE 1"
+
+    async def fetchrow(self, sql, *args):
+        if "FROM knowledge_bases" in sql:
+            row = {"top_k": 5, "score_threshold": 0.3, "retrieval_mode": "hybrid",
+                   "vector_store_id": "vs-test-001", "embedding_model": "bge-m3"}
+            if self._default is not None:
+                row["default_inference_service"] = self._default
+            return row
+        if "kb_sessions" in sql:
+            return {"id": uuid.uuid4()}
+        if "kb_messages" in sql:
+            return {"id": uuid.uuid4()}
+        return None
+
+    async def fetch(self, sql, *args):
+        return []
+
+    async def fetchval(self, sql, *args):
+        return 0
+
+
+class _KBDefaultPool:
+    def __init__(self, default_inference_service=None):
+        self._default = default_inference_service
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield _KBDefaultConn(self._default)
+
+
+def _make_fallback_servicer(default_inference_service=None):
+    rag = _RecordingRagGrpcClient()
+    servicer = KBServiceServicer(
+        pool=_KBDefaultPool(default_inference_service),
+        retrieve_service_factory=lambda tenant_id: _MockRetrieveService(),
+        rag_engine_grpc_client_factory=lambda: rag,
+        session_cache_factory=lambda: _MockSessionCache(),
+    )
+    return servicer, rag
+
+
+def test_query_falls_back_to_kb_default_inference_service():
+    """M3: request.inference_service_name 为空 → 用 KB 行的
+    default_inference_service（回落链第二级），而非直接 "default"。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service="qwen3-32b")
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
+
+    assert len(rag.generate_kwargs) == 1
+    assert rag.generate_kwargs[0]["inference_service_name"] == "qwen3-32b"
+
+
+def test_query_request_level_inference_service_overrides_kb_default():
+    """M3: 请求级 inference_service_name 优先于 KB 行默认值（回落链第一级）。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service="qwen3-32b")
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+        inference_service_name="deepseek-v3",
+    )
+    import asyncio
+    asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
+
+    assert len(rag.generate_kwargs) == 1
+    assert rag.generate_kwargs[0]["inference_service_name"] == "deepseek-v3"
+
+
+def test_query_falls_back_to_default_when_kb_row_unset():
+    """M3: 请求与 KB 行都未设置 → ""（回落链第三级，rag-engine 端由
+    ``model or settings.vllm_model`` 接管默认模型）。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service=None)
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
+
+    assert len(rag.generate_kwargs) == 1
+    assert rag.generate_kwargs[0]["inference_service_name"] == ""
+
+
+def test_retrieve_stream_falls_back_to_kb_default_inference_service():
+    """M3（流式场景）：Retrieve 流式路径同样走三级回落链。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service="qwen3-32b")
+    ctx = _make_context()
+    req = kb_pb.RetrieveRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+
+    async def _drain():
+        events = []
+        async for ev in servicer._retrieve_stream(req, ctx):
+            events.append(ev)
+        return events
+
+    events = asyncio.new_event_loop().run_until_complete(_drain())
+
+    assert len(rag.generate_stream_kwargs) == 1
+    assert (
+        rag.generate_stream_kwargs[0]["inference_service_name"] == "qwen3-32b"
+    )
+    # 流式事件完整：token* → sources → done
+    kinds = [e.WhichOneof("event") for e in events]
+    assert kinds[0] == "token" and "sources" in kinds and kinds[-1] == "done"
+
+
+def test_retrieve_stream_request_level_overrides_kb_default():
+    """M3（流式场景）：请求级 inference_service_name 优先于 KB 默认值。"""
+    servicer, rag = _make_fallback_servicer(default_inference_service="qwen3-32b")
+    ctx = _make_context()
+    req = kb_pb.RetrieveRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+        inference_service_name="deepseek-v3",
+    )
+    import asyncio
+
+    async def _drain():
+        async for _ev in servicer._retrieve_stream(req, ctx):
+            pass
+
+    asyncio.new_event_loop().run_until_complete(_drain())
+
+    assert len(rag.generate_stream_kwargs) == 1
+    assert (
+        rag.generate_stream_kwargs[0]["inference_service_name"] == "deepseek-v3"
+    )
+
+
 # ── gRPC server-level regression: skeleton mode still works ───────────────────
+
 
 
 @pytest.fixture

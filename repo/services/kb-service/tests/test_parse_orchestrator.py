@@ -25,6 +25,7 @@ chunk_repo.write_chunks and doc_repo.update_parse_status are mocked.
 """
 import json
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
@@ -77,7 +78,7 @@ class _FakeRagEngine:
         self._dimension = dimension
         self._summary_answer = summary_answer
         self.parse_calls: list[dict] = []
-        self.embed_calls: list[list[str]] = []
+        self.embed_calls: list[dict] = []
         self.generate_calls: list[dict] = []
 
     async def parse(
@@ -96,8 +97,10 @@ class _FakeRagEngine:
         })
         return [dict(c) for c in self._chunks]
 
-    async def embed(self, *, texts: list[str]) -> tuple[list[list[float]], int]:
-        self.embed_calls.append(list(texts))
+    async def embed(
+        self, *, texts: list[str], model: str = ""
+    ) -> tuple[list[list[float]], int]:
+        self.embed_calls.append({"texts": list(texts), "model": model})
         # Return one vector per text (cycle if fewer pre-built vectors).
         out = []
         for i in range(len(texts)):
@@ -435,7 +438,7 @@ async def test_embed_separates_summary_from_children():
 
     # embed called once with child texts + summary text
     assert len(rag.embed_calls) == 1
-    embedded_texts = rag.embed_calls[0]
+    embedded_texts = rag.embed_calls[0]["texts"]
     # 2 children + 1 summary = 3 texts
     assert len(embedded_texts) == 3
     # First two are child contents
@@ -471,9 +474,12 @@ async def test_core_insert_vector_metadata():
     assert len(core.insert_calls) == 1
     ins = core.insert_calls[0]
     assert ins["vector_store_id"] == VECTOR_STORE_ID
-    # Batched insert: first batch of 100 uses suffix -b0 (gateway idempotency
-    # middleware caches by fingerprint, so each batch needs a fresh key).
-    assert ins["idempotency_key"] == f"parse-{DOC_ID}-b0"
+    # Batched insert with a per-run id (Bug A fix: reparse regenerates
+    # chunk_ids, so the key must be unique per parse run; same-run network
+    # retries still dedupe on the same key). First batch of 100 uses -b0.
+    assert re.fullmatch(
+        rf"parse-{DOC_ID}-[0-9a-f]{{32}}-b0", ins["idempotency_key"]
+    )
 
     # 1 child + 1 summary = 2 documents inserted
     assert len(ins["documents"]) == 2
@@ -596,7 +602,7 @@ async def test_summary_uses_first_3_parents_and_prompt():
     assert len(rag.generate_calls) == 1
     gen_call = rag.generate_calls[0]
     prompt = gen_call["question"]
-    assert "Summarize the following content in 200-500 characters" in prompt
+    assert "Summarize the following content in 200-460 characters" in prompt
     assert "Use the same language as the content" in prompt
     assert "内容一" in prompt
     assert "内容二" in prompt
@@ -604,7 +610,8 @@ async def test_summary_uses_first_3_parents_and_prompt():
     assert "内容四" not in prompt  # 4th parent excluded
     assert gen_call["context"] == []
     assert gen_call["history"] == []
-    assert gen_call["max_tokens"] == 500
+    assert gen_call["max_tokens"] == po_module.SUMMARY_SAFE_CHARS
+    assert len(result["content"]) <= po_module.SUMMARY_SAFE_CHARS  # Bug B clamp
 
 
 # AC: _generate_summary — failure returns None, does not block
@@ -758,7 +765,7 @@ async def test_no_children_still_generates_summary():
 
     # embed called with just the summary text (0 children + 1 summary)
     assert len(rag.embed_calls) == 1
-    assert len(rag.embed_calls[0]) == 1  # only summary
+    assert len(rag.embed_calls[0]["texts"]) == 1  # only summary
 
     # Core insert called with 1 document (the summary)
     assert len(core.insert_calls) == 1
@@ -793,7 +800,7 @@ async def test_summary_failure_no_summary_in_write_or_embed():
 
     # embed called with only child text (no summary)
     assert len(rag.embed_calls) == 1
-    assert len(rag.embed_calls[0]) == 1  # only 1 child
+    assert len(rag.embed_calls[0]["texts"]) == 1  # only 1 child
 
     # Core insert: 1 document (child only)
     assert len(core.insert_calls) == 1

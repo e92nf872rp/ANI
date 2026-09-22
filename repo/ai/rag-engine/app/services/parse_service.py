@@ -25,7 +25,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from llama_index.readers.docling import DoclingReader
+# DoclingReader is imported lazily on first Word/Excel/PPT parse. The
+# module-level import pulls in torch/docling (30s+ cold start) and used to
+# stall the gRPC Parse handler for TXT/MD/PDF documents (E2E 2026-09-20).
+DoclingReader: Any = None  # type: ignore[assignment]
+
+
+def _docling_reader() -> Any:
+    """Lazily import and instantiate DoclingReader (heavy import chain)."""
+    global DoclingReader
+    if DoclingReader is None:
+        from llama_index.readers.docling import DoclingReader as _DR
+
+        DoclingReader = _DR
+    return DoclingReader()
 
 if TYPE_CHECKING:
 
@@ -399,7 +412,7 @@ class ParseService:
         else:
             # Word/Excel/PPT: use DoclingReader for text + table extraction.
             # A fresh instance per call avoids state leakage between documents.
-            reader = DoclingReader()
+            reader = _docling_reader()
             docs = reader.load_data(file_path=file_path)
             markdown = "\n\n".join(d.text for d in docs)
 

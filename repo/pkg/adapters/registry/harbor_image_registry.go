@@ -386,6 +386,7 @@ func (r *HarborImageRegistry) ListImages(ctx context.Context, request ports.Regi
 		repositories = result.Items
 	}
 	registryHost := harborRegistryHost(r.endpoint)
+	keyword := strings.ToLower(strings.TrimSpace(request.Keyword))
 	items := []ports.RegistryImage{}
 	for _, repository := range repositories {
 		artifacts, err := r.ListArtifacts(ctx, ports.RegistryArtifactListRequest{TenantID: request.TenantID, Project: project, Repository: repository.Name})
@@ -394,6 +395,9 @@ func (r *HarborImageRegistry) ListImages(ctx context.Context, request ports.Regi
 		}
 		for _, artifact := range artifacts.Items {
 			for _, tag := range artifact.Tags {
+				if keyword != "" && !registryMatchesImageKeyword(repository.Name, tag, keyword) {
+					continue
+				}
 				if requestedTag := strings.TrimSpace(request.Tag); requestedTag != "" && requestedTag != tag {
 					continue
 				}
@@ -646,6 +650,19 @@ func registryImagePurpose(repository, tag string) string {
 	default:
 		return "container"
 	}
+}
+
+// registryMatchesImageKeyword 判断镜像行是否命中 keyword 过滤条件，
+// 匹配范围覆盖仓库名与 tag 名（loose、大小写不敏感）。
+func registryMatchesImageKeyword(repository, tag, keyword string) bool {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(repository), keyword) {
+		return true
+	}
+	return tag != "" && strings.Contains(strings.ToLower(tag), keyword)
 }
 
 func isRegistryHost(value string) bool {
