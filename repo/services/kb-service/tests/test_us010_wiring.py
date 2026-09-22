@@ -638,6 +638,11 @@ def test_query_failure_persists_placeholder_and_failed_audit():
     assert len(asst) == 1
     assert asst[0]["content"].startswith("回答生成失败：")
     assert "Error code: 404" in asst[0]["content"]
+    # 错误原因包在 fenced code block 中，避免前端 markdown/HTML
+    # 渲染吞掉 <AioRpcError ...> 的尖括号
+    assert asst[0]["content"] == (
+        "回答生成失败：\n```\nError code: 404\n```"
+    )
 
     # 2) failed kb.query audit row: QA_FAILED + error text, answer empty
     import json as _json
@@ -678,7 +683,9 @@ def test_query_failure_truncates_error_text():
         )
 
     asst = [a for a in cache.appended if a.get("role") == "assistant"]
-    assert asst[0]["content"] == "回答生成失败：" + "E" * 500
+    assert asst[0]["content"] == (
+        "回答生成失败：\n```\n" + "E" * 500 + "\n```"
+    )
     audits = [
         e for c in pool.conns for e in c.events if e[0] == "insert_audit"
     ]
