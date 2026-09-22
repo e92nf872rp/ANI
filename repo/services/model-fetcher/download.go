@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,7 +25,10 @@ type Descriptor struct {
 	AllowInsecureHTTP bool
 }
 
-const maxDownloadSize = int64(1 << 40) // defensive bound when a descriptor is malformed
+// The provider/model manifest is the authoritative size. Keep only the
+// arithmetic-safe upper bound here; fixed GiB ceilings would reject valid
+// large models before the exact byte and checksum checks run.
+const maxDownloadSize = int64(math.MaxInt64 - 1)
 
 // modelDownloadHTTPTimeout bounds a presigned URL fetch even when the caller
 // supplies a context without a deadline. It is a variable so unit tests can

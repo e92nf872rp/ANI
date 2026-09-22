@@ -86,6 +86,7 @@ func modelScopeHTTPClient(client *http.Client) *http.Client {
 			return http.ErrUseLastResponse
 		}
 		scrubSourceRedirectHeaders(req)
+		preserveSourceRangeHeader(req, via)
 		return nil
 	}
 	return clone
@@ -504,6 +505,29 @@ func (s *ModelScopeSource) Open(ctx context.Context, repository Repository, file
 		return nil, 0, errors.New("source file is too large")
 	}
 	return response.Body, response.ContentLength, nil
+}
+
+func (s *ModelScopeSource) OpenRange(ctx context.Context, repository Repository, filePath string, offset, length int64) (io.ReadCloser, error) {
+	if s == nil || s.endpoint == nil || ValidateRepository(repository) != nil || repository.Source != "modelscope" || validateRemoteFilePath(filePath) != nil {
+		return nil, errors.New("invalid model scope range file")
+	}
+	if err := validateModelScopeRevision(repository.Revision); err != nil {
+		return nil, err
+	}
+	requestURL := appendURLPath(s.endpoint, "api", "v1", "models", repository.RepoID, "repo")
+	query := requestURL.Query()
+	query.Set("Revision", repository.Revision)
+	query.Set("FilePath", filePath)
+	requestURL.RawQuery = query.Encode()
+	client := s.downloadClient
+	if client == nil {
+		client = s.client
+	}
+	response, err := sourceRangeGET(ctx, client, requestURL, offset, length)
+	if err != nil {
+		return nil, err
+	}
+	return &exactRangeReadCloser{body: response.Body, remaining: length}, nil
 }
 
 func validateModelScopeRevision(revision string) error {

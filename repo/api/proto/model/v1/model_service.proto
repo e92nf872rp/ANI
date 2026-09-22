@@ -155,6 +155,9 @@ message GetModelDownloadURLRequest {
   string tenant_id        = 1;
   string model_version_id = 2;
   string requester        = 3;   // "init-container" — audited
+  // Optional relative snapshot file path. Empty requests the manifest or
+  // legacy single object; non-empty requests one manifest-listed file.
+  string file_path        = 4;
 }
 
 message GetModelDownloadURLResponse {
@@ -163,6 +166,8 @@ message GetModelDownloadURLResponse {
   bool   is_encrypted     = 3;
   string encrypt_algo     = 4;
   string encrypt_hint     = 5;
+  int64  size_bytes       = 6;
+  string checksum_sha256  = 7;
 }
 
 // ── Domain messages ───────────────────────────────────────────────────────────

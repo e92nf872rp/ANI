@@ -81,3 +81,20 @@ type ObjectStoreContentVerifier interface {
 	ObjectStore
 	VerifyObject(ctx context.Context, ref ObjectRef, expectedSize int64, expectedChecksum string) error
 }
+
+type MultipartPart struct {
+	Number int    `json:"number"`
+	ETag   string `json:"etag"`
+	Size   int64  `json:"size"`
+}
+
+// MultipartObjectStore is an optional capability for streaming large objects
+// in independently retryable parts.
+type MultipartObjectStore interface {
+	ObjectStore
+	BeginMultipart(ctx context.Context, ref ObjectRef, contentType string) (string, error)
+	ListParts(ctx context.Context, ref ObjectRef, uploadID string) ([]MultipartPart, error)
+	UploadPart(ctx context.Context, ref ObjectRef, uploadID string, partNumber int, body io.Reader, size int64) (MultipartPart, error)
+	CompleteMultipart(ctx context.Context, ref ObjectRef, uploadID string, parts []MultipartPart) (ObjectMetadata, error)
+	AbortMultipart(ctx context.Context, ref ObjectRef, uploadID string) error
+}

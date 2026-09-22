@@ -45,8 +45,8 @@ type ImportTask struct {
 const (
 	modelImportTaskType       = "model.import"
 	modelImportTargetBucket   = "model"
-	modelImportTargetDir      = "archive"
-	modelImportArchiveName    = "model.tar.gz"
+	modelImportTargetDir      = "snapshot"
+	modelImportManifestName   = "manifest.json"
 	modelImportMaxAttempts    = 3
 	modelImportOperationScope = "model.import"
 )
@@ -248,7 +248,7 @@ func validateCreateImportRequest(req CreateImportRequest) error {
 }
 
 func modelImportTargetPath(tenantID, modelID, importID uuid.UUID) string {
-	return "object://models/" + tenantID.String() + "/" + modelID.String() + "/import-" + importID.String() + "/" + modelImportTargetDir + "/" + modelImportArchiveName
+	return "object://models/" + tenantID.String() + "/" + modelID.String() + "/import-" + importID.String() + "/" + modelImportTargetDir + "/" + modelImportManifestName
 }
 
 func importedModelName(repoID, source, requestHash string) string {

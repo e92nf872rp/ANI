@@ -154,6 +154,9 @@ func runWithDependencies(ctx context.Context, cfg FetcherConfig, dialer modelSer
 	if cfg.ObjectRef != "" && strings.TrimSpace(response.GetStoragePath()) != cfg.ObjectRef {
 		return errors.New("model-service returned an unexpected object")
 	}
+	if isModelSnapshotObject(response.GetStoragePath()) || isModelSnapshotObject(cfg.ObjectRef) {
+		return fetchModelSnapshot(ctx, cfg, response, client, httpClient)
+	}
 	if isModelArchiveObject(response.GetStoragePath()) || isModelArchiveObject(cfg.ObjectRef) {
 		// Archives are downloaded beside (not inside) the final version
 		// directory, then atomically extracted into TargetPath. TargetPath is

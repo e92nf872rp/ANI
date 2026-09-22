@@ -21,6 +21,8 @@ import (
 
 	"github.com/kubercloud/ani/pkg/adapters/resilience"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 const (
@@ -58,10 +60,12 @@ type MinIOObjectStore struct {
 	client          *http.Client
 	policy          resilience.Policy
 	now             func() time.Time
+	core            *minio.Core
 }
 
 var _ ports.ObjectStore = (*MinIOObjectStore)(nil)
 var _ ports.ObjectStoreContentVerifier = (*MinIOObjectStore)(nil)
+var _ ports.MultipartObjectStore = (*MinIOObjectStore)(nil)
 
 func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, error) {
 	endpoints, err := parseMinIOEndpoints(config.Endpoint, config.Endpoints, config.Secure)
@@ -93,6 +97,20 @@ func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, erro
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
+	coreOptions := &minio.Options{
+		Creds:        credentials.NewStaticV4(accessKeyID, secretAccessKey, strings.TrimSpace(config.SessionToken)),
+		Secure:       endpoint.Scheme == "https",
+		Region:       region,
+		BucketLookup: minio.BucketLookupPath,
+		MaxRetries:   0, // streamed part bodies are not seekable; never replay them.
+	}
+	if client.Transport != nil {
+		coreOptions.Transport = client.Transport
+	}
+	core, err := minio.NewCore(endpoint.Host, coreOptions)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid MinIO client configuration", ports.ErrInvalid)
+	}
 	return &MinIOObjectStore{
 		endpoint:        endpoint,
 		endpoints:       endpoints,
@@ -105,6 +123,7 @@ func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, erro
 		client:          client,
 		policy:          resilience.Policy{Timeout: config.RequestTimeout},
 		now:             now,
+		core:            core,
 	}, nil
 }
 

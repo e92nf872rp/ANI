@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,6 +30,8 @@ type ModelService struct {
 	repo        repo.ModelRepo
 	objectStore ModelObjectStore
 }
+
+const maxModelSnapshotManifestBytes int64 = 8 << 20
 
 func NewModelService(db *pgxpool.Pool, modelRepo repo.ModelRepo) *ModelService {
 	return &ModelService{db: db, repo: modelRepo}
@@ -469,12 +472,18 @@ func (s *ModelService) GetModelDownloadURL(ctx context.Context, req *modelv1.Get
 	if model == nil || version == nil || !modelOwnedBy(model, tenantID) || version.ID == uuid.Nil || version.ID != versionID || version.ModelID == uuid.Nil || version.ModelID != model.ID {
 		return nil, status.Error(codes.NotFound, "model version not found")
 	}
-	if model.Status != "ready" || !strings.HasPrefix(version.StoragePath, "object://") || version.SizeBytes <= 0 || normalizedSHA256(version.ChecksumSHA256) == "" {
+	if model.Status != "ready" || !strings.HasPrefix(version.StoragePath, "object://") || version.SizeBytes < 0 || normalizedSHA256(version.ChecksumSHA256) == "" {
 		return nil, status.Error(codes.FailedPrecondition, "model version is not object-backed and ready")
 	}
 	ref, err := parseModelObjectPath(version.StoragePath)
 	if err != nil || ref.TenantID != tenantID.String() || ref.ModelID != model.ID.String() || ref.Version != version.Version {
 		return nil, status.Error(codes.NotFound, "model version not found")
+	}
+	if filePath := strings.TrimSpace(req.GetFilePath()); filePath != "" {
+		return s.getSnapshotFileDownloadURL(ctx, version, ref, filePath)
+	}
+	if version.SizeBytes <= 0 {
+		return nil, status.Error(codes.FailedPrecondition, "model version is not object-backed and ready")
 	}
 	metadata, err := s.objectStore.StatObject(ctx, ref)
 	if err != nil {
@@ -487,7 +496,88 @@ func (s *ModelService) GetModelDownloadURL(ctx context.Context, req *modelv1.Get
 	if err != nil {
 		return nil, status.Error(codes.Unavailable, "object storage is unavailable")
 	}
-	return &modelv1.GetModelDownloadURLResponse{DownloadUrl: signed.URL, StoragePath: version.StoragePath, IsEncrypted: version.IsEncrypted, EncryptAlgo: version.EncryptAlgo, EncryptHint: ""}, nil
+	return &modelv1.GetModelDownloadURLResponse{DownloadUrl: signed.URL, StoragePath: version.StoragePath, IsEncrypted: version.IsEncrypted, EncryptAlgo: version.EncryptAlgo, EncryptHint: "", SizeBytes: version.SizeBytes, ChecksumSha256: normalizedSHA256(version.ChecksumSHA256)}, nil
+}
+
+func (s *ModelService) getSnapshotFileDownloadURL(ctx context.Context, version *repo.ModelVersion, manifestRef ModelObjectRef, filePath string) (*modelv1.GetModelDownloadURLResponse, error) {
+	if !strings.HasSuffix(manifestRef.ObjectKey, "/snapshot/manifest.json") {
+		return nil, status.Error(codes.FailedPrecondition, "model version is not a snapshot manifest")
+	}
+	if !safeSnapshotRelativePath(filePath) {
+		return nil, status.Error(codes.InvalidArgument, "invalid snapshot file path")
+	}
+	reader, ok := s.objectStore.(ModelObjectStoreReader)
+	if !ok {
+		return nil, status.Error(codes.Unavailable, "object storage manifest reader is unavailable")
+	}
+	manifest, err := reader.ReadObject(ctx, manifestRef, maxModelSnapshotManifestBytes)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "object storage is unavailable")
+	}
+	if int64(len(manifest)) != version.SizeBytes {
+		return nil, status.Error(codes.FailedPrecondition, "model manifest metadata does not match version")
+	}
+	digest := sha256.Sum256(manifest)
+	if !equalSHA256(hex.EncodeToString(digest[:]), version.ChecksumSHA256) {
+		return nil, status.Error(codes.FailedPrecondition, "model manifest metadata does not match version")
+	}
+	snapshot, err := types.ParseModelSnapshot(manifest)
+	if err != nil {
+		return nil, status.Error(codes.FailedPrecondition, "invalid model snapshot manifest")
+	}
+	var entry *types.ModelSnapshotFile
+	for i := range snapshot.Files {
+		if snapshot.Files[i].Path == filePath {
+			entry = &snapshot.Files[i]
+			break
+		}
+	}
+	if entry == nil {
+		return nil, status.Error(codes.NotFound, "model snapshot file not found")
+	}
+	objectKey := strings.TrimSuffix(manifestRef.ObjectKey, "manifest.json") + "files/" + filePath
+	if entry.ObjectKey != objectKey || !strings.HasSuffix(objectKey, "/"+entry.Path) || !strings.Contains(objectKey, "/snapshot/files/") {
+		return nil, status.Error(codes.NotFound, "model snapshot file not found")
+	}
+	fileRef := manifestRef
+	fileRef.ObjectKey = objectKey
+	metadata, err := s.objectStore.StatObject(ctx, fileRef)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "object storage is unavailable")
+	}
+	if metadata.SizeBytes != entry.SizeBytes {
+		return nil, status.Error(codes.FailedPrecondition, "model snapshot file metadata does not match manifest")
+	}
+	if strings.TrimSpace(metadata.Checksum) != "" && !equalSHA256(metadata.Checksum, entry.SHA256) {
+		return nil, status.Error(codes.FailedPrecondition, "model snapshot file metadata does not match manifest")
+	}
+	if strings.TrimSpace(metadata.Checksum) == "" && entry.SizeBytes > 0 {
+		// Streaming imports calculate the digest while the bytes are sent, so
+		// the initial PUT cannot always attach it as object metadata. In that
+		// case require the adapter to hash the object it reads back before a
+		// download URL is issued. Metadata/ETag alone is not content proof.
+		verifier, ok := s.objectStore.(ModelObjectStoreContentVerifier)
+		if !ok || verifier.VerifyObject(ctx, fileRef, entry.SizeBytes, entry.SHA256) != nil {
+			return nil, status.Error(codes.FailedPrecondition, "model snapshot file content does not match manifest")
+		}
+	}
+	signed, err := s.objectStore.SignedDownloadURL(ctx, fileRef, 30*time.Minute)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "object storage is unavailable")
+	}
+	return &modelv1.GetModelDownloadURLResponse{DownloadUrl: signed.URL, StoragePath: version.StoragePath, IsEncrypted: version.IsEncrypted, EncryptAlgo: version.EncryptAlgo, SizeBytes: entry.SizeBytes, ChecksumSha256: entry.SHA256}, nil
+}
+
+func safeSnapshotRelativePath(value string) bool {
+	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") || strings.Contains(value, "//") || strings.Contains(value, "..") {
+		return false
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 var (

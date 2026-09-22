@@ -11,6 +11,7 @@ use (
 	./services/inference-service
 	./services/metering-service
 	./services/model-service
+	./services/model-fetcher
 	./services/reconcile-worker
 	./services/pkg
 	./services/task-service

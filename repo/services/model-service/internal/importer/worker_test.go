@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -42,6 +43,7 @@ type workerFakeStore struct {
 	resolvedRevision     string
 	resolveRevisionErr   error
 	resolvedWorkerID     string
+	files                []modelrepo.ImportFile
 }
 
 func (s *workerFakeStore) GetTask(context.Context, uuid.UUID, uuid.UUID) (*taskrepo.AsyncTask, error) {
@@ -97,10 +99,43 @@ func (s *workerFakeStore) SetResolvedRevision(_ context.Context, _ uuid.UUID, _ 
 	return nil
 }
 
+func (s *workerFakeStore) EnsureImportFiles(_ context.Context, tenantID, importID, _ uuid.UUID, _ string, files []modelrepo.ImportFileSpec) error {
+	if len(s.files) != 0 {
+		return nil
+	}
+	for _, file := range files {
+		s.files = append(s.files, modelrepo.ImportFile{TenantID: tenantID, ImportTaskID: importID, Path: file.Path, ObjectKey: file.ObjectKey, SizeBytes: file.SizeBytes, Status: "pending"})
+	}
+	return nil
+}
+
+func (s *workerFakeStore) ListImportFiles(context.Context, uuid.UUID, uuid.UUID) ([]modelrepo.ImportFile, error) {
+	return s.files, nil
+}
+
+func (s *workerFakeStore) SaveImportFileCheckpoint(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, string, string, int64, []modelrepo.ImportFilePart) error {
+	return nil
+}
+
+func (s *workerFakeStore) CompleteImportFile(_ context.Context, _ uuid.UUID, importID, _ uuid.UUID, _ string, filePath, checksum string, size int64) error {
+	for i := range s.files {
+		if s.files[i].ImportTaskID == importID && s.files[i].Path == filePath {
+			s.files[i].Status = "completed"
+			s.files[i].SHA256 = checksum
+			s.files[i].UploadedBytes = size
+		}
+	}
+	return nil
+}
+
 type workerFakeObjectStore struct {
-	input ports.PutObjectInput
-	data  []byte
-	err   error
+	input   ports.PutObjectInput
+	data    []byte
+	err     error
+	uploads []struct {
+		ref  ports.ObjectRef
+		data []byte
+	}
 }
 
 func (s *workerFakeObjectStore) Health(context.Context) error                          { return nil }
@@ -110,16 +145,27 @@ func (s *workerFakeObjectStore) BucketUsage(context.Context, ports.BucketClass, 
 }
 func (s *workerFakeObjectStore) PutObject(_ context.Context, input ports.PutObjectInput) (ports.ObjectMetadata, error) {
 	s.input = input
+	var uploaded []byte
 	if input.Body != nil {
-		s.data, _ = io.ReadAll(input.Body)
+		uploaded, _ = io.ReadAll(input.Body)
+		s.data = uploaded
 	}
+	s.uploads = append(s.uploads, struct {
+		ref  ports.ObjectRef
+		data []byte
+	}{ref: input.Ref, data: append([]byte(nil), uploaded...)})
 	if s.err != nil {
 		return ports.ObjectMetadata{}, s.err
 	}
 	return ports.ObjectMetadata{Ref: input.Ref, SizeBytes: int64(len(s.data)), Checksum: input.Checksum}, nil
 }
-func (s *workerFakeObjectStore) GetObject(context.Context, ports.ObjectRef) (io.ReadCloser, ports.ObjectMetadata, error) {
-	return nil, ports.ObjectMetadata{}, errors.New("not implemented")
+func (s *workerFakeObjectStore) GetObject(_ context.Context, ref ports.ObjectRef) (io.ReadCloser, ports.ObjectMetadata, error) {
+	for _, upload := range s.uploads {
+		if upload.ref == ref {
+			return io.NopCloser(bytes.NewReader(upload.data)), ports.ObjectMetadata{Ref: upload.ref, SizeBytes: int64(len(upload.data))}, nil
+		}
+	}
+	return nil, ports.ObjectMetadata{}, errors.New("not found")
 }
 func (s *workerFakeObjectStore) DeleteObject(context.Context, ports.ObjectRef) error { return nil }
 func (s *workerFakeObjectStore) StatObject(context.Context, ports.ObjectRef) (ports.ObjectMetadata, error) {
@@ -174,6 +220,66 @@ func TestWorkerHandleUploadsArchiveAndCompletesAtomically(t *testing.T) {
 	}
 	if store.version.ChecksumSHA256 == "" || store.version.SizeBytes <= 0 || store.version.IdempotencyKey == "" {
 		t.Fatalf("version request lacks authoritative archive metadata: %+v", store.version)
+	}
+}
+
+func TestWorkerStreamsSnapshotFilesAndManifest(t *testing.T) {
+	message, store := testImportMessage()
+	store.importTask.ResolvedRevision = testHuggingFaceCommit
+	store.importTask.TargetStoragePath = "object://models/" + testTenantID.String() + "/" + testModelID.String() + "/import-" + testImportID.String() + "/snapshot/manifest.json"
+	objectStore := &workerFakeObjectStore{}
+	source := fixtureSource{
+		files: []RemoteFile{{Path: "config.json", Size: 2}, {Path: "weights.bin", Size: 4}},
+		data:  map[string]string{"config.json": "{}", "weights.bin": "data"},
+	}
+	worker := NewWorker(store, objectStore, map[string]Source{"huggingface": source}, WorkerConfig{WorkerID: "worker-1", LeaseDuration: time.Minute})
+	if err := worker.Handle(context.Background(), message); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if store.completeN != 1 || store.failN != 0 {
+		t.Fatalf("complete/fail calls = %d/%d, want 1/0", store.completeN, store.failN)
+	}
+	if len(objectStore.uploads) != 3 {
+		t.Fatalf("uploaded object count = %d, want two files plus manifest", len(objectStore.uploads))
+	}
+	for _, upload := range objectStore.uploads[:2] {
+		if !strings.Contains(upload.ref.ObjectKey, "/snapshot/files/") {
+			t.Fatalf("file object key = %q, want snapshot file prefix", upload.ref.ObjectKey)
+		}
+	}
+	manifestUpload := objectStore.uploads[2]
+	if !strings.HasSuffix(manifestUpload.ref.ObjectKey, "/snapshot/manifest.json") {
+		t.Fatalf("manifest object key = %q", manifestUpload.ref.ObjectKey)
+	}
+	snapshot, err := types.ParseModelSnapshot(manifestUpload.data)
+	if err != nil {
+		t.Fatalf("ParseModelSnapshot() error = %v", err)
+	}
+	if snapshot.Revision != testHuggingFaceCommit || snapshot.TotalSizeBytes != 6 || len(snapshot.Files) != 2 {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if store.version.StoragePath != store.importTask.TargetStoragePath || store.version.SizeBytes != int64(len(manifestUpload.data)) || store.version.ContentSizeBytes != 6 {
+		t.Fatalf("version = %+v", store.version)
+	}
+}
+
+func TestWorkerRecoversVisibleMultipartObjectAfterCrash(t *testing.T) {
+	message, store := testImportMessage()
+	store.importTask.ResolvedRevision = testHuggingFaceCommit
+	store.importTask.TargetStoragePath = "object://models/" + testTenantID.String() + "/" + testModelID.String() + "/import-" + testImportID.String() + "/snapshot/manifest.json"
+	fileKey := testModelID.String() + "/import-" + testImportID.String() + "/snapshot/files/weights.bin"
+	store.files = []modelrepo.ImportFile{{TenantID: testTenantID, ImportTaskID: testImportID, Path: "weights.bin", ObjectKey: fileKey, SizeBytes: 4, Status: "uploading", UploadID: "completed-upload"}}
+	objectStore := &workerFakeObjectStore{uploads: []struct {
+		ref  ports.ObjectRef
+		data []byte
+	}{{ref: ports.ObjectRef{TenantID: testTenantID.String(), BucketClass: ports.BucketClassModel, ObjectKey: fileKey, Version: "import-" + testImportID.String()}, data: []byte("data")}}}
+	source := fixtureSource{files: []RemoteFile{{Path: "weights.bin", Size: 4}}}
+	worker := NewWorker(store, objectStore, map[string]Source{"huggingface": source}, WorkerConfig{WorkerID: "worker-1", LeaseDuration: time.Minute})
+	if err := worker.Handle(context.Background(), message); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if store.completeN != 1 || store.failN != 0 || len(objectStore.uploads) != 2 {
+		t.Fatalf("complete/fail/uploads = %d/%d/%d, want 1/0/2", store.completeN, store.failN, len(objectStore.uploads))
 	}
 }
 
