@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -71,6 +72,31 @@ func (s modelObjectStoreAdapter) VerifyObject(ctx context.Context, ref types.Mod
 		return errModelObjectStoreVerifierUnavailable
 	}
 	return verifier.VerifyObject(ctx, s.ref(ref), expectedSize, expectedChecksum)
+}
+
+func (s modelObjectStoreAdapter) ReadObject(ctx context.Context, ref types.ModelObjectRef, maxBytes int64) ([]byte, error) {
+	if s.store == nil {
+		return nil, errModelObjectStoreUnavailable
+	}
+	if maxBytes < 0 {
+		return nil, errors.New("invalid object read limit")
+	}
+	body, metadata, err := s.store.GetObject(ctx, s.ref(ref))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = body.Close() }()
+	if metadata.SizeBytes > maxBytes {
+		return nil, errors.New("object exceeds read limit")
+	}
+	data, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errors.New("object exceeds read limit")
+	}
+	return data, nil
 }
 
 func cloneHeaders(headers map[string]string) map[string]string {

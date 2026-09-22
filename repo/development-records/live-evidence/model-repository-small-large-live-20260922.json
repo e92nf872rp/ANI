@@ -1,0 +1,69 @@
+{
+  "batch": "MODEL-REPOSITORY-SMALL-LARGE-LIVE",
+  "date": "2026-09-22",
+  "scope": "legacy-ANI-model-import-and-inference",
+  "status": "pass",
+  "tenant": "tenant-a",
+  "imports": {
+    "small": {
+      "provider": "modelscope",
+      "repository": "BAAI/bge-small-en-v1.5",
+      "model_id": "18d90e74-3790-4b26-a70c-d676c96c5c49",
+      "version_id": "818748ed-eacc-4937-8750-d7a8c7369919",
+      "logical_size_bytes": 401109582,
+      "manifest_size_bytes": 3925,
+      "status": "ready"
+    },
+    "large": {
+      "provider": "modelscope",
+      "repository": "Qwen/Qwen2.5-3B-Instruct",
+      "task_id": "be4ab791-e97a-4340-8280-4f1a5c365bbd",
+      "model_id": "ac3e2307-c42f-4884-a7db-b112903d66b1",
+      "version_id": "c4010e8f-6172-42c7-a132-7d2b053a2b5d",
+      "logical_size_bytes": 6183464937,
+      "manifest_size_bytes": 3435,
+      "files": 13,
+      "status": "ready",
+      "resolved_revision": "8f4992eda43eea7c770690ddc0de8f732da246f5"
+    }
+  },
+  "runtime_probes": {
+    "small": {
+      "service_id": "049dc025-d953-4e2c-9cdb-2676d554c8ee",
+      "type": "embedding",
+      "status": "running",
+      "http_status": 200,
+      "embedding_dimensions": 384,
+      "deleted_after_probe": true
+    },
+    "large": {
+      "service_id": "358e7fe2-fd6d-4bd4-bb77-e2976c112567",
+      "accelerator_spec_id": "gpu-nvidia-geforce-rtx-4090",
+      "count_per_replica": 1,
+      "vgpu_memory_mib": 1229,
+      "status": "running",
+      "http_status": 200,
+      "endpoint": "/v1/chat/completions",
+      "deleted_after_probe": true
+    }
+  },
+  "cleanup": {
+    "large_delete_operation_id": "12a86d35-bdc8-4659-be8e-3dbc75ba3167",
+    "large_delete_status": "completed",
+    "small_delete_operation_id": "180d42be-8f64-4ab6-9fc4-88716c863684",
+    "small_delete_status": "completed",
+    "kubercloud_gpu_requests_after_cleanup": 0,
+    "other_existing_tenant_gpu_pods_left_untouched": 7,
+    "stale_e2e_namespaces_deleted": [
+      "ani-model-inference-e2e-20260916",
+      "ani-model-inference-e2e-retry-20260916"
+    ]
+  },
+  "fix_verified": {
+    "problem": "PostgreSQL inferred ContentSizeBytes as int4 during total_size_bytes update",
+    "fix": "Explicit bigint casts in updateModelAfterVersionSQL",
+    "worker_image": "docker.changqingyun.cn/ani/model-import-worker@sha256:49c1738a6a22668c626c0c93dd57a73c05050e89de01eb31295698cb09568fdf",
+    "model_service_image": "docker.changqingyun.cn/ani/model-service@sha256:5ddab025c4a5de6e8027db6607a16ee32e6593782bb0b3f64a540159a68799f9",
+    "repo_tests": "go test ./services/model-service/internal/repo ./services/model-service/internal/importer"
+  }
+}

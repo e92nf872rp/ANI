@@ -88,11 +88,15 @@ type CreateVersionReq struct {
 	StoragePath    string
 	ChecksumSHA256 string
 	SizeBytes      int64
-	IsEncrypted    bool
-	EncryptAlgo    string
-	EncryptHint    string
-	IdempotencyKey string
-	RequestHash    string
+	// ContentSizeBytes is the logical model content size when the stored
+	// version is a manifest or archive wrapper. Zero keeps the historical
+	// version-size behavior for ordinary uploaded versions.
+	ContentSizeBytes int64
+	IsEncrypted      bool
+	EncryptAlgo      string
+	EncryptHint      string
+	IdempotencyKey   string
+	RequestHash      string
 }
 
 type ListFilter struct {
@@ -340,7 +344,7 @@ func (r *PostgresModelRepo) CreateVersion(ctx context.Context, tx pgx.Tx, req Cr
 	if err != nil {
 		return nil, fmt.Errorf("modelRepo.CreateVersion insert: %w", err)
 	}
-	tag, err := tx.Exec(ctx, updateModelAfterVersionSQL, req.ModelID, req.TenantID, req.SizeBytes)
+	tag, err := tx.Exec(ctx, updateModelAfterVersionSQL, req.ModelID, req.TenantID, req.ContentSizeBytes, req.SizeBytes)
 	if err != nil {
 		return nil, fmt.Errorf("modelRepo.CreateVersion update model: %w", err)
 	}
@@ -450,7 +454,7 @@ const createModelVersionSQL = `
 
 const updateModelAfterVersionSQL = `
 	UPDATE models
-	SET status='ready', total_size_bytes=COALESCE(total_size_bytes, 0)+$3, updated_at=NOW()
+	SET status='ready', total_size_bytes=CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE COALESCE(total_size_bytes, 0)+$4::bigint END, updated_at=NOW()
 	WHERE id=$1 AND tenant_id=$2 AND status <> 'deleted'
 `
 

@@ -57,6 +57,30 @@ func TestNewModelObjectStoreForwardsContentVerification(t *testing.T) {
 	}
 }
 
+func TestNewModelObjectStoreReaderIsBounded(t *testing.T) {
+	store := NewModelObjectStore(&readerObjectStore{body: "manifest"})
+	reader, ok := store.(types.ModelObjectStoreReader)
+	if !ok {
+		t.Fatal("model object store adapter lacks reader capability")
+	}
+	ref := types.ModelObjectRef{TenantID: "tenant", ModelID: "model", Version: "v1", BucketClass: "model", ObjectKey: "model/v1/manifest.json"}
+	if got, err := reader.ReadObject(context.Background(), ref, 8); err != nil || string(got) != "manifest" {
+		t.Fatalf("read = %q err=%v", got, err)
+	}
+	if _, err := reader.ReadObject(context.Background(), ref, 3); err == nil {
+		t.Fatal("oversized object accepted")
+	}
+}
+
+type readerObjectStore struct {
+	headerSigningObjectStore
+	body string
+}
+
+func (s *readerObjectStore) GetObject(context.Context, ports.ObjectRef) (io.ReadCloser, ports.ObjectMetadata, error) {
+	return io.NopCloser(strings.NewReader(s.body)), ports.ObjectMetadata{SizeBytes: int64(len(s.body))}, nil
+}
+
 type headerSigningObjectStore struct {
 	lastRef     ports.ObjectRef
 	verifyRef   ports.ObjectRef

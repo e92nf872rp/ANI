@@ -21,7 +21,7 @@ func TestModelQueriesContainExplicitTenantFence(t *testing.T) {
 		"list":                           {listModelsBaseWhere, "tenant_id=$1"},
 		"delete":                         {softDeleteModelSQL, "id=$1", "tenant_id=$2"},
 		"create-version":                 {createModelVersionSQL, "SELECT $3", "FROM models", "id=$1", "tenant_id=$2", "status <> 'deleted'"},
-		"create-version-parent-update":   {updateModelAfterVersionSQL, "id=$1", "tenant_id=$2", "+$3", "status <> 'deleted'"},
+		"create-version-parent-update":   {updateModelAfterVersionSQL, "id=$1", "tenant_id=$2", "CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE", "+$4::bigint", "status <> 'deleted'"},
 		"list-versions-parent-ownership": {listModelVersionsParentSQL, "SELECT id", "FROM models", "id=$1", "tenant_id=$2", "status <> 'deleted'"},
 		"list-versions":                  {listModelVersionsSQL, "JOIN models", "m.tenant_id=$2"},
 	}

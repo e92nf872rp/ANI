@@ -15,6 +15,7 @@ type ModelObjectMetadata = types.ModelObjectMetadata
 type ModelSignedURL = types.ModelSignedURL
 type ModelObjectStore = types.ModelObjectStore
 type ModelObjectStoreContentVerifier = types.ModelObjectStoreContentVerifier
+type ModelObjectStoreReader = types.ModelObjectStoreReader
 
 func parseModelObjectPath(raw string) (ModelObjectRef, error) {
 	value := strings.TrimSpace(raw)

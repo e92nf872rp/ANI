@@ -76,9 +76,11 @@ func TestRunExtractsImportedArchiveIntoVersionDirectory(t *testing.T) {
 }
 
 type fakeModelServiceClient struct {
-	request     *modelv1.GetModelDownloadURLRequest
-	url         string
-	storagePath string
+	request       *modelv1.GetModelDownloadURLRequest
+	url           string
+	storagePath   string
+	fileResponses map[string]*modelv1.GetModelDownloadURLResponse
+	fileRequests  int
 }
 
 type fakeModelServiceServer struct {
@@ -95,6 +97,12 @@ func (f *fakeModelServiceServer) GetModelDownloadURL(_ context.Context, req *mod
 
 func (f *fakeModelServiceClient) GetModelDownloadURL(_ context.Context, req *modelv1.GetModelDownloadURLRequest, _ ...grpc.CallOption) (*modelv1.GetModelDownloadURLResponse, error) {
 	f.request = req
+	if req.GetFilePath() != "" {
+		f.fileRequests++
+		if response := f.fileResponses[req.GetFilePath()]; response != nil {
+			return response, nil
+		}
+	}
 	return &modelv1.GetModelDownloadURLResponse{DownloadUrl: f.url, StoragePath: f.storagePath}, nil
 }
 
@@ -186,6 +194,47 @@ func TestRunRejectsInsecureDownloadURLWithoutExplicitOptIn(t *testing.T) {
 	}
 	if err := runWithDependencies(context.Background(), cfg, dialer, nil); err == nil || !strings.Contains(err.Error(), "insecure") {
 		t.Fatalf("err=%v, want insecure URL rejection", err)
+	}
+}
+
+func TestRunFetchesManifestFilesIntoAtomicDirectory(t *testing.T) {
+	file := []byte("weights")
+	fileSum := sha256.Sum256(file)
+	manifest := []byte(`{"schema":"ani.model.snapshot.v1","revision":"r1","total_size_bytes":7,"files":[{"path":"nested/weights.bin","size_bytes":7,"sha256":"` + fmt.Sprintf("%x", fileSum) + `","object_key":"model/import-1/snapshot/files/nested/weights.bin"}]}`)
+	manifestSum := sha256.Sum256(manifest)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/manifest" {
+			_, _ = w.Write(manifest)
+			return
+		}
+		if r.URL.Path == "/file" {
+			_, _ = w.Write(file)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	objectRef := "object://models/tenant/model/import-1/snapshot/manifest.json"
+	fake := &fakeModelServiceClient{url: server.URL + "/manifest", storagePath: objectRef, fileResponses: map[string]*modelv1.GetModelDownloadURLResponse{
+		"nested/weights.bin": {DownloadUrl: server.URL + "/file", StoragePath: objectRef, SizeBytes: 7, ChecksumSha256: fmt.Sprintf("%x", fileSum)},
+	}}
+	target := filepath.Join(t.TempDir(), "version")
+	cfg := FetcherConfig{TenantID: "tenant", ModelVersionID: "version", ModelServiceGRPCAddr: "model-service:9103", ObjectRef: objectRef, TargetPath: target, ExpectedSize: int64(len(manifest)), ExpectedSHA256: fmt.Sprintf("%x", manifestSum), AllowInsecureHTTP: true}
+	dialer := func(context.Context, string) (modelDownloadURLClient, func() error, error) {
+		return fake, func() error { return nil }, nil
+	}
+	if err := runWithDependencies(context.Background(), cfg, dialer, server.Client()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(target, "nested", "weights.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(file) {
+		t.Fatalf("file=%q", got)
+	}
+	if fake.fileRequests != 1 {
+		t.Fatalf("file requests=%d", fake.fileRequests)
 	}
 }
 

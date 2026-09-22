@@ -172,6 +172,16 @@ func TestCreateBodyUsesVersionDirectoryForImportedArchive(t *testing.T) {
 	}
 }
 
+func TestCreateBodyUsesVersionDirectoryForImportedSnapshotManifest(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	objectRef := "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-444444444444/import-44444444-4444-4444-4444-444444444444/snapshot/manifest.json"
+	body := materializationBodyWithConfig(domain.ModelMaterialization{TenantID: tenantID, ModelVersionID: versionID, ObjectRef: objectRef, ExpectedSizeBytes: 12, SHA256: "sha256:" + strings.Repeat("a", 64)}, "model-service:9103", "registry.example/model-fetcher@sha256:"+strings.Repeat("b", 64))
+	if got := body["target_path"]; got != "/models/"+versionID.String() {
+		t.Fatalf("target_path = %v, want snapshot directory", got)
+	}
+}
+
 func TestEnsureRejectsObjectArtifactWithoutMaterialization(t *testing.T) {
 	rt := New("http://127.0.0.1:1", "")
 	_, err := rt.Ensure(t.Context(), runtime.EnsureRequest{
