@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/kubercloud/ani/pkg/ports"
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 )
 
 type stubAdminTenantService struct{}
@@ -50,10 +52,202 @@ func (stubAdminTenantService) ListTenantLifecycle(context.Context, string, ports
 }
 
 func newAdminTenantTestServer(tenant ports.TenantService) *server.Hertz {
+	return newAdminTenantTestServerWithInfra(tenant, nil, nil)
+}
+
+func newAdminTenantTestServerWithInfra(tenant ports.TenantService, registry ports.ImageRegistry, kubeApply runtimeadapter.TenantNamespaceApplier) *server.Hertz {
 	h := server.Default()
 	v1 := h.Group("/api/v1")
-	registerAdminTenantResources(v1, tenant)
+	registerAdminTenantResources(v1, tenant, registry, kubeApply)
 	return h
+}
+
+// stubProvisionTenantService：GetTenant 成功（存在性校验通过），其余不支持。
+type stubProvisionTenantService struct {
+	stubAdminTenantService
+}
+
+func (stubProvisionTenantService) GetTenant(context.Context, string) (ports.Tenant, error) {
+	return ports.Tenant{ID: "t1", Name: "acme", Status: ports.TenantStatusActive}, nil
+}
+
+type stubEnsureProjectRegistry struct {
+	ports.ImageRegistry // 嵌入接口：测试仅覆盖 EnsureProject，其余方法不可达
+	ensured    []string
+	ensureErr  error
+}
+
+func (s *stubEnsureProjectRegistry) EnsureProject(_ context.Context, projectID string) error {
+	if s.ensureErr != nil {
+		return s.ensureErr
+	}
+	s.ensured = append(s.ensured, projectID)
+	return nil
+}
+
+type stubTenantNamespaceApplier struct {
+	applied []ports.WorkloadManifest
+	err     error
+}
+
+func (s *stubTenantNamespaceApplier) ApplyManifests(_ context.Context, manifests []ports.WorkloadManifest) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	s.applied = append(s.applied, manifests...)
+	return make([]string, len(manifests)), nil
+}
+
+func TestAdminTenantProvision_RouteRegistered(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	h := newAdminTenantTestServerWithInfra(stubProvisionTenantService{}, nil, nil)
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/admin/tenants/11111111-1111-1111-1111-111111111111/provision", nil)
+	if resp.Code == http.StatusNotFound {
+		t.Fatal("provision route not registered (404)")
+	}
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestAdminTenantProvision_EnsuresRegistryProjectAndNamespace(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	registry := &stubEnsureProjectRegistry{}
+	kube := &stubTenantNamespaceApplier{}
+	h := newAdminTenantTestServerWithInfra(stubProvisionTenantService{}, registry, kube)
+
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/admin/tenants/"+tenantID+"/provision", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if body["tenant_id"] != tenantID {
+		t.Fatalf("tenant_id=%v", body["tenant_id"])
+	}
+	if proj, ok := body["registry_project"].(map[string]any); !ok || proj["ensured"] != true {
+		t.Fatalf("registry_project=%v", body["registry_project"])
+	}
+	if ns, ok := body["namespace"].(map[string]any); !ok || ns["ensured"] != true {
+		t.Fatalf("namespace=%v", body["namespace"])
+	}
+	if len(registry.ensured) != 1 || registry.ensured[0] != tenantID {
+		t.Fatalf("registry.ensured=%v", registry.ensured)
+	}
+	if len(kube.applied) != 1 || kube.applied[0].Kind != "Namespace" {
+		t.Fatalf("kube.applied=%+v", kube.applied)
+	}
+}
+
+func TestAdminTenantProvision_KubeNotConfiguredDegrades(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	registry := &stubEnsureProjectRegistry{}
+	h := newAdminTenantTestServerWithInfra(stubProvisionTenantService{}, registry, nil)
+
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/admin/tenants/"+tenantID+"/provision", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if ns, ok := body["namespace"].(map[string]any); !ok || ns["ensured"] != false {
+		t.Fatalf("namespace must degrade to ensured=false, got %v", body["namespace"])
+	}
+	if ns, ok := body["namespace"].(map[string]any); !ok || ns["reason"] == nil {
+		t.Fatalf("namespace.reason=%v", body["namespace"])
+	}
+	if proj, ok := body["registry_project"].(map[string]any); !ok || proj["ensured"] != true {
+		t.Fatalf("registry_project=%v", body["registry_project"])
+	}
+}
+
+func TestAdminTenantProvision_InvalidUUIDRejected(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	h := newAdminTenantTestServerWithInfra(stubProvisionTenantService{}, nil, nil)
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/admin/tenants/not-a-uuid/provision", nil)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestAdminTenantProvision_TenantNotFound(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	registry := &stubEnsureProjectRegistry{}
+	kube := &stubTenantNamespaceApplier{}
+	h := server.Default()
+	v1 := h.Group("/api/v1")
+	// GetTenant 返回 ErrTenantNotFound → 404 TENANT_NOT_FOUND
+	registerAdminTenantResources(v1, notFoundTenantService{}, registry, kube)
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/admin/tenants/11111111-1111-1111-1111-111111111111/provision", nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(registry.ensured) != 0 || len(kube.applied) != 0 {
+		t.Fatalf("must not provision infra for missing tenant: registry=%v kube=%+v",
+			registry.ensured, kube.applied)
+	}
+}
+
+// notFoundTenantService：GetTenant 返回 ErrTenantNotFound（其余不支持）。
+type notFoundTenantService struct {
+	stubAdminTenantService
+}
+
+func (notFoundTenantService) GetTenant(context.Context, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrTenantNotFound
+}
+
+func TestAdminTenantProvision_RegistryFailureReturns500(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	registry := &stubEnsureProjectRegistry{ensureErr: errors.New("harbor unreachable")}
+	kube := &stubTenantNamespaceApplier{}
+	h := newAdminTenantTestServerWithInfra(stubProvisionTenantService{}, registry, kube)
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/admin/tenants/11111111-1111-1111-1111-111111111111/provision", nil)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if body["code"] != "INFRA_PROVISION_FAILED" {
+		t.Fatalf("code=%v", body["code"])
+	}
+	if len(kube.applied) != 0 {
+		t.Fatalf("namespace must not be ensured after registry failure")
+	}
+}
+
+func TestAdminTenantProvision_NamespaceFailureReturns500(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	registry := &stubEnsureProjectRegistry{}
+	kube := &stubTenantNamespaceApplier{err: errors.New("k8s api error")}
+	h := newAdminTenantTestServerWithInfra(stubProvisionTenantService{}, registry, kube)
+	resp := ut.PerformRequest(h.Engine, http.MethodPost,
+		"/api/v1/admin/tenants/11111111-1111-1111-1111-111111111111/provision", nil)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if body["code"] != "INFRA_PROVISION_FAILED" {
+		t.Fatalf("code=%v", body["code"])
+	}
+	if len(registry.ensured) != 1 {
+		t.Fatalf("registry project must still be ensured (idempotent replay covers namespace)")
+	}
 }
 
 func TestAdminTenantRoutes_RegisterNinePlusExisting(t *testing.T) {

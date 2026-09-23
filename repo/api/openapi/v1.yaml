@@ -4559,6 +4559,24 @@ components:
       properties:
         plan_id: { type: string, format: uuid, description: "目标套餐 ID（须存在于 tenant_plans）" }
 
+    TenantInfraProvisionResponse:
+      type: object
+      description: "租户基础设施初始化结果（POST /admin/tenants/{tenant_id}/provision）；ensured 为「确保存在」语义，不区分新建 vs 已存在"
+      required: [tenant_id, registry_project, namespace]
+      properties:
+        tenant_id:         { type: string, format: uuid }
+        registry_project:
+          type: object
+          required: [ensured]
+          properties:
+            ensured: { type: boolean, description: "Harbor 项目已确保存在（local 模式为 no-op 成功）" }
+        namespace:
+          type: object
+          required: [ensured]
+          properties:
+            ensured: { type: boolean, description: "K8s 命名空间已确保存在；未配置 K8s 凭证的环境为 false" }
+            reason:  { type: string, nullable: true, description: "ensured=false 时的跳过原因（配置态）" }
+
     PlanBoundTenantCount:
       type: object
       description: "单个套餐的绑定租户计数（status <> disabled）"
@@ -10464,6 +10482,39 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/TenantNotFound' }
+
+  /admin/tenants/{tenant_id}/provision:
+    post:
+      operationId: provisionTenant
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        action: update
+        boundary: platform
+        principal_kinds: [user]
+      summary: 初始化租户基础设施
+      description: |
+        幂等确保租户基础设施存在：Harbor 镜像仓库项目（与 tenant_id 同名）+
+        K8s 命名空间 ani-tenant-<tenant_id>。
+        tenant-service CreateTenant 成功后异步调用；运维可对存量租户重放。
+        本端点业务层自幂等（EnsureProject + SSA），不要求 Idempotency-Key。
+        K8s 客户端未配置的环境（本地/无 K8s 凭证）namespace 步骤降级跳过
+        （namespace.ensured=false），不视为失败。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 基础设施已确保存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantInfraProvisionResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "500": { $ref: '#/components/responses/ErrorResponse', description: "INFRA_PROVISION_FAILED" }
 
   /admin/tenants/{tenant_id}/plan:
     put:

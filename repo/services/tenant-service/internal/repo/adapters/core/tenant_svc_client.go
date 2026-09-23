@@ -327,6 +327,16 @@ func (c *TenantSvcClient) ListTenantLifecycle(ctx context.Context, tenantID uuid
 	}, nil
 }
 
+// ProvisionTenantInfra 调用 Core POST /admin/tenants/{id}/provision。
+// 端点业务层自幂等（Harbor EnsureProject + K8s SSA），200 即成功；
+// 404 TENANT_NOT_FOUND 等经 mapSDKError。
+func (c *TenantSvcClient) ProvisionTenantInfra(ctx context.Context, tenantID uuid.UUID) error {
+	_ = ctx
+	path := fmt.Sprintf("/admin/tenants/%s/provision", tenantID.String())
+	_, err := coreRequest(ctx, c.sdk, "POST", path, anisdk.RequestOptions{})
+	return mapSDKError(err)
+}
+
 func decodeTenant(raw any) (ports.Tenant, error) {
 	obj, err := asObject(raw)
 	if err != nil {

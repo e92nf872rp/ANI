@@ -352,6 +352,10 @@ func (s *TenantService) CreateTenant(ctx context.Context, req *tenantv1.CreateTe
 		scheduleQuotaSyncRetry(s.audit, s.plans, s.quota, planID, created.ID, totals, dims)
 	}
 
+	// 步骤 7b：异步初始化租户基础设施（Harbor 项目 + K8s Namespace）；
+	// 幂等重试 1s/2s/4s，失败只审计不回滚，不影响创建结果。
+	scheduleTenantInfraProvision(s.audit, s.tenants, created.ID)
+
 	// 步骤 8：成功审计（details 含 email/username，不含密码）+ 返回 { id, message }
 	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
 		"tenant_id":     created.ID.String(),

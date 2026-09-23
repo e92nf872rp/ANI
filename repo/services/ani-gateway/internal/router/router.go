@@ -142,7 +142,13 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerSecretResourcesWithService(v1, options.SecretService)
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
-	registerAdminTenantResources(v1, options.TenantService)
+	// Tenant infra provision：K8s apply 依赖收窄为接口；nil 判断必须在
+	// 具体类型上做（*KubernetesRESTClient 为 nil 时转接口仍非 nil）。
+	var tenantNamespaceApplier runtimeadapter.TenantNamespaceApplier
+	if options.KubernetesRESTClient != nil {
+		tenantNamespaceApplier = options.KubernetesRESTClient
+	}
+	registerAdminTenantResources(v1, options.TenantService, options.ImageRegistry, tenantNamespaceApplier)
 	registerAdminPlatformUserResources(v1, options.PlatformUserAdminStore)
 	registerAdminTenantAdminResources(v1, options.TenantAdminService)
 	registerAdminTenantPlanResources(v1, options.TenantPlanService)

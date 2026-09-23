@@ -258,6 +258,10 @@ type fakeTenantClient struct {
 
 	lifecycleItems []ports.TenantLifecycleEntry
 	lifecycleFn    func(ctx context.Context, id uuid.UUID, filter ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error)
+
+	provisionCalls int
+	provisionFn    func(id uuid.UUID) error
+	provisionErr   error
 }
 
 var (
@@ -514,6 +518,14 @@ func (f *fakeTenantClient) ListTenantLifecycle(ctx context.Context, id uuid.UUID
 		matched = matched[:limit]
 	}
 	return ports.TenantLifecycleListResult{Items: matched, NextCursor: next}, nil
+}
+
+func (f *fakeTenantClient) ProvisionTenantInfra(_ context.Context, id uuid.UUID) error {
+	f.provisionCalls++
+	if f.provisionFn != nil {
+		return f.provisionFn(id)
+	}
+	return f.provisionErr
 }
 
 func (f *fakeTenantClient) UpdateTenantPlan(_ context.Context, id uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {

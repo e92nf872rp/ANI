@@ -174,4 +174,10 @@ type TenantSvcClient interface {
 	// ListTenantLifecycle 查询租户生命周期（Core GET /admin/tenants/{id}/lifecycle）。
 	// action 空串表示不过滤。
 	ListTenantLifecycle(ctx context.Context, tenantID uuid.UUID, filter TenantLifecycleFilter) (TenantLifecycleListResult, error)
+
+	// ProvisionTenantInfra 幂等确保租户基础设施（Core POST /admin/tenants/{id}/provision）：
+	// Harbor 镜像仓库项目（与 tenant_id 同名）+ K8s 命名空间 ani-tenant-<tenant_id>。
+	// 端点业务层自幂等（EnsureProject isConflict + SSA），重复调用无副作用。
+	// 租户不存在 → ErrTenantNotFound。
+	ProvisionTenantInfra(ctx context.Context, tenantID uuid.UUID) error
 }
