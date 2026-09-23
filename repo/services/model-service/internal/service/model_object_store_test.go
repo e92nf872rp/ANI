@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,10 +13,67 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	modelv1 "github.com/kubercloud/ani/pkg/generated/pb/model/v1"
+	"github.com/kubercloud/ani/pkg/types"
 	"github.com/kubercloud/ani/services/model-service/internal/repo"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestGetModelDownloadURLSignsOnlyManifestListedSnapshotFile(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	fileHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	snapshot := types.ModelSnapshot{Schema: types.ModelSnapshotSchema, Revision: "r1", TotalSizeBytes: 2, Files: []types.ModelSnapshotFile{{Path: "weights.bin", SizeBytes: 2, SHA256: fileHash, ObjectKey: modelID.String() + "/import-1/snapshot/files/weights.bin"}}}
+	manifest, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(manifest)
+	path := "object://models/" + tenantID.String() + "/" + modelID.String() + "/import-1/snapshot/manifest.json"
+	store := &snapshotModelObjectStore{manifest: manifest, fileSize: 2, fileHash: fileHash}
+	svc := NewModelServiceWithObjectStore(nil, &stubRepo{model: &repo.Model{TenantID: tenantID, ID: modelID, Status: "ready"}, version: &repo.ModelVersion{ID: versionID, ModelID: modelID, Version: "import-1", StoragePath: path, SizeBytes: int64(len(manifest)), ChecksumSHA256: fmt.Sprintf("%x", digest)}}, store)
+	got, err := svc.GetModelDownloadURL(context.Background(), &modelv1.GetModelDownloadURLRequest{TenantId: tenantID.String(), ModelVersionId: versionID.String(), Requester: "init-container", FilePath: "weights.bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetSizeBytes() != 2 || got.GetChecksumSha256() != fileHash || !strings.HasSuffix(store.downloadRef.ObjectKey, "/snapshot/files/weights.bin") {
+		t.Fatalf("response=%+v ref=%+v", got, store.downloadRef)
+	}
+	for _, path := range []string{"missing.bin", "../secret", "/etc/passwd"} {
+		store.downloadCalls = 0
+		_, err := svc.GetModelDownloadURL(context.Background(), &modelv1.GetModelDownloadURLRequest{TenantId: tenantID.String(), ModelVersionId: versionID.String(), Requester: "init-container", FilePath: path})
+		if status.Code(err) == codes.OK || store.downloadCalls != 0 {
+			t.Errorf("path %q accepted or signed: code=%v calls=%d", path, status.Code(err), store.downloadCalls)
+		}
+	}
+}
+
+type snapshotModelObjectStore struct {
+	manifest      []byte
+	fileSize      int64
+	fileHash      string
+	downloadRef   ModelObjectRef
+	downloadCalls int
+}
+
+func (s *snapshotModelObjectStore) SignedUploadURL(context.Context, ModelObjectRef, time.Duration) (ModelSignedURL, error) {
+	return ModelSignedURL{}, errors.New("unused")
+}
+func (s *snapshotModelObjectStore) SignedDownloadURL(_ context.Context, ref ModelObjectRef, _ time.Duration) (ModelSignedURL, error) {
+	s.downloadRef = ref
+	s.downloadCalls++
+	return ModelSignedURL{URL: "https://object.invalid/file"}, nil
+}
+func (s *snapshotModelObjectStore) StatObject(_ context.Context, ref ModelObjectRef) (ModelObjectMetadata, error) {
+	if strings.HasSuffix(ref.ObjectKey, "manifest.json") {
+		return ModelObjectMetadata{SizeBytes: int64(len(s.manifest)), Checksum: ""}, nil
+	}
+	return ModelObjectMetadata{SizeBytes: s.fileSize, Checksum: s.fileHash}, nil
+}
+func (s *snapshotModelObjectStore) ReadObject(context.Context, ModelObjectRef, int64) ([]byte, error) {
+	return s.manifest, nil
+}
 
 const testModelChecksum = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 

@@ -40,7 +40,7 @@ func TestModelImportTargetPathIsTenantScoped(t *testing.T) {
 	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	importID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	path := modelImportTargetPath(tenantID, modelID, importID)
-	for _, part := range []string{tenantID.String(), modelID.String(), importID.String(), "model.tar.gz"} {
+	for _, part := range []string{tenantID.String(), modelID.String(), importID.String(), "snapshot", "manifest.json"} {
 		if !strings.Contains(path, part) {
 			t.Fatalf("target path %q lacks %q", path, part)
 		}

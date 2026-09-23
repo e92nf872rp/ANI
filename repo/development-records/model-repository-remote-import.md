@@ -2,15 +2,15 @@
 
 ## 状态
 
-本批次完成远程模型导入的本地/逻辑闭环（Task 1–6）。Gateway 入口、model-service 原子导入任务、公共 Hugging Face/ModelScope source adapter、确定性 `model.tar.gz` 归档、异步 worker、fetcher 安全解压和推理 runtime 目录接线均已落地。未执行真实集群、Docker、kubectl、Secret 读取或生产发布；不得据此标记 runtime/production ready。
+本批次完成远程模型导入的本地/逻辑闭环（Task 1–6）。Gateway 入口、model-service 原子导入任务、公共 Hugging Face/ModelScope source adapter、对象存储快照清单、异步 worker、fetcher 安全物化和推理 runtime 目录接线均已落地；旧 `model.tar.gz` 路径仍保留兼容。未执行真实集群、Docker、kubectl、Secret 读取或生产发布；不得据此标记 runtime/production ready。
 
 ## 已交付
 
 - 模型导入 POST 路由（`/api/v1/svc/models/import`）通过 Gateway 调用 model-service gRPC，注入认证租户并返回 `202 + Location`；不修改 v1 OpenAPI/protobuf。
 - model-service 以租户和幂等键原子创建 `model_import_tasks`、`async_tasks` 与 outbox 记录；同键相同请求 replay，冲突 fail-closed。
 - 远程 source 仅允许公共 HTTPS，host 固定为 `huggingface.co`/`modelscope.cn`，拒绝路径穿越、redirect、非 2xx 和任何仓库凭据。
-- worker 以租户隔离的对象 key 写入确定性 `model.tar.gz`，完成后注册 verified/ready model version；重复投递、租约和 fencing 可安全重放。
-- fetcher 对归档执行有界解压，拒绝绝对路径、`..`、symlink/hardlink、重复项和 archive bomb，使用 sibling 临时目录 + 原子 rename，并写入完成 marker；runtime 对 archive-backed model 使用 `/models/<model-version-id>/` 并重写 `--model`/`--model-path`。
+- worker 对新导入以租户隔离的对象 key 写入逐文件 snapshot 与 manifest，完成后注册 verified/ready model version；旧 `model.tar.gz` 描述符继续走兼容分支，重复投递、租约和 fencing 可安全重放。
+- fetcher 对归档和 snapshot 都执行有界内容校验；归档路径拒绝绝对路径、`..`、symlink/hardlink、重复项和 archive bomb，snapshot 路径按 manifest 逐文件下载，二者都使用 sibling 临时目录 + 原子 rename；runtime 对两种 materialization 都使用 `/models/<model-version-id>/` 并重写 `--model`/`--model-path`。
 - real-k8s-lab profile 增加 `model-import-worker` Deployment 和 object-store/消息总线配置契约；当前示例填写不可变 digest，ConfigMap 与 Deployment 镜像必须保持一致。未配置发布 artifact 时应同时留空并 fail-closed，不能解析或猜测 mutable tag。
 
 ## 验证
@@ -72,3 +72,43 @@
 
 - After the object-reference requirement was made fail-closed, the generated-client TLS integration test was updated to provide the same canonical object reference in its request and model-service response. Model-service and model-fetcher full tests, including race tests, now pass outside the IPv6-restricted sandbox; model-service vet/build/tidy and fetcher vet/build/tidy also pass.
 - Remote-import validator tests (27 cases), standalone validation, Atlas checksum validation, OpenAPI, SDK Alpha, Services semantic contract, and architecture guardrails pass. No live cluster mutation, Secret read, image push, migration apply, commit, or PR was performed.
+
+## 2026-09-20 streaming snapshot follow-up
+
+- New imports no longer build a complete local directory or `model.tar.gz`. The worker lists one immutable provider revision, streams each file directly to the object store, persists file rows and multipart checkpoints in `model_import_files`, and writes a bounded `snapshot/manifest.json` only after every file is verified. The legacy archive branch remains available for existing descriptors.
+- Large files use the MinIO multipart capability with 128 MiB parts and at most 10,000 parts; smaller files use the bounded `PutObject` stream. A retry reuses completed parts/files only after size and checksum verification. Structured logs now cover import start, revision resolution, file/part completion, manifest readiness and final version registration.
+- The model download contract adds an optional `file_path` request and per-file size/SHA-256 response fields. `model-fetcher` reads the manifest, obtains one signed URL per listed file, verifies each file, and atomically installs the directory. No model bytes are assembled into a worker-local archive.
+- The new migration and `atlas.sum` entry are present. Static migration checksum validation, a rollback-only PostgreSQL schema check against the local PostgreSQL container, focused tests, full package/model/inference/fetcher tests, race tests for importer/object-store/fetcher, and vet pass. Atlas CLI apply, live provider import, live MinIO multipart, cluster rollout, and production identity/dependency verification remain not verified.
+
+## 2026-09-20 live verification follow-up
+
+- Hugging Face and ModelScope public APIs were probed read-only. Immutable revision lookup, repository tree metadata, and ranged file responses returned successfully; this is provider connectivity evidence only and does not prove a worker import.
+- The snapshot tree path no longer applies the legacy `WorkerArchiveMaxBytes` 3 GiB archive ceiling. It still rejects negative sizes, per-file values above the int64 source bound, and aggregate-size overflow. The legacy archive path keeps its bounded workspace policy.
+- The working object-store adapter completed an isolated multipart smoke against the existing cluster MinIO through a port-forward: two parts were uploaded, listed, completed, read back, SHA-256 verified, and the unique smoke object was deleted. The test used a newly ensured `model` bucket because the local Compose bucket name (`ani-models`) and the configured `<prefix>model` convention are not currently identical. This is adapter-level evidence, not a model import.
+- A real full import is still `not_verified`: the cluster `model-service` and `model-import-worker` are running the older `remote-import-20260909-r1` images, and the cluster database does not contain `model_import_files`.
+- The official Atlas binary was installed under `/tmp/ani-tools` for verification. The repository's default Atlas migration format currently fails validation because several pre-existing migration filenames reuse the same parsed version (for example `20260827_001_*`). No repository migration was renamed and no shared database was changed. The new migration therefore remains `not_verified` for formal Atlas apply.
+- The real cluster PostgreSQL was checked through `ani-reconcile-ha-postgres` port-forward. The application URL uses `ani_app_user`, which cannot read the Atlas revision schema; the database owner `ani` reports revision `20260828000200` and no `public.model_import_files`. A dry-run of the new migration against this cluster database succeeded from a one-file temporary directory, but it was deliberately not applied because doing so would skip 18 older pending migrations and leave the shared history out of order.
+- Cluster API access is available, but no new image rollout or production identity test was performed. The existing Core/Gateway credentials and direct gRPC calls are not evidence for the new production Workload/IAM chain.
+
+## 2026-09-21 live verification completed
+
+本节记录老 ANI 仓库在现有集群中的实际验证结果。它只覆盖模型导入/物化链路，不把整套推理产品或生产身份链路标为 ready。
+
+- PostgreSQL 迁移已在集群数据库正式 apply：Atlas 状态为 `OK`，当前版本 `20260920000100`，执行文件 43，待执行 0；`model_import_files`、租户外键、RLS 和检查点约束均已存在。
+- 老 ANI 的 `model-service`、`model-import-worker` 和 materialization ConfigMap 已切换到 digest 固定的 streaming artifact。worker 当前 digest 为 `sha256:0f2984ada341908cffd88031d4bb387ce15585799288b800bf837360948221bb`，fetcher 配置 digest 为 `sha256:a95c9397943a475d31978232c1a7b807394c0d927fc9bb74cb39e80c43d5c501`；两个 Deployment 均为 `1/1 Ready`。
+- 租户登录、ModelScope `BAAI/bge-small-en-v1.5` 真实导入通过：任务返回 `202`，15 个文件全部完成，源总大小 `401109582` 字节，固定 revision `160f4d645d32abe3cabc5af6b6b39823eadf3c0e`，任务 100%，模型和版本 API 回读为 ready。
+- 进程重启恢复通过：在 `Qwen/Qwen2.5-0.5B-Instruct` 导入进行到已有 multipart 检查点时删除 worker Pod，新的 worker 通过 PostgreSQL durable payload 扫描、过期 lease 重新领取任务并继续上传；11 个文件最终全部 completed，上传字节数和预期均为 `999604128`，任务和 API 回读均为 completed/100%。
+- 现有已发布 BGE runtime 通过真实健康和调用检查：`/health` 返回 200，`/v1/embeddings` 返回一条 384 维 embedding。这证明现有旧归档 runtime 可调用，不证明本次新 snapshot 版本已经创建并发布为新 runtime。
+- 本次验证未运行超过 1 GiB 的完整模型导入，也未验证新 snapshot 版本创建推理实例、生产 Workload/IAM 身份链路、长时间故障恢复或正式外部 Gateway 数据面。因此模型导入/持久检查点范围为 `pass`；整套旧 ANI 产品验收仍为 `not_verified`，新 snapshot 到推理 runtime 的集成是下一项前置工作。
+- 脱敏证据归档于 [`development-records/live-evidence/model-repository-remote-import-live-20260921.json`](live-evidence/model-repository-remote-import-live-20260921.json)。
+
+## 2026-09-21 remaining acceptance live gate
+
+- 用已完成的 Qwen snapshot 创建了全新的 tenant-a 推理服务 `2127be8c-c73f-4e7e-bf4b-1de4f95d95df`。请求使用 Core capability 返回的权威 GPU ID `gpu-nvidia-geforce-rtx-4090` 和 12285 MiB vGPU；model-fetcher init 成功，vLLM 读取 snapshot manifest 并完成 GPU KV cache 初始化，服务 API 回读为 `running`、`ready_replicas=1`、`generation=1`、`observed_generation=1`。
+- 对应 HTTPRoute 与 AIGatewayRoute 为 `Accepted`/`ResolvedRefs`。通过 Auth API 创建带 `scope:inference:invoke` 的 API Key，并创建 service+key 访问策略；以 API Key 通过 Envoy 调用 `/v1/chat/completions` 返回 HTTP 200，证明 snapshot → runtime ready → publication → external invocation 链路。
+- 生产 Workload/IAM 链路通过：inference-service Pod 的 `AUTH_SERVICE_MINT_SECRET` 使用 `inference-mint` SecretKeyRef；Auth gRPC 以 `CallerService=inference-service` 签发短期服务 JWT，调用 Core `/platform-workload-capabilities` 返回 200；错误 caller secret 返回 `PermissionDenied`。租户 Header 没有被用作服务身份。
+- 真实 ModelScope `Qwen/Qwen2.5-1.5B-Instruct` 导入完成：11 文件、固定 revision `3c3787b7c81927cc64ad45dc32ff1c9ce2a5de34`、快照内容 `3,098,973,449` 字节、最大权重文件 `3,087,467,144` 字节、24 个 128 MiB multipart 分片，任务 `completed/100%`。这关闭了“超过 1 GiB 完整导入”缺口。
+- 导入回读发现 `models.total_size_bytes` 当前沿用 version storage object 大小，不能代表 snapshot 内容量。已增加 `ContentSizeBytes` 写入路径和 focused tests；model-service 使用 digest `sha256:b4144285e911772f7ee14cfcbbedbf94f08ed0511464fb703dacf7c85f59b670`、model-import-worker 使用 digest `sha256:52f347e56ff11ae78cd95ec92be5c1629daa00fab1cf068acad7dc2220b34e55` 完成 rollout。新的 BAAI/bge-small-en-v1.5 导入任务 `f33f93d6-4e7a-4c23-8ad0-e419d6a37ee3` / 模型 `b4dce287-ad8e-4172-a84e-4e727811c2f3` 回读 `total_size_bytes=401109582`，manifest 为 `3925` 字节，证明逻辑快照大小修复已在集群生效。
+- tenant-a 历史失败推理服务均无活动 Deployment/Pod：一个已删除 runtime 但遗留无 Endpoints Service，另一个创建超时且 Core workload 已删除。保留 operation/history，不能重试旧 operation；需要后续专门的幂等清理/归档流程。
+
+本次剩余 gate 的结论是：新 snapshot 推理实例、外部调用、生产身份链路、超过 1 GiB 导入和逻辑快照大小元数据 rollout 均已 `pass`；历史失败记录的业务归档和长期故障恢复仍为 `not_verified`，所以整套老 ANI 不能标记为完全验收通过。

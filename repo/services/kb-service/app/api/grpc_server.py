@@ -1903,8 +1903,18 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         The placeholder content is user-facing (session detail) and feeds
         the next turn's chat history; the raw error text is truncated to
         the same 500-char cap used by the audit trail.
+
+        The raw error text (e.g. an AioRpcError repr full of ``<...>``
+        angle brackets) is wrapped in a fenced code block: chat frontends
+        render assistant messages as markdown/HTML, and a bare ``<...>``
+        sequence would be swallowed as an HTML tag — hiding the failure
+        reason. Inside a code fence the text is displayed verbatim.
         """
-        content = f"回答生成失败：{_audit_text_truncate(error_message)}"
+        content = (
+            "回答生成失败：\n```\n"
+            + _audit_text_truncate(error_message)
+            + "\n```"
+        )
         try:
             if self._pool is not None:
                 async with self._pool.acquire() as conn:

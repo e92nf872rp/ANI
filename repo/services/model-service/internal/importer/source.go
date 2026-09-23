@@ -10,9 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -69,7 +71,7 @@ func classifyRevisionLookupError(err error) error {
 
 const (
 	maxSourceResponseBytes = int64(16 << 20)
-	maxSourceFileBytes     = int64(1 << 40)
+	maxSourceFileBytes     = int64(math.MaxInt64)
 	sourceHTTPTimeout      = 30 * time.Minute
 )
 
@@ -100,6 +102,14 @@ type RemoteFile struct {
 type Source interface {
 	List(context.Context, Repository) ([]RemoteFile, error)
 	Open(context.Context, Repository, string) (io.ReadCloser, int64, error)
+}
+
+// RangeSource opens one immutable byte range without buffering the response.
+// Implementations require a fixed revision and reject providers that ignore a
+// partial request. The returned reader reports truncation or extra bytes while
+// it is consumed, so callers cannot silently resume from a corrupt payload.
+type RangeSource interface {
+	OpenRange(context.Context, Repository, string, int64, int64) (io.ReadCloser, error)
 }
 
 // RevisionResolver is implemented by sources whose branch/tag API can be
@@ -195,6 +205,21 @@ func scrubSourceRedirectHeaders(request *http.Request) {
 	}
 }
 
+func preserveSourceRangeHeader(request *http.Request, via []*http.Request) {
+	if request == nil || request.Header == nil {
+		return
+	}
+	for index := len(via) - 1; index >= 0; index-- {
+		if via[index] == nil {
+			continue
+		}
+		if value := via[index].Header.Get("Range"); value != "" {
+			request.Header.Set("Range", value)
+			return
+		}
+	}
+}
+
 func sourceEndpoint(raw string, allowedHosts ...string) (*url.URL, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -254,6 +279,162 @@ func sourceGET(ctx context.Context, client *http.Client, requestURL *url.URL) (*
 	}
 	return response, nil
 }
+
+func sourceRangeGET(ctx context.Context, client *http.Client, requestURL *url.URL, offset, length int64) (*http.Response, error) {
+	end, err := sourceRangeEnd(offset, length)
+	if err != nil {
+		return nil, err
+	}
+	if requestURL == nil || requestURL.Scheme != "https" || requestURL.User != nil {
+		return nil, errors.New("invalid source URL")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
+	if err != nil {
+		return nil, errors.New("create source request")
+	}
+	request.Header.Set("Accept", "application/octet-stream")
+	request.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, end))
+	if client == nil {
+		client = sourceHTTPClient(nil)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, errors.New("source request failed")
+	}
+	if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
+		_ = response.Body.Close()
+		return nil, &sourceHTTPError{status: response.StatusCode, redirect: true}
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		_ = response.Body.Close()
+		return nil, &sourceHTTPError{status: response.StatusCode}
+	}
+	if response.StatusCode != http.StatusPartialContent {
+		_ = response.Body.Close()
+		return nil, errors.New("source range request was not honored")
+	}
+	start, responseEnd, total, err := parseSourceContentRange(response.Header.Get("Content-Range"))
+	if err != nil || start != offset || responseEnd != end || total <= responseEnd {
+		_ = response.Body.Close()
+		return nil, errors.New("source range response has invalid content range")
+	}
+	if response.Body == nil {
+		return nil, errors.New("source range response has no body")
+	}
+	return response, nil
+}
+
+func sourceRangeEnd(offset, length int64) (int64, error) {
+	if offset < 0 || length <= 0 || offset > math.MaxInt64-(length-1) {
+		return 0, errors.New("invalid source range")
+	}
+	return offset + length - 1, nil
+}
+
+func parseSourceContentRange(raw string) (start, end, total int64, err error) {
+	parts := strings.Fields(raw)
+	if len(parts) != 2 || parts[0] != "bytes" {
+		return 0, 0, 0, errors.New("invalid content range")
+	}
+	bounds := strings.Split(parts[1], "/")
+	if len(bounds) != 2 || bounds[1] == "*" {
+		return 0, 0, 0, errors.New("invalid content range")
+	}
+	rangeBounds := strings.Split(bounds[0], "-")
+	if len(rangeBounds) != 2 {
+		return 0, 0, 0, errors.New("invalid content range")
+	}
+	if !sourceDecimal(rangeBounds[0]) || !sourceDecimal(rangeBounds[1]) || !sourceDecimal(bounds[1]) {
+		return 0, 0, 0, errors.New("invalid content range")
+	}
+	start, err = strconv.ParseInt(rangeBounds[0], 10, 64)
+	if err != nil {
+		return 0, 0, 0, errors.New("invalid content range")
+	}
+	end, err = strconv.ParseInt(rangeBounds[1], 10, 64)
+	if err != nil {
+		return 0, 0, 0, errors.New("invalid content range")
+	}
+	total, err = strconv.ParseInt(bounds[1], 10, 64)
+	if err != nil || start < 0 || end < start || total <= end {
+		return 0, 0, 0, errors.New("invalid content range")
+	}
+	return start, end, total, nil
+}
+
+func sourceDecimal(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	for _, r := range raw {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+var (
+	errSourceRangeBodySize = errors.New("source range response size mismatch")
+	errSourceRangeBodyRead = errors.New("read source range response")
+)
+
+type exactRangeReadCloser struct {
+	body        io.ReadCloser
+	remaining   int64
+	finalized   bool
+	terminalErr error
+}
+
+func (r *exactRangeReadCloser) Read(p []byte) (int, error) {
+	if r.terminalErr != nil {
+		return 0, r.terminalErr
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.remaining == 0 {
+		if r.finalized {
+			return 0, io.EOF
+		}
+		var extra [1]byte
+		n, err := r.body.Read(extra[:])
+		if n > 0 {
+			r.terminalErr = errSourceRangeBodySize
+			return 0, r.terminalErr
+		}
+		if errors.Is(err, io.EOF) {
+			r.finalized = true
+			return 0, io.EOF
+		}
+		if err != nil {
+			r.terminalErr = errSourceRangeBodyRead
+			return 0, r.terminalErr
+		}
+		return 0, nil
+	}
+	if int64(len(p)) > r.remaining {
+		p = p[:int(r.remaining)]
+	}
+	n, err := io.ReadFull(r.body, p)
+	if n > 0 {
+		r.remaining -= int64(n)
+	}
+	if err == io.ErrUnexpectedEOF || errors.Is(err, io.EOF) {
+		if r.remaining != 0 {
+			r.terminalErr = errSourceRangeBodySize
+			return n, r.terminalErr
+		}
+		return n, io.EOF
+	}
+	if err != nil {
+		r.terminalErr = errSourceRangeBodyRead
+		return n, r.terminalErr
+	}
+	return n, nil
+}
+
+func (r *exactRangeReadCloser) Close() error { return r.body.Close() }
 
 func readSourceResponse(response *http.Response) ([]byte, error) {
 	defer func() { _ = response.Body.Close() }()

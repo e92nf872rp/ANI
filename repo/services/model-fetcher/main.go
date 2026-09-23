@@ -136,7 +136,7 @@ func runWithDependencies(ctx context.Context, cfg FetcherConfig, dialer modelSer
 		return errors.New("model-service client unavailable")
 	}
 	if closeClient != nil {
-		defer closeClient()
+		defer func() { _ = closeClient() }()
 	}
 	response, err := client.GetModelDownloadURL(lookupCtx, &modelv1.GetModelDownloadURLRequest{
 		TenantId: cfg.TenantID, ModelVersionId: cfg.ModelVersionID, Requester: "init-container",
@@ -154,6 +154,9 @@ func runWithDependencies(ctx context.Context, cfg FetcherConfig, dialer modelSer
 	if cfg.ObjectRef != "" && strings.TrimSpace(response.GetStoragePath()) != cfg.ObjectRef {
 		return errors.New("model-service returned an unexpected object")
 	}
+	if isModelSnapshotObject(response.GetStoragePath()) || isModelSnapshotObject(cfg.ObjectRef) {
+		return fetchModelSnapshot(ctx, cfg, response, client, httpClient)
+	}
 	if isModelArchiveObject(response.GetStoragePath()) || isModelArchiveObject(cfg.ObjectRef) {
 		// Archives are downloaded beside (not inside) the final version
 		// directory, then atomically extracted into TargetPath. TargetPath is
@@ -168,7 +171,7 @@ func runWithDependencies(ctx context.Context, cfg FetcherConfig, dialer modelSer
 		}, httpClient, archiveDir); err != nil {
 			return err
 		}
-		defer os.Remove(archivePath)
+		defer func() { _ = os.Remove(archivePath) }()
 		return ExtractArchive(ctx, archivePath, cfg.TargetPath)
 	}
 	return Download(ctx, Descriptor{

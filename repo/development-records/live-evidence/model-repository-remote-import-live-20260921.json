@@ -1,0 +1,104 @@
+{
+  "batch": "MODEL-REPOSITORY-REMOTE-IMPORT",
+  "date": "2026-09-21",
+  "scope": "legacy-ANI-model-import",
+  "status": "pass",
+  "database": {
+    "atlas_status": "OK",
+    "current_version": "20260920000100",
+    "pending_files": 0,
+    "executed_files": 43,
+    "checkpoint_table": "model_import_files"
+  },
+  "artifacts": {
+    "model_service_image": "docker.changqingyun.cn/ani/model-service@sha256:b4144285e911772f7ee14cfcbbedbf94f08ed0511464fb703dacf7c85f59b670",
+    "worker_image": "docker.changqingyun.cn/ani/model-import-worker@sha256:52f347e56ff11ae78cd95ec92be5c1629daa00fab1cf068acad7dc2220b34e55",
+    "fetcher_image": "docker.changqingyun.cn/ani/model-fetcher@sha256:a95c9397943a475d31978232c1a7b807394c0d927fc9bb74cb39e80c43d5c501"
+  },
+  "imports": [
+    {
+      "provider": "modelscope",
+      "repository": "BAAI/bge-small-en-v1.5",
+      "files": 15,
+      "source_size_bytes": 401109582,
+      "progress_pct": 100,
+      "status": "completed",
+      "resolved_revision": "160f4d645d32abe3cabc5af6b6b39823eadf3c0e"
+    },
+    {
+      "provider": "modelscope",
+      "repository": "Qwen/Qwen2.5-0.5B-Instruct",
+      "files": 11,
+      "source_size_bytes": 999604128,
+      "progress_pct": 100,
+      "status": "completed",
+      "resolved_revision": "186d8559ad54c32cf47dc3a8225f993742c507b8",
+      "restart_recovery": "pass",
+      "recovery_evidence": "worker pod was deleted during multipart upload; the replacement worker resumed from PostgreSQL file checkpoints"
+    },
+    {
+      "provider": "modelscope",
+      "repository": "Qwen/Qwen2.5-1.5B-Instruct",
+      "files": 11,
+      "source_size_bytes": 3098973449,
+      "largest_file_size_bytes": 3087467144,
+      "multipart_parts": 24,
+      "progress_pct": 100,
+      "status": "completed",
+      "resolved_revision": "3c3787b7c81927cc64ad45dc32ff1c9ce2a5de34",
+      "task_id": "ad6e5d44-c25a-4800-899b-3c10dee6917d",
+      "snapshot_model_id": "96d9690c-2965-488d-996c-6a6af0d69cbf",
+      "manifest_size_bytes": 2843
+    },
+    {
+      "provider": "modelscope",
+      "repository": "BAAI/bge-small-en-v1.5",
+      "files": 15,
+      "source_size_bytes": 401109582,
+      "progress_pct": 100,
+      "status": "completed",
+      "resolved_revision": "160f4d645d32abe3cabc5af6b6b39823eadf3c0e",
+      "task_id": "f33f93d6-4e7a-4c23-8ad0-e419d6a37ee3",
+      "snapshot_model_id": "b4dce287-ad8e-4172-a84e-4e727811c2f3",
+      "logical_size_readback_bytes": 401109582,
+      "manifest_size_bytes": 3925,
+      "size_metadata_fix": "pass"
+    }
+  ],
+  "runtime_probe": {
+    "existing_legacy_bge_service_health": "pass",
+    "existing_legacy_bge_embeddings": "pass",
+    "new_snapshot_to_new_inference_service": "pass",
+    "new_snapshot_service_id": "2127be8c-c73f-4e7e-bf4b-1de4f95d95df",
+    "new_snapshot_runtime_ready": "pass",
+    "new_snapshot_publication_route": "pass",
+    "new_snapshot_external_chat": "pass",
+    "production_workload_iam_identity": "pass",
+    "snapshot_total_size_metadata_rollout": "pass",
+    "snapshot_total_size_metadata_model_id": "b4dce287-ad8e-4172-a84e-4e727811c2f3",
+    "snapshot_total_size_metadata_logical_bytes": 401109582,
+    "snapshot_total_size_metadata_manifest_bytes": 3925,
+    "legacy_ani_tenant_login": "pass",
+    "legacy_ani_control_plane_readback": "pass",
+    "legacy_ani_external_invocation": "pass"
+  },
+  "boundary": "This evidence proves the model import, durable checkpoint, snapshot runtime, external invocation, production identity, and logical snapshot-size metadata slices. It does not mark historical failure cleanup/archive or long-duration recovery as complete for the entire legacy ANI product.",
+  "legacy_ani_tenant_e2e": {
+    "tenant": "tenant-a",
+    "control_plane": "old-ANI-Gateway",
+    "login": "password-login accepted",
+    "ready_model_id": "b4dce287-ad8e-4172-a84e-4e727811c2f3",
+    "ready_model_total_size_bytes": 401109582,
+    "inference_service_id": "2127be8c-c73f-4e7e-bf4b-1de4f95d95df",
+    "inference_service_status": "running",
+    "ready_replicas": 1,
+    "generation": 1,
+    "observed_generation": 1,
+    "policy_id": "7e8771ba-0c14-4ccc-ae98-df1103e38310",
+    "api_key_id": "7b464ce3-7ed1-44c9-9512-7c9c5b79c85f",
+    "external_path": "/v1/chat/completions",
+    "external_http_status": 200,
+    "response_content": "Old-Nan-Li-Elive-O",
+    "scope": "scope:inference:invoke"
+  }
+}

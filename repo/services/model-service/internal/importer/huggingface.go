@@ -90,6 +90,7 @@ func huggingFaceDownloadHTTPClient(client *http.Client) *http.Client {
 		// hop-sensitive headers in case a caller supplied a custom transport or
 		// default redirect headers on the injected client.
 		scrubSourceRedirectHeaders(req)
+		preserveSourceRangeHeader(req, via)
 		return nil
 	}
 	return clone
@@ -203,7 +204,11 @@ func (s *HuggingFaceSource) List(ctx context.Context, repository Repository) ([]
 					size = *entry.LFS.Size
 				}
 			}
-			if size < 0 || size > WorkerArchiveMaxBytes || totalBytes > WorkerArchiveMaxBytes-size {
+			// Snapshot imports stream each source file directly to object storage;
+			// they do not build the legacy local archive. Keep the tree accounting
+			// bounded only by int64 so multi-gigabyte repositories are accepted,
+			// while still rejecting malformed sizes and arithmetic overflow.
+			if size < 0 || size > maxSourceFileBytes || totalBytes > maxSourceFileBytes-size {
 				return nil, errors.New("source tree size budget exceeded")
 			}
 			if len(files) >= maxHuggingFaceTreeFiles {
@@ -288,4 +293,19 @@ func (s *HuggingFaceSource) Open(ctx context.Context, repository Repository, fil
 		return nil, 0, errors.New("source file is too large")
 	}
 	return response.Body, response.ContentLength, nil
+}
+
+func (s *HuggingFaceSource) OpenRange(ctx context.Context, repository Repository, filePath string, offset, length int64) (io.ReadCloser, error) {
+	if s == nil || s.endpoint == nil || ValidateRepository(repository) != nil || repository.Source != "huggingface" || !isHuggingFaceCommit(repository.Revision) || validateRemoteFilePath(filePath) != nil {
+		return nil, errors.New("invalid hugging face range file")
+	}
+	requestURL := appendURLPath(s.endpoint, repository.RepoID, "resolve", repository.Revision, filePath)
+	query := requestURL.Query()
+	query.Set("download", "true")
+	requestURL.RawQuery = query.Encode()
+	response, err := sourceRangeGET(ctx, s.downloadClient, requestURL, offset, length)
+	if err != nil {
+		return nil, err
+	}
+	return &exactRangeReadCloser{body: response.Body, remaining: length}, nil
 }

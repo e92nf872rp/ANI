@@ -32,11 +32,13 @@ const (
 	maxImportTotalBytesEnv  = "MODEL_IMPORT_MAX_TOTAL_BYTES"
 	maxImportFileBytesEnv   = "MODEL_IMPORT_MAX_FILE_BYTES"
 	maxImportOutputBytesEnv = "MODEL_IMPORT_MAX_OUTPUT_BYTES"
+	importRecoveryInterval  = 15 * time.Second
+	importRecoveryBatchSize = 20
 )
 
-// loadArchiveLimits reads optional worker policy overrides. Empty values use
-// the workspace-aligned defaults; malformed, negative, oversized, or
-// internally inconsistent values fail closed before any dependency is opened.
+// loadArchiveLimits reads the compatibility policy for legacy archive
+// descriptors. New snapshot imports do not apply these fixed workspace
+// ceilings; malformed overrides still fail closed before dependencies open.
 func loadArchiveLimits() (importer.ArchiveLimits, error) {
 	limits := importer.DefaultWorkerArchiveLimits()
 	fields := []struct {
@@ -85,8 +87,9 @@ func main() {
 	defer stop()
 
 	workerID := strings.TrimSpace(os.Getenv("MODEL_IMPORT_WORKER_ID"))
+	store := importer.NewPostgresImportStore(deps.DB, modelrepo.NewPostgresModelRepo(), sharedrepo.NewPostgresAsyncTaskRepo())
 	worker := importer.NewWorker(
-		importer.NewPostgresImportStore(deps.DB, modelrepo.NewPostgresModelRepo(), sharedrepo.NewPostgresAsyncTaskRepo()),
+		store,
 		deps.Ports.ObjectStore,
 		map[string]importer.Source{
 			"huggingface": importer.NewHuggingFaceSource(),
@@ -117,8 +120,42 @@ func main() {
 		deps.Logger.Error("model import worker subscription failed", "err", err)
 		return
 	}
+	if recovery, ok := any(store).(importer.RecoveryStore); ok {
+		go runRecoveryLoop(ctx, worker, recovery, deps.Logger)
+	}
 	<-ctx.Done()
 	if err := subscription.Drain(context.Background()); err != nil {
 		deps.Logger.Error("model import worker drain failed", "err", err)
+	}
+}
+
+func runRecoveryLoop(ctx context.Context, worker *importer.Worker, store importer.RecoveryStore, logger interface {
+	Error(msg string, args ...any)
+}) {
+	if worker == nil || store == nil {
+		return
+	}
+	recover := func() {
+		messages, err := store.ListRecoverableImports(ctx, importRecoveryBatchSize)
+		if err != nil {
+			logger.Error("model import recovery scan failed", "err", err)
+			return
+		}
+		for _, message := range messages {
+			if err := worker.Handle(ctx, message); err != nil {
+				logger.Error("model import recovery failed", "task_id", message.TaskID, "err", err)
+			}
+		}
+	}
+	recover()
+	ticker := time.NewTicker(importRecoveryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			recover()
+		}
 	}
 }
