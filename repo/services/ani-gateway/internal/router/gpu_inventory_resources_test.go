@@ -2,9 +2,13 @@ package router
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -421,5 +425,117 @@ func TestGPUNodeOccupancyPicksStableInstanceWhenMultipleOnSameNode(t *testing.T)
 	}
 	if entry.PodCount != 2 {
 		t.Fatalf("PodCount = %d, want 2 (2 running pods on same node)", entry.PodCount)
+	}
+}
+
+// gpuOccupancyPodsRoundTripper 拦截 gateway 的 pods 查询，返回预置 Pod 列表
+// 并记录请求 URL，用于断言租户视角/平台视角走的是哪个端点。
+type gpuOccupancyPodsRoundTripper struct {
+	body      string
+	requested *string
+}
+
+func (r *gpuOccupancyPodsRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if r.requested != nil {
+		*r.requested = req.URL.String()
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(r.body)),
+		Header:     http.Header{},
+	}, nil
+}
+
+func newGPUOccupancyTestAPI(t *testing.T, rt http.RoundTripper) *gpuInventoryAPI {
+	t.Helper()
+	client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       "https://kubernetes.test",
+		HTTPClient: &http.Client{Transport: rt},
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient() error = %v", err)
+	}
+	return newGPUInventoryAPIWithStore(nil, nil, client)
+}
+
+// TestGPUNodeOccupancyPlatformScopeCountsAcrossTenants 锁定平台视角回归：
+// 平台 token 的 tenant_id 被 auth-service 置为 uuid.Nil（网关侧呈现为全零
+// UUID，实测 30080 access log 即 00000000-0000-0000-0000-000000000000）。
+// 修复前代码只判空串，全零 UUID 会走租户分支去查
+// ani-tenant-00000000-0000-0000-0000-000000000000（不存在），使 in_use 恒为 0
+// （"全部空闲"），与 GET /platform/capacity 的跨租户 gpu_free 直接矛盾。
+func TestGPUNodeOccupancyPlatformScopeCountsAcrossTenants(t *testing.T) {
+	for _, tenantID := range []string{"", "00000000-0000-0000-0000-000000000000"} {
+		t.Run("tenant_id="+tenantID, func(t *testing.T) {
+			requested := ""
+			rt := &gpuOccupancyPodsRoundTripper{requested: &requested, body: `{"items":[
+				{"metadata":{"namespace":"ani-tenant-t1","labels":{"ani.kubercloud.io/tenant-id":"t1","ani.kubercloud.io/instance":"inst-a"}},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}},
+				{"metadata":{"namespace":"ani-tenant-t2","labels":{"ani.kubercloud.io/tenant-id":"t2","ani.kubercloud.io/instance":"inst-b"}},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"volcano.sh/vgpu-number":"1"}}}]},"status":{"phase":"Running"}},
+				{"metadata":{"namespace":"ani-tenant-t1","labels":{"ani.kubercloud.io/tenant-id":"t1"}},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"cpu":"1"}}}]},"status":{"phase":"Running"}}
+			]}`}
+			api := newGPUOccupancyTestAPI(t, rt)
+
+			occupancy := api.gpuNodeOccupancyForRequest(context.Background(), tenantID)
+
+			entry, ok := occupancy.lookup("gpu-node-a")
+			if !ok {
+				t.Fatalf("lookup(gpu-node-a) not found; 平台视角不应回退到占位租户")
+			}
+			// 3 个 Running Pod 中只有 2 个真的请求 GPU；CPU-only 的租户 Pod 不算占用。
+			if entry.PodCount != 2 {
+				t.Fatalf("PodCount = %d, want 2 (跨租户 GPU Pod，排除 CPU-only)", entry.PodCount)
+			}
+			if !strings.Contains(requested, "/api/v1/pods?labelSelector=") {
+				t.Fatalf("pods endpoint = %q, want cluster-level cross-tenant query", requested)
+			}
+			if strings.Contains(requested, "demo-tenant") {
+				t.Fatalf("pods endpoint = %q, must not fall back to a placeholder tenant", requested)
+			}
+		})
+	}
+}
+
+// TestPlatformScopeTenantClassification 覆盖空串/全零 UUID/真实租户三类取值。
+func TestPlatformScopeTenantClassification(t *testing.T) {
+	platform := []string{"", "   ", "00000000-0000-0000-0000-000000000000"}
+	for _, tenantID := range platform {
+		if !platformScopeTenant(tenantID) {
+			t.Fatalf("platformScopeTenant(%q) = false, want true", tenantID)
+		}
+	}
+	// 注意 00000000-...-0001 是真实租户（tenant-a），不是平台占位值。
+	tenants := []string{"00000000-0000-0000-0000-000000000001", "tenant-a", "not-a-uuid"}
+	for _, tenantID := range tenants {
+		if platformScopeTenant(tenantID) {
+			t.Fatalf("platformScopeTenant(%q) = true, want false", tenantID)
+		}
+	}
+}
+
+// TestGPUNodeOccupancyTenantScopeQueriesTenantNamespaceAndFiltersGPU 锁定租户
+// 视角：只查本租户命名空间，且只统计真的请求 GPU 的 Running Pod。
+func TestGPUNodeOccupancyTenantScopeQueriesTenantNamespaceAndFiltersGPU(t *testing.T) {
+	requested := ""
+	rt := &gpuOccupancyPodsRoundTripper{requested: &requested, body: `{"items":[
+		{"metadata":{"namespace":"ani-tenant-tenant-a","labels":{"ani.kubercloud.io/tenant-id":"tenant-a","ani.kubercloud.io/instance":"inst-1"}},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-tenant-a","labels":{"ani.kubercloud.io/tenant-id":"tenant-a","ani.kubercloud.io/instance":"vm-1"}},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"cpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-tenant-a","labels":{"ani.kubercloud.io/tenant-id":"tenant-a","ani.kubercloud.io/instance":"pending-1"}},"spec":{"nodeName":"gpu-node-b","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Pending"}}
+	]}`}
+	api := newGPUOccupancyTestAPI(t, rt)
+
+	occupancy := api.gpuNodeOccupancyForTenant(context.Background(), "tenant-a")
+
+	entry, ok := occupancy.lookup("gpu-node-a")
+	if !ok || entry.PodCount != 1 {
+		t.Fatalf("lookup(gpu-node-a) = %+v ok=%v, want PodCount=1 (CPU-only Pod 不计入)", entry, ok)
+	}
+	if entry.TenantID != "tenant-a" {
+		t.Fatalf("tenant_id = %q, want tenant-a", entry.TenantID)
+	}
+	if _, ok := occupancy.lookup("gpu-node-b"); ok {
+		t.Fatal("lookup(gpu-node-b) should be absent (Pending Pod 不占用 GPU)")
+	}
+	if !strings.Contains(requested, "/api/v1/namespaces/ani-tenant-tenant-a/pods?labelSelector=") {
+		t.Fatalf("pods endpoint = %q, want tenant-namespace query", requested)
 	}
 }
