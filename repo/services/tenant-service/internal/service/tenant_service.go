@@ -1046,6 +1046,129 @@ func assembleTenantQuotaViews(items []ports.CoreQuotaResult) []*tenantv1.TenantQ
 	return out
 }
 
+// UpdateTenantQuotaDirect 直接修改租户配额（BOSS 快速通道，跳过审批流）。
+func (s *TenantService) UpdateTenantQuotaDirect(ctx context.Context, req *tenantv1.UpdateTenantQuotaDirectRequest) (*tenantv1.UpdateTenantQuotaDirectResponse, error) {
+	const action = "tenant.quota_update_direct"
+
+	// 步骤 1：校验请求、租户 ID，并确认 Core 配额/租户客户端可用。
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": req.GetTenantId()}, err, nil)
+		return nil, err
+	}
+	if s.quota == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：校验 items 非空、resource_type 格式与批内唯一、total 非负。
+	resourceTypes, coreItems, err := validateTenantQuotaTotalInputs(req.GetItems())
+	details := map[string]any{"tenant_id": tenantID.String()}
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, details, err, &tenantID)
+		return nil, err
+	}
+	details["items"] = coreItemsForAudit(coreItems)
+
+	// 步骤 3：经 Core quota-meta 校验全部维度已注册且启用。
+	if err := validateEnabledQuotaResourceTypes(ctx, s.quota, resourceTypes); err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, details, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 4：经 Core 租户 API 校验租户存在；disabled 拒绝，frozen 放行。
+	tenant, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+	details["tenant_name"] = tenant.Name
+	details["tenant_display_name"] = tenant.DisplayName
+	if tenant.Status == ports.TenantStatusDisabled {
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantStateInvalid, "tenant is disabled")
+		details["status"] = string(tenant.Status)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, details, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 5：调用 Core quota/upsert 原子写入；低于 used+reserved 时由 Core 自动收紧。
+	results, err := applyTenantQuotaItems(ctx, s.quota, tenantID, coreItems)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 6：组装生效结果与收紧维度，写入 success 审计后返回。
+	tightened := make([]string, 0, len(results))
+	for _, result := range results {
+		if result.Tightened {
+			tightened = append(tightened, result.ResourceType)
+		}
+	}
+	details["tightened"] = tightened
+	if actor := userIDFromCtx(ctx); actor != nil {
+		details["updated_by"] = actor.String()
+	}
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, details, &tenantID)
+
+	return &tenantv1.UpdateTenantQuotaDirectResponse{Items: assembleTenantQuotaWriteItems(results)}, nil
+}
+
+func validateTenantQuotaTotalInputs(items []*tenantv1.TenantQuotaTotalInput) ([]string, []ports.CoreQuotaItem, error) {
+	if len(items) == 0 {
+		return nil, nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "items must contain at least 1 entry")
+	}
+	seen := make(map[string]struct{}, len(items))
+	resourceTypes := make([]string, 0, len(items))
+	coreItems := make([]ports.CoreQuotaItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			return nil, nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "items entry required")
+		}
+		resourceType := strings.TrimSpace(item.GetResourceType())
+		if !quotaChangeResourceTypePattern.MatchString(resourceType) {
+			return nil, nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "resource_type format invalid: "+resourceType)
+		}
+		if _, exists := seen[resourceType]; exists {
+			return nil, nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "duplicate resource_type in batch: "+resourceType)
+		}
+		if item.GetTotal() < 0 {
+			return nil, nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "total must be >= 0")
+		}
+		seen[resourceType] = struct{}{}
+		resourceTypes = append(resourceTypes, resourceType)
+		coreItems = append(coreItems, ports.CoreQuotaItem{ResourceType: resourceType, Total: item.GetTotal()})
+	}
+	return resourceTypes, coreItems, nil
+}
+
+func assembleTenantQuotaWriteItems(items []ports.CoreQuotaResult) []*tenantv1.TenantQuotaWriteItem {
+	out := make([]*tenantv1.TenantQuotaWriteItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, &tenantv1.TenantQuotaWriteItem{
+			ResourceType: item.ResourceType,
+			Total:        item.Total,
+			Used:         item.Used,
+			Reserved:     item.Reserved,
+			Tightened:    item.Tightened,
+		})
+	}
+	return out
+}
+
 // SubmitQuotaChangeRequest 提交配额变更申请（US-012）：
 // 网关 request_id → meta 启用校验 → GetQuota 冻 old_value → INSERT pending。
 func (s *TenantService) SubmitQuotaChangeRequest(ctx context.Context, req *tenantv1.SubmitQuotaChangeRequestRequest) (*commonv1.IdempotentResult, error) {

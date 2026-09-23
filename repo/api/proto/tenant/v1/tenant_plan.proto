@@ -78,6 +78,8 @@ service TenantService {
   rpc ListQuotaChangeRequests(ListQuotaChangeRequestsRequest) returns (ListQuotaChangeRequestsResponse);
   // ReviewQuotaChangeRequest approves or rejects a pending request.
   rpc ReviewQuotaChangeRequest(ReviewQuotaChangeRequestRequest) returns (common.v1.IdempotentResult);
+  // UpdateTenantQuotaDirect writes tenant quota directly (BOSS fast path, no approval).
+  rpc UpdateTenantQuotaDirect(UpdateTenantQuotaDirectRequest) returns (UpdateTenantQuotaDirectResponse);
   // ListTenantLifecycle returns tenant lifecycle entries.
   rpc ListTenantLifecycle(ListTenantLifecycleRequest) returns (ListTenantLifecycleResponse);
   // ListTenantAuditLogs returns tenant-scoped audit logs.

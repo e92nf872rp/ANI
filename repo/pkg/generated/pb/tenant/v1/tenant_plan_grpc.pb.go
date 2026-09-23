@@ -597,6 +597,7 @@ const (
 	TenantService_SubmitQuotaChangeRequest_FullMethodName = "/tenant.v1.TenantService/SubmitQuotaChangeRequest"
 	TenantService_ListQuotaChangeRequests_FullMethodName  = "/tenant.v1.TenantService/ListQuotaChangeRequests"
 	TenantService_ReviewQuotaChangeRequest_FullMethodName = "/tenant.v1.TenantService/ReviewQuotaChangeRequest"
+	TenantService_UpdateTenantQuotaDirect_FullMethodName  = "/tenant.v1.TenantService/UpdateTenantQuotaDirect"
 	TenantService_ListTenantLifecycle_FullMethodName      = "/tenant.v1.TenantService/ListTenantLifecycle"
 	TenantService_ListTenantAuditLogs_FullMethodName      = "/tenant.v1.TenantService/ListTenantAuditLogs"
 	TenantService_ListTenantAdmins_FullMethodName         = "/tenant.v1.TenantService/ListTenantAdmins"
@@ -640,6 +641,8 @@ type TenantServiceClient interface {
 	ListQuotaChangeRequests(ctx context.Context, in *ListQuotaChangeRequestsRequest, opts ...grpc.CallOption) (*ListQuotaChangeRequestsResponse, error)
 	// ReviewQuotaChangeRequest approves or rejects a pending request.
 	ReviewQuotaChangeRequest(ctx context.Context, in *ReviewQuotaChangeRequestRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// UpdateTenantQuotaDirect writes tenant quota directly (BOSS fast path, no approval).
+	UpdateTenantQuotaDirect(ctx context.Context, in *UpdateTenantQuotaDirectRequest, opts ...grpc.CallOption) (*UpdateTenantQuotaDirectResponse, error)
 	// ListTenantLifecycle returns tenant lifecycle entries.
 	ListTenantLifecycle(ctx context.Context, in *ListTenantLifecycleRequest, opts ...grpc.CallOption) (*ListTenantLifecycleResponse, error)
 	// ListTenantAuditLogs returns tenant-scoped audit logs.
@@ -809,6 +812,15 @@ func (c *tenantServiceClient) ReviewQuotaChangeRequest(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *tenantServiceClient) UpdateTenantQuotaDirect(ctx context.Context, in *UpdateTenantQuotaDirectRequest, opts ...grpc.CallOption) (*UpdateTenantQuotaDirectResponse, error) {
+	out := new(UpdateTenantQuotaDirectResponse)
+	err := c.cc.Invoke(ctx, TenantService_UpdateTenantQuotaDirect_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *tenantServiceClient) ListTenantLifecycle(ctx context.Context, in *ListTenantLifecycleRequest, opts ...grpc.CallOption) (*ListTenantLifecycleResponse, error) {
 	out := new(ListTenantLifecycleResponse)
 	err := c.cc.Invoke(ctx, TenantService_ListTenantLifecycle_FullMethodName, in, out, opts...)
@@ -874,6 +886,8 @@ type TenantServiceServer interface {
 	ListQuotaChangeRequests(context.Context, *ListQuotaChangeRequestsRequest) (*ListQuotaChangeRequestsResponse, error)
 	// ReviewQuotaChangeRequest approves or rejects a pending request.
 	ReviewQuotaChangeRequest(context.Context, *ReviewQuotaChangeRequestRequest) (*v1.IdempotentResult, error)
+	// UpdateTenantQuotaDirect writes tenant quota directly (BOSS fast path, no approval).
+	UpdateTenantQuotaDirect(context.Context, *UpdateTenantQuotaDirectRequest) (*UpdateTenantQuotaDirectResponse, error)
 	// ListTenantLifecycle returns tenant lifecycle entries.
 	ListTenantLifecycle(context.Context, *ListTenantLifecycleRequest) (*ListTenantLifecycleResponse, error)
 	// ListTenantAuditLogs returns tenant-scoped audit logs.
@@ -937,6 +951,9 @@ func (UnimplementedTenantServiceServer) ListQuotaChangeRequests(context.Context,
 }
 func (UnimplementedTenantServiceServer) ReviewQuotaChangeRequest(context.Context, *ReviewQuotaChangeRequestRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReviewQuotaChangeRequest not implemented")
+}
+func (UnimplementedTenantServiceServer) UpdateTenantQuotaDirect(context.Context, *UpdateTenantQuotaDirectRequest) (*UpdateTenantQuotaDirectResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTenantQuotaDirect not implemented")
 }
 func (UnimplementedTenantServiceServer) ListTenantLifecycle(context.Context, *ListTenantLifecycleRequest) (*ListTenantLifecycleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTenantLifecycle not implemented")
@@ -1266,6 +1283,24 @@ func _TenantService_ReviewQuotaChangeRequest_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TenantService_UpdateTenantQuotaDirect_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTenantQuotaDirectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).UpdateTenantQuotaDirect(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_UpdateTenantQuotaDirect_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).UpdateTenantQuotaDirect(ctx, req.(*UpdateTenantQuotaDirectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TenantService_ListTenantLifecycle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListTenantLifecycleRequest)
 	if err := dec(in); err != nil {
@@ -1394,6 +1429,10 @@ var TenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReviewQuotaChangeRequest",
 			Handler:    _TenantService_ReviewQuotaChangeRequest_Handler,
+		},
+		{
+			MethodName: "UpdateTenantQuotaDirect",
+			Handler:    _TenantService_UpdateTenantQuotaDirect_Handler,
 		},
 		{
 			MethodName: "ListTenantLifecycle",

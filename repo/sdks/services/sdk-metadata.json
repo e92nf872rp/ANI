@@ -827,6 +827,12 @@
       "scope": ""
     },
     {
+      "operationId": "updateTenantQuotaDirect",
+      "method": "PUT",
+      "path": "/tenants/{tenantId}/quota",
+      "scope": ""
+    },
+    {
       "operationId": "listQuotaChangeRequests",
       "method": "GET",
       "path": "/tenants/{tenantId}/quota-requests",
@@ -991,8 +997,10 @@
     "TenantPlanListItem",
     "TenantPlanListResponse",
     "TenantPlanStateChangeRequest",
+    "TenantQuotaTotalInput",
     "TenantQuotaViewItem",
     "TenantQuotaViewResponse",
+    "TenantQuotaWriteItem",
     "TenantRef",
     "TenantRole",
     "UpdateInferenceServicePoliciesRequest",
@@ -1005,6 +1013,8 @@
     "UpdateSsoConfigRequest",
     "UpdateTenantMfaRequest",
     "UpdateTenantPlanRequest",
+    "UpdateTenantQuotaDirectRequest",
+    "UpdateTenantQuotaDirectResponse",
     "UpdateTenantRequest",
     "UpdateTenantRoleRequest",
     "UpdateTenantSsoRequest",
@@ -1065,6 +1075,7 @@
     "disableTenant",
     "freezeTenant",
     "bindTenantPlan",
+    "updateTenantQuotaDirect",
     "submitQuotaChangeRequest",
     "reviewQuotaChangeRequest",
     "unfreezeTenant"

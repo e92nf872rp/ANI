@@ -1456,6 +1456,42 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/TenantQuotaViewItem' } }
 
+    UpdateTenantQuotaDirectRequest:
+      type: object
+      required: [idempotency_key, items]
+      description: "直接修改租户配额请求；idempotency_key 也可通过 Idempotency-Key 请求头传递"
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          description: "批内 resource_type 不可重复"
+          items: { $ref: '#/components/schemas/TenantQuotaTotalInput' }
+
+    TenantQuotaTotalInput:
+      type: object
+      required: [resource_type, total]
+      properties:
+        resource_type: { type: string, pattern: '^[a-z0-9_]{2,40}$' }
+        total:         { type: integer, format: int64, minimum: 0 }
+
+    TenantQuotaWriteItem:
+      type: object
+      required: [resource_type, total, used, reserved, tightened]
+      properties:
+        resource_type: { type: string }
+        total:         { type: integer, format: int64, minimum: 0, description: "生效后的值；收紧时为 used+reserved" }
+        used:          { type: integer, format: int64, minimum: 0 }
+        reserved:      { type: integer, format: int64, minimum: 0 }
+        tightened:     { type: boolean, description: "请求值低于当前占用时 Core 自动收紧" }
+
+    UpdateTenantQuotaDirectResponse:
+      type: object
+      required: [tenant_id, items]
+      properties:
+        tenant_id: { type: string, format: uuid }
+        items: { type: array, items: { $ref: '#/components/schemas/TenantQuotaWriteItem' } }
+
     QuotaChangeRequestInput:
       type: object
       required: [resource_type, new_value]
@@ -4301,6 +4337,40 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+    put:
+      operationId: updateTenantQuotaDirect
+      summary: 直接修改租户配额（需 platform-admin / platform-ops）
+      description: |
+        跳过配额变更审批流，立即生效。upsert 语义：维度已有配额行则修改 total，无则新建。
+        先校验维度启用，再经 tenant-service 调 Core quota/upsert；total 低于 used+reserved 时自动收紧并返回 tightened=true。
+      tags: [Tenants]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: update
+        boundary: platform
+        principal_kinds: [user]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantQuotaDirectRequest' }
+      responses:
+        "200":
+          description: 租户配额已直接修改；tightened=true 表示 Core 自动收紧
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpdateTenantQuotaDirectResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID（disabled 不可改）/ IDEMPOTENCY_KEY_REUSED" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "QUOTA_RESOURCE_NOT_REGISTERED" }
         "502": { $ref: '#/components/responses/BadGateway' }
 
   /tenants/{tenantId}/quota-requests:

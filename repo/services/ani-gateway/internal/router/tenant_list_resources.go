@@ -46,6 +46,7 @@ func registerTenantListWithClient(svc *route.RouterGroup, client tenantv1.Tenant
 	svc.POST("/tenants/:tenantId/auth/sso/test", api.testTenantSso)
 	svc.PUT("/tenants/:tenantId/auth/mfa", api.updateTenantMfa)
 	svc.GET("/tenants/:tenantId/quota", api.getTenantQuota)
+	svc.PUT("/tenants/:tenantId/quota", api.updateTenantQuotaDirect)
 	svc.GET("/tenants/:tenantId/quota-requests", api.listQuotaChangeRequests)
 	svc.POST("/tenants/:tenantId/quota-requests", api.submitQuotaChangeRequest)
 	svc.POST("/tenants/:tenantId/quota-requests/:reqId/approve", api.reviewQuotaChangeRequest)
@@ -407,6 +408,64 @@ func (api *tenantListAPI) getTenantQuota(ctx context.Context, c *app.RequestCont
 		})
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
+func (api *tenantListAPI) updateTenantQuotaDirect(ctx context.Context, c *app.RequestContext) {
+	// 步骤 1：校验 tenant-service gRPC 客户端可用。
+	if api.tenants == nil {
+		writeTenantListError(c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant grpc client unavailable")
+		return
+	}
+	// 步骤 2：绑定请求体；幂等键优先取 body，缺失时兜底 Idempotency-Key 头，最终必须存在。
+	var body struct {
+		IdempotencyKey string `json:"idempotency_key"`
+		Items          []struct {
+			ResourceType string `json:"resource_type"`
+			Total        int64  `json:"total"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(c.Request.Body(), &body); err != nil {
+		writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
+		return
+	}
+	idem := strings.TrimSpace(body.IdempotencyKey)
+	if idem == "" {
+		idem = idempotencyHeader(c)
+	}
+	// 步骤 3：组装 tenant-service gRPC 请求并透传网关上下文。
+	items := make([]*tenantv1.TenantQuotaTotalInput, 0, len(body.Items))
+	for _, item := range body.Items {
+		items = append(items, &tenantv1.TenantQuotaTotalInput{
+			ResourceType: item.ResourceType,
+			Total:        item.Total,
+		})
+	}
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	res, err := api.tenants.UpdateTenantQuotaDirect(callCtx, &tenantv1.UpdateTenantQuotaDirectRequest{
+		TenantId:       c.Param("tenantId"),
+		Items:          items,
+		IdempotencyKey: idem,
+	})
+	if err != nil {
+		mapTenantListError(c, err)
+		return
+	}
+	// 步骤 4：透传 Core 生效后的 total/used/reserved 与 tightened 结果。
+	quotaItems := make([]map[string]any, 0, len(res.GetItems()))
+	for _, item := range res.GetItems() {
+		quotaItems = append(quotaItems, map[string]any{
+			"resource_type": item.GetResourceType(),
+			"total":         item.GetTotal(),
+			"used":          item.GetUsed(),
+			"reserved":      item.GetReserved(),
+			"tightened":     item.GetTightened(),
+		})
+	}
+	c.JSON(http.StatusOK, map[string]any{
+		"tenant_id": c.Param("tenantId"),
+		"items":     quotaItems,
+	})
 }
 
 func (api *tenantListAPI) listQuotaChangeRequests(ctx context.Context, c *app.RequestContext) {

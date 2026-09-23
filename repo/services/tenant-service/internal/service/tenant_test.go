@@ -1287,6 +1287,190 @@ func quotaChangeCtx(actorID, requestID uuid.UUID) context.Context {
 	))
 }
 
+func tenantQuotaDirectCtx(actorID uuid.UUID) context.Context {
+	return metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"x-request-id", uuid.NewString(),
+		"x-user-id", actorID.String(),
+	))
+}
+
+func TestTenantService_UpdateTenantQuotaDirect_HappyPathWithTightened(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	actorID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	quota := &fakeQuotaClient{
+		meta: []ports.QuotaMeta{
+			{ResourceType: "gpu_count", Enabled: true},
+			{ResourceType: "cpu_core", Enabled: true},
+		},
+		upsertFn: func(_ context.Context, _ uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
+			return []ports.CoreQuotaResult{
+				{ResourceType: "gpu_count", Total: 3, Used: 2, Reserved: 1, Tightened: true},
+				{ResourceType: "cpu_core", Total: 16, Used: 2, Reserved: 0},
+			}, nil
+		},
+	}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive}}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, tenants, nil, quota, nil, audit, nil, nil, nil, nil)
+
+	res, err := svc.UpdateTenantQuotaDirect(tenantQuotaDirectCtx(actorID), &tenantv1.UpdateTenantQuotaDirectRequest{
+		TenantId: tenantID.String(),
+		Items: []*tenantv1.TenantQuotaTotalInput{
+			{ResourceType: "gpu_count", Total: 1},
+			{ResourceType: "cpu_core", Total: 16},
+		},
+		IdempotencyKey: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("UpdateTenantQuotaDirect: %v", err)
+	}
+	if quota.upsertCalls != 1 || len(quota.upsertItems) != 2 || quota.upsertItems[0].Total != 1 {
+		t.Fatalf("upsertCalls=%d items=%+v", quota.upsertCalls, quota.upsertItems)
+	}
+	if len(res.GetItems()) != 2 || res.GetItems()[0].Total != 3 || !res.GetItems()[0].GetTightened() {
+		t.Fatalf("res=%+v", res)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "tenant.quota_update_direct" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if audit.logs[0].Details["updated_by"] != actorID.String() || fmt.Sprint(audit.logs[0].Details["tightened"]) != "[gpu_count]" {
+		t.Fatalf("details=%+v", audit.logs[0].Details)
+	}
+}
+
+func TestTenantService_UpdateTenantQuotaDirect_FrozenAllowedAndDisabledRejected(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	quota := &fakeQuotaClient{meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}}}
+	frozen := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusFrozen}}
+	frozenSvc := NewTenantService(nil, frozen, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil, nil)
+	if _, err := frozenSvc.UpdateTenantQuotaDirect(context.Background(), &tenantv1.UpdateTenantQuotaDirectRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.TenantQuotaTotalInput{{ResourceType: "gpu_count", Total: 8}},
+	}); err != nil {
+		t.Fatalf("frozen tenant should be allowed: %v", err)
+	}
+
+	disabled := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusDisabled}}
+	disabledQuota := &fakeQuotaClient{meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}}}
+	audit := &fakeAuditStore{}
+	disabledSvc := NewTenantService(nil, disabled, nil, disabledQuota, nil, audit, nil, nil, nil, nil)
+	_, err := disabledSvc.UpdateTenantQuotaDirect(context.Background(), &tenantv1.UpdateTenantQuotaDirectRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.TenantQuotaTotalInput{{ResourceType: "gpu_count", Total: 8}},
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.FailedPrecondition || !strings.HasPrefix(st.Message(), "TENANT_STATE_INVALID") {
+		t.Fatalf("want TENANT_STATE_INVALID, got %v", err)
+	}
+	if disabledQuota.upsertCalls != 0 || len(audit.logs) != 1 || audit.logs[0].Result != "failure" {
+		t.Fatalf("quota=%+v audit=%+v", disabledQuota, audit.logs)
+	}
+}
+
+func TestTenantService_UpdateTenantQuotaDirect_TenantNotFound(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	quota := &fakeQuotaClient{meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}}}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, &fakeTenantClient{}, nil, quota, nil, audit, nil, nil, nil, nil)
+
+	_, err := svc.UpdateTenantQuotaDirect(context.Background(), &tenantv1.UpdateTenantQuotaDirectRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.TenantQuotaTotalInput{{ResourceType: "gpu_count", Total: 8}},
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.NotFound || !strings.Contains(st.Message(), "TENANT_NOT_FOUND") {
+		t.Fatalf("want TENANT_NOT_FOUND, got %v", err)
+	}
+	if quota.upsertCalls != 0 || len(audit.logs) != 1 || audit.logs[0].Result != "failure" {
+		t.Fatalf("quota=%+v audit=%+v", quota, audit.logs)
+	}
+}
+
+func TestTenantService_UpdateTenantQuotaDirect_CoreFailure(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	quota := &fakeQuotaClient{
+		meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}},
+		upsertFn: func(context.Context, uuid.UUID, []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
+			return nil, ports.ErrCoreUnavailable
+		},
+	}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive}}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, tenants, nil, quota, nil, audit, nil, nil, nil, nil)
+
+	_, err := svc.UpdateTenantQuotaDirect(context.Background(), &tenantv1.UpdateTenantQuotaDirectRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.TenantQuotaTotalInput{{ResourceType: "gpu_count", Total: 8}},
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.Unavailable || !strings.Contains(st.Message(), "GRPC_CLIENT_UNAVAILABLE") {
+		t.Fatalf("want GRPC_CLIENT_UNAVAILABLE, got %v", err)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Result != "failure" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+}
+
+func TestTenantService_UpdateTenantQuotaDirect_ValidationAndMeta(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	cases := []struct {
+		name  string
+		meta  []ports.QuotaMeta
+		items []*tenantv1.TenantQuotaTotalInput
+		code  codes.Code
+		want  string
+	}{
+		{
+			name: "empty items",
+			code: codes.InvalidArgument,
+			want: "VALIDATION_FAILED",
+		},
+		{
+			name: "duplicate resource type",
+			meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}},
+			items: []*tenantv1.TenantQuotaTotalInput{
+				{ResourceType: "gpu_count", Total: 1},
+				{ResourceType: "gpu_count", Total: 2},
+			},
+			code: codes.InvalidArgument,
+			want: "VALIDATION_FAILED",
+		},
+		{
+			name:  "negative total",
+			meta:  []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}},
+			items: []*tenantv1.TenantQuotaTotalInput{{ResourceType: "gpu_count", Total: -1}},
+			code:  codes.InvalidArgument,
+			want:  "VALIDATION_FAILED",
+		},
+		{
+			name:  "resource disabled",
+			meta:  []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: false}},
+			items: []*tenantv1.TenantQuotaTotalInput{{ResourceType: "gpu_count", Total: 1}},
+			code:  codes.FailedPrecondition,
+			want:  "QUOTA_RESOURCE_NOT_REGISTERED",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			quota := &fakeQuotaClient{meta: testCase.meta}
+			tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive}}
+			audit := &fakeAuditStore{}
+			svc := NewTenantService(nil, tenants, nil, quota, nil, audit, nil, nil, nil, nil)
+			_, err := svc.UpdateTenantQuotaDirect(context.Background(), &tenantv1.UpdateTenantQuotaDirectRequest{
+				TenantId: tenantID.String(),
+				Items:    testCase.items,
+			})
+			st, _ := status.FromError(err)
+			if st.Code() != testCase.code || !strings.Contains(st.Message(), testCase.want) {
+				t.Fatalf("want %s, got %v", testCase.want, err)
+			}
+			if quota.upsertCalls != 0 || len(audit.logs) != 1 || audit.logs[0].Result != "failure" {
+				t.Fatalf("quota=%+v audit=%+v", quota, audit.logs)
+			}
+		})
+	}
+}
+
 func TestTenantService_SubmitQuotaChangeRequest_HappyPath(t *testing.T) {
 	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	actorID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")

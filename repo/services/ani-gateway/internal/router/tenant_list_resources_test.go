@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -20,8 +21,10 @@ import (
 
 type fakeTenantListGRPC struct {
 	tenantv1.TenantServiceClient
-	detailResp *tenantv1.TenantDetail
-	detailErr  error
+	detailResp     *tenantv1.TenantDetail
+	detailErr      error
+	quotaDirectReq *tenantv1.UpdateTenantQuotaDirectRequest
+	quotaDirectErr error
 }
 
 func (f *fakeTenantListGRPC) ListAvailablePlans(context.Context, *tenantv1.ListAvailablePlansRequest, ...grpc.CallOption) (*tenantv1.ListAvailablePlansResponse, error) {
@@ -69,6 +72,18 @@ func (f *fakeTenantListGRPC) UpdateTenantMfa(context.Context, *tenantv1.UpdateTe
 func (f *fakeTenantListGRPC) GetTenantQuota(context.Context, *tenantv1.GetTenantQuotaRequest, ...grpc.CallOption) (*tenantv1.GetTenantQuotaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "NOT_IMPLEMENTED")
 }
+func (f *fakeTenantListGRPC) UpdateTenantQuotaDirect(_ context.Context, req *tenantv1.UpdateTenantQuotaDirectRequest, _ ...grpc.CallOption) (*tenantv1.UpdateTenantQuotaDirectResponse, error) {
+	f.quotaDirectReq = req
+	if f.quotaDirectErr != nil {
+		return nil, f.quotaDirectErr
+	}
+	if f.quotaDirectReq != nil {
+		return &tenantv1.UpdateTenantQuotaDirectResponse{Items: []*tenantv1.TenantQuotaWriteItem{{
+			ResourceType: "gpu_count", Total: 2, Used: 2, Reserved: 0, Tightened: true,
+		}}}, nil
+	}
+	return nil, status.Error(codes.Unimplemented, "NOT_IMPLEMENTED")
+}
 func (f *fakeTenantListGRPC) SubmitQuotaChangeRequest(context.Context, *tenantv1.SubmitQuotaChangeRequestRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
 	return nil, status.Error(codes.Unimplemented, "NOT_IMPLEMENTED")
 }
@@ -98,7 +113,7 @@ func newTenantListTestServer(client tenantv1.TenantServiceClient) *server.Hertz 
 	return h
 }
 
-func TestTenantListRoutes_RegisterNineteen(t *testing.T) {
+func TestTenantListRoutes_RegisterTwenty(t *testing.T) {
 	t.Setenv("ANI_AUTH_MODE", "dev")
 	h := newTenantListTestServer(&fakeTenantListGRPC{})
 	tenantID := "11111111-1111-1111-1111-111111111111"
@@ -120,6 +135,7 @@ func TestTenantListRoutes_RegisterNineteen(t *testing.T) {
 		{http.MethodPost, "/api/v1/svc/tenants/" + tenantID + "/auth/sso/test"},
 		{http.MethodPut, "/api/v1/svc/tenants/" + tenantID + "/auth/mfa"},
 		{http.MethodGet, "/api/v1/svc/tenants/" + tenantID + "/quota"},
+		{http.MethodPut, "/api/v1/svc/tenants/" + tenantID + "/quota"},
 		{http.MethodGet, "/api/v1/svc/tenants/" + tenantID + "/quota-requests"},
 		{http.MethodPost, "/api/v1/svc/tenants/" + tenantID + "/quota-requests"},
 		{http.MethodPost, "/api/v1/svc/tenants/" + tenantID + "/quota-requests/" + reqID + "/approve"},
@@ -127,14 +143,79 @@ func TestTenantListRoutes_RegisterNineteen(t *testing.T) {
 		{http.MethodGet, "/api/v1/svc/tenants/" + tenantID + "/audit-logs"},
 		{http.MethodGet, "/api/v1/svc/tenants/" + tenantID + "/admins"},
 	}
-	if len(paths) != 19 {
-		t.Fatalf("want 19 routes, got %d", len(paths))
+	if len(paths) != 20 {
+		t.Fatalf("want 20 routes, got %d", len(paths))
 	}
 	for _, tc := range paths {
 		resp := ut.PerformRequest(h.Engine, tc.method, tc.path, nil)
 		if resp.Code == http.StatusNotFound {
 			t.Fatalf("%s %s not registered (404)", tc.method, tc.path)
 		}
+	}
+}
+
+func TestTenantListRoutes_UpdateTenantQuotaDirect(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	idempotencyKey := "22222222-2222-4222-8222-222222222222"
+	client := &fakeTenantListGRPC{}
+	h := newTenantListTestServer(client)
+	body := `{"items":[{"resource_type":"gpu_count","total":1}],"idempotency_key":"` + idempotencyKey + `"}`
+	resp := ut.PerformRequest(
+		h.Engine,
+		http.MethodPut,
+		"/api/v1/svc/tenants/"+tenantID+"/quota",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var responseBody map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &responseBody); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if responseBody["tenant_id"] != tenantID {
+		t.Fatalf("tenant_id=%v", responseBody["tenant_id"])
+	}
+	items, ok := responseBody["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("items=%#v", responseBody["items"])
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok || item["total"] != float64(2) || item["used"] != float64(2) || item["tightened"] != true {
+		t.Fatalf("item=%#v", items[0])
+	}
+	if client.quotaDirectReq.GetTenantId() != tenantID || client.quotaDirectReq.GetIdempotencyKey() != idempotencyKey {
+		t.Fatalf("request=%+v", client.quotaDirectReq)
+	}
+	if len(client.quotaDirectReq.GetItems()) != 1 || client.quotaDirectReq.GetItems()[0].GetTotal() != 1 {
+		t.Fatalf("items=%+v", client.quotaDirectReq.GetItems())
+	}
+}
+
+func TestTenantListRoutes_UpdateTenantQuotaDirectRequiresIdempotencyKey(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	client := &fakeTenantListGRPC{}
+	h := newTenantListTestServer(client)
+	body := `{"items":[{"resource_type":"gpu_count","total":1}]}`
+	resp := ut.PerformRequest(
+		h.Engine,
+		http.MethodPut,
+		"/api/v1/svc/tenants/"+tenantID+"/quota",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var responseBody map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &responseBody); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if responseBody["code"] != "VALIDATION_FAILED" || client.quotaDirectReq != nil {
+		t.Fatalf("body=%#v request=%+v", responseBody, client.quotaDirectReq)
 	}
 }
 
