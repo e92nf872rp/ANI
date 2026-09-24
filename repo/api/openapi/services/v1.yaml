@@ -1564,9 +1564,10 @@ components:
 
     PlatformAdminListItem:
       type: object
-      required: [id, username, display_name, role_id, role, status, source]
+      required: [id, email, username, display_name, role_id, role, status, source]
       properties:
         id:           { type: string, format: uuid }
+        email:        { type: string, format: email }
         username:     { type: string }
         display_name: { type: string }
         role_id:      { type: string, format: uuid, description: "当前绑定平台角色 id" }

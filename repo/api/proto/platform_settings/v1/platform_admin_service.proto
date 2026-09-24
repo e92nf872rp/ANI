@@ -110,6 +110,7 @@ message PlatformAdminListItem {
   string source = 6;
   google.protobuf.Timestamp last_login_at = 7;
   string role_id = 8;
+  string email = 9;
 }
 
 message PlatformAdminDetail {

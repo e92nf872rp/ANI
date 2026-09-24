@@ -334,7 +334,7 @@ func TestListPlatformAdmins_Success(t *testing.T) {
 	core := &fakeCoreClient{
 		listRes: ports.PlatformUserListDTO{
 			Items: []ports.PlatformUserDTO{{
-				ID: "11111111-1111-1111-1111-111111111111", Username: "local:ops",
+				ID: "11111111-1111-1111-1111-111111111111", Email: "ops@ani.io", Username: "local:ops",
 				DisplayName: &dn, RoleID: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local",
 				LastLoginAt: &last,
 			}},
@@ -357,6 +357,9 @@ func TestListPlatformAdmins_Success(t *testing.T) {
 	}
 	if res.Items[0].Username != "ops" || res.Items[0].Source != "local" {
 		t.Fatalf("item username/source unexpected: %+v", res.Items[0])
+	}
+	if res.Items[0].Email != "ops@ani.io" {
+		t.Fatalf("item email unexpected: %+v", res.Items[0])
 	}
 }
 

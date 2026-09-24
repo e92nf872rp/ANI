@@ -633,14 +633,14 @@ users (tenant_id IS NULL = 平台运营账号)
 
 #### GET /svc/platform-admins — 列表
 
-**Query:** `limit`(default 20, max 100) / `cursor` / `role`(platform-admin|platform-ops|platform-readonly) / `status`(active|disabled) / `source`(local|oidc) / `search`(email|username 模糊)
+**Query:** `limit`(default 20, max 100) / `cursor` / `role`(platform-admin|platform-ops|platform-readonly) / `status`(active|disabled) / `source`(local|oidc) / `search`(username 模糊，不含 local:/oidc: 前缀)
 
 **Response 200 (CursorPage):**
 ```json
 {
   "items": [
     {
-      "id": "uuid", "username": "platform_admin", "display_name": "平台管理员",
+      "id": "uuid", "email": "admin@ani.io", "username": "platform_admin", "display_name": "平台管理员",
       "role": "platform-admin", "status": "active", "source": "local",
       "last_login_at": "2026-08-18T10:00:00Z"
     }
@@ -648,7 +648,7 @@ users (tenant_id IS NULL = 平台运营账号)
   "next_cursor": "cursor-string"
 }
 ```
-> items 每项不含 email（仅详情返回）；source 推断：`oidc:` → third_party，`local:` → local。
+> items 每项含 email；search 仅匹配对外 username，不按 email 搜索；source 推断：`oidc:` → third_party，`local:` → local。
 
 #### GET /svc/platform-admins/roles — 可变更角色与权限矩阵
 
@@ -785,11 +785,11 @@ users (tenant_id IS NULL = 平台运营账号)
   可选: AND status=$status
   可选: source='local' → AND username LIKE 'local:%'
         source='oidc'  → AND username LIKE 'oidc:%'
-  可选: AND (email ILIKE '%search%' OR username ILIKE '%search%')
+  可选: AND REGEXP_REPLACE(username, '^(local:|oidc:)', '') ILIKE '%search%'
   ORDER BY created_at DESC, id DESC
   游标分页（limit + cursor，多取 1 条判断 next_cursor）
   source 推断: 'oidc:' → third_party, 'local:' → local
-返回 items[]（不含 email）+ next_cursor
+返回 items[]（含 email）+ next_cursor
 ```
 
 #### 5.1.3 Get（详情，US-003）

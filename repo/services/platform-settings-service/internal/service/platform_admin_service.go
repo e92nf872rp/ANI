@@ -124,7 +124,7 @@ func (s *PlatformAdminService) ListPlatformAdmins(ctx context.Context, req *plat
 	if err != nil {
 		return nil, mapDomainError(err)
 	}
-	// 步骤 4：映射列表项（不含 email；剥 username 前缀；source 推断）
+	// 步骤 4：映射列表项（透传 email；剥 username 前缀；source 推断）
 	items := make([]*platformsettingsv1.PlatformAdminListItem, 0, len(res.Items))
 	for _, it := range res.Items {
 		items = append(items, toPlatformAdminListItem(it))
@@ -507,6 +507,7 @@ func toPlatformAdminAuditLog(it ports.AuditLog) (*platformsettingsv1.PlatformAdm
 func toPlatformAdminListItem(it ports.PlatformUserDTO) *platformsettingsv1.PlatformAdminListItem {
 	item := &platformsettingsv1.PlatformAdminListItem{
 		Id:       it.ID,
+		Email:    it.Email,
 		Username: stripPlatformUsernamePrefix(it.Username),
 		RoleId:   it.RoleID,
 		Role:     it.Role,

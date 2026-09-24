@@ -273,7 +273,7 @@ func TestPlatformAdmins_ListForwardParams(t *testing.T) {
 	fake := &fakePlatformAdminClient{
 		listResp: &platformsettingsv1.ListPlatformAdminsResponse{
 			Items: []*platformsettingsv1.PlatformAdminListItem{
-				{Id: "u1", Username: "local:ops", RoleId: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local"},
+				{Id: "u1", Email: "ops@ani.io", Username: "local:ops", RoleId: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local"},
 			},
 			NextCursor: "n1",
 		},
@@ -293,6 +293,9 @@ func TestPlatformAdmins_ListForwardParams(t *testing.T) {
 	}
 	if payload["next_cursor"] != "n1" {
 		t.Fatalf("payload=%v", payload)
+	}
+	if items, _ := payload["items"].([]any); len(items) != 1 || items[0].(map[string]any)["email"] != "ops@ani.io" {
+		t.Fatalf("payload items=%v", payload["items"])
 	}
 }
 
@@ -403,7 +406,7 @@ func TestHandler_CreateFlow(t *testing.T) {
 	fake := &fakePlatformAdminClient{
 		listResp: &platformsettingsv1.ListPlatformAdminsResponse{
 			Items: []*platformsettingsv1.PlatformAdminListItem{
-				{Id: id, Username: "ops", DisplayName: "Ops", RoleId: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local"},
+				{Id: id, Email: "ops@ani.io", Username: "ops", DisplayName: "Ops", RoleId: "00000000-0000-0000-0000-000000000006", Role: "platform-ops", Status: "active", Source: "local"},
 			},
 		},
 		getResp: &platformsettingsv1.PlatformAdminDetail{
@@ -440,13 +443,13 @@ func TestHandler_CreateFlow(t *testing.T) {
 		t.Fatalf("list=%v", listed)
 	}
 	first, _ := items[0].(map[string]any)
-	if _, hasEmail := first["email"]; hasEmail {
-		t.Fatalf("list item must not include email: %v", first)
-	}
-	for _, key := range []string{"id", "username", "display_name", "role_id", "role", "status", "source"} {
+	for _, key := range []string{"id", "email", "username", "display_name", "role_id", "role", "status", "source"} {
 		if first[key] == nil || first[key] == "" {
 			t.Fatalf("missing list field %s: %v", key, first)
 		}
+	}
+	if first["email"] != "ops@ani.io" {
+		t.Fatalf("email=%v", first["email"])
 	}
 	if first["username"] != "ops" {
 		t.Fatalf("username=%v", first["username"])

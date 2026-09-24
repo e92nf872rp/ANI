@@ -182,7 +182,7 @@ flowchart LR
 |--------|--------|---------|-------|
 | 列表 | page header | 标题「平台运营账号」+ 副标题「管理可登录 BOSS 的平台运营账号，与租户管理员严格分离」+ 主操作「新建运营账号」按钮 | 仅 platform-admin 可见 |
 | 列表 | toolbar | `Input` 关键字（email/username 模糊）+ `Select` 状态（active/disabled）+ `Select` 角色（platform-admin/ops/readonly）+ `Select` 来源（本地/第三方）+ 搜索/重置按钮 | 来源「第三方」对应 oidc 前缀；P0 仅存在本地账号 |
-| 列表 | table | 列：用户名(username) / 显示名(display_name) / 角色(Tag) / 状态(Tag) / 来源 / 最近登录 / 操作 | 列来源对齐 `GET /platform-admins` items 字段；**无 email 列**（email 仅详情返回）；**无 MFA 列**（PRD 未定义） |
+| 列表 | table | 列：用户名(username) / 显示名(display_name) / 邮箱(email) / 角色(Tag) / 状态(Tag) / 来源 / 最近登录 / 操作 | 列来源对齐 `GET /platform-admins` items 字段；列表返回并展示 email；**无 MFA 列**（PRD 未定义） |
 | 列表 | 操作列 | 「详情」常驻 +「重置密码」+「改角色」+ 禁用→「禁用」/ disabled→「启用」；「更多」下拉含「删除」 | 4 个直接行操作 + 1 个下拉项 |
 | 列表 | pagination | `Pagination` 上一页/下一页，由 next_cursor 驱动 | limit 默认 20 |
 
@@ -519,7 +519,7 @@ flowchart LR
 - **平台账号 SSO/OIDC 集成** — PRD Non-Goal；来源列保留「第三方」展示位但 P0 仅存在本地账号
 - **新建 platform_admins 表** — 后端复用 users 表（tenant_id IS NULL），前端不感知表结构
 - **MFA 状态列** — PRD 未定义 MFA 字段，列表与详情均不展示 MFA（与租户管理员 UX 不同）
-- **email 列** — 列表 items 不含 email（仅详情返回），列表不展示 email 列
+- **email 搜索** — 列表返回并展示 email，但 P0 搜索仍仅匹配 username；email 模糊搜索未定义
 - **导出** — 原型「导出」次级操作，PRD/plan 未定义导出接口，不纳入
 - **运维演示能力** — 原型「模拟登录 / 模拟设密」为演示用，不实现
 - 租户管理员管理 — 属「租户管理 → 租户管理员」，与本页严格分离
