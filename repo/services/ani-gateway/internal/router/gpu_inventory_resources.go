@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -38,10 +37,12 @@ type gpuInventoryAPI struct {
 
 // gpuPodOccupancy is the minimal info extracted from a K8s Pod for GPU
 // inventory ownership echo: the instance name (from label
-// ani.kubercloud.io/instance), the node name (spec.nodeName), and the pod
-// phase. Only Running pods with non-empty node and instance name produce
-// an occupancy entry.
+// ani.kubercloud.io/instance), the node name (spec.nodeName), the pod
+// phase, and the owning tenant (from label ani.kubercloud.io/tenant-id,
+// needed for the platform-scope cross-tenant view). Only Running pods with
+// non-empty node and instance name produce an occupancy entry.
 type gpuPodOccupancy struct {
+	TenantID     string
 	InstanceName string
 	NodeName     string
 	Phase        string
@@ -699,45 +700,77 @@ func (m gpuNodeOccupancyMap) lookup(nodeName string) (gpuNodeOccupancyEntry, boo
 	return entry, ok
 }
 
-// gpuNodeOccupancy 查询本租户在 K8s 集群中所有 GPU 容器实例对应的 Pod，
-// 构建 nodeName → 归属实例 映射。不依赖 InstanceStore——直接从 K8s API 查
+// gpuNodeOccupancy 查询 K8s 集群中的 GPU 容器实例 Pod，构建
+// nodeName → 归属实例 映射。不依赖 InstanceStore——直接从 K8s API 查
 // Pod label ani.kubercloud.io/instance + spec.nodeName。
 //
 // 数据来源：
-//   - K8s Pod（按 ani.kubercloud.io/tenant-id=<tenant> label 过滤）
+//   - K8s Pod（租户 token 按 ani.kubercloud.io/tenant-id=<tenant> label 过滤；
+//     平台 token 无租户上下文，按跨租户口径统计全部 ani-tenant-* 命名空间）
 //   - Pod label ani.kubercloud.io/instance 作为实例名（回显到 instance_id 字段）
 //   - Pod spec.nodeName 作为节点名
 //
-// InstanceStore 中的正式实例（inst_xxx）会与 Pod 反查结果合并；
-// orphan Pod（不在 InstanceStore 中的）用 deployment 名作为 instance_id。
 // 同节点多实例时取字典序最小的 instance_id，保证稳定。
 //
 // 没有 k8sClient 注入时返回空 map，行为等同于旧的硬编码 nil。
 func (api *gpuInventoryAPI) gpuNodeOccupancy(ctx context.Context, c *app.RequestContext) gpuNodeOccupancyMap {
-	tenantID := middleware.GetTenantID(c)
-	if strings.TrimSpace(tenantID) == "" {
-		tenantID = "demo-tenant"
+	return api.gpuNodeOccupancyForRequest(ctx, middleware.GetTenantID(c))
+}
+
+// gpuNodeOccupancyForRequest 按 tenant_id 取值分派视角：平台占位值（空串 /
+// 全零 UUID）走跨租户口径，其余走租户命名空间口径。
+func (api *gpuInventoryAPI) gpuNodeOccupancyForRequest(ctx context.Context, tenantID string) gpuNodeOccupancyMap {
+	// 平台 token（scope=platform）没有租户上下文，此处不得回退到占位租户名——
+	// 那会去查一个不存在的命名空间，把平台视角的 in_use 算成 0（"全部空闲"），
+	// 与 GET /platform/capacity 的跨租户 gpu_free 直接矛盾。
+	if platformScopeTenant(tenantID) {
+		return api.gpuNodeOccupancyForPlatform(ctx)
 	}
 	return api.gpuNodeOccupancyForTenant(ctx, tenantID)
+}
+
+// platformScopeTenant 判断 tenant_id 是否表示「无租户上下文」。平台 token 的
+// tenant_id 由 auth-service 置为 uuid.Nil，网关侧呈现为空串或全零 UUID。
+func platformScopeTenant(tenantID string) bool {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return true
+	}
+	id, err := uuid.Parse(tenantID)
+	return err == nil && id == uuid.Nil
 }
 
 // gpuNodeOccupancyForTenant 按显式租户构建 occupancy 映射；tenantID 为空时
 // 返回空 map（平台台账路径无租户上下文，in_use 标记由 Pod 归属之外的状态承载）。
 func (api *gpuInventoryAPI) gpuNodeOccupancyForTenant(ctx context.Context, tenantID string) gpuNodeOccupancyMap {
-	empty := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}
 	if strings.TrimSpace(tenantID) == "" {
-		return empty
+		return gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}
 	}
-	// 获取 Pod 占用列表：测试时用注入的 fetcher，生产时查 K8s API。
-	var pods []gpuPodOccupancy
+	return gpuNodeOccupancyMapFromPods(api.collectPodOccupancy(ctx, tenantID), tenantID)
+}
+
+// gpuNodeOccupancyForPlatform 跨全部租户命名空间统计 GPU 占用，口径与
+// GET /platform/capacity 的 in_use 一致（平台 token 与租户 token 因此不再矛盾）。
+func (api *gpuInventoryAPI) gpuNodeOccupancyForPlatform(ctx context.Context) gpuNodeOccupancyMap {
+	return gpuNodeOccupancyMapFromPods(api.collectPodOccupancy(ctx, ""), "")
+}
+
+// collectPodOccupancy 取回 Pod 占用列表：测试时用注入的 fetcher，生产时查
+// K8s API（tenantID 为空走集群级跨租户查询）。
+func (api *gpuInventoryAPI) collectPodOccupancy(ctx context.Context, tenantID string) []gpuPodOccupancy {
 	if api.podOccupancyFetcher != nil {
-		pods = api.podOccupancyFetcher(ctx, tenantID)
-	} else if api.k8sClient != nil {
-		pods = api.fetchPodOccupancyFromK8s(ctx, tenantID)
+		return api.podOccupancyFetcher(ctx, tenantID)
 	}
-	if len(pods) == 0 {
-		return empty
+	if api.k8sClient != nil {
+		return api.fetchPodOccupancyFromK8s(ctx, tenantID)
 	}
+	return nil
+}
+
+// gpuNodeOccupancyMapFromPods 聚合 Pod 占用记录：PodCount 是该节点上 Running
+// GPU Pod 数（每个 Pod 占 1 个设备记录）；InstanceID/TenantID 取字典序最小
+// 实例名那条（展示用，保证稳定）。fallbackTenant 用于 Pod 无租户 label 时回填。
+func gpuNodeOccupancyMapFromPods(pods []gpuPodOccupancy, fallbackTenant string) gpuNodeOccupancyMap {
 	entries := make(map[string]gpuNodeOccupancyEntry, len(pods))
 	for _, pod := range pods {
 		instanceName := strings.TrimSpace(pod.InstanceName)
@@ -753,6 +786,10 @@ func (api *gpuInventoryAPI) gpuNodeOccupancyForTenant(ctx context.Context, tenan
 			continue
 		}
 		// 累计同节点的 Running Pod 数量；InstanceID 取字典序最小的（展示用）。
+		podTenant := strings.TrimSpace(pod.TenantID)
+		if podTenant == "" {
+			podTenant = fallbackTenant
+		}
 		if existing, ok := entries[nodeName]; ok {
 			existing.PodCount++
 			if instanceName < existing.InstanceID {
@@ -761,7 +798,7 @@ func (api *gpuInventoryAPI) gpuNodeOccupancyForTenant(ctx context.Context, tenan
 			entries[nodeName] = existing
 		} else {
 			entries[nodeName] = gpuNodeOccupancyEntry{
-				TenantID:   tenantID,
+				TenantID:   podTenant,
 				InstanceID: instanceName,
 				NodeName:   nodeName,
 				PodCount:   1,
@@ -771,43 +808,45 @@ func (api *gpuInventoryAPI) gpuNodeOccupancyForTenant(ctx context.Context, tenan
 	return gpuNodeOccupancyMap{entries: entries}
 }
 
-// fetchPodOccupancyFromK8s 查询 K8s API 获取本租户命名空间下所有带
-// ani.kubercloud.io/tenant-id label 的 Pod，提取 instance name、node name
-// 和 phase 用于 occupancy 构建。
+// fetchPodOccupancyFromK8s 查询 K8s API 获取 GPU 占用 Pod。
+//
+// tenantID 非空为租户视角：查询该租户命名空间下带 tenant-id label 的 Pod。
+// tenantID 为空为平台视角：集群级查询带 tenant-id label 的 Pod，跨全部租户
+// 命名空间统计（与 GET /platform/capacity 的 in_use 口径一致）。
+//
+// 两种视角都经 runtimeadapter.ParseRunningGPUPodOccupancy 过滤，只保留
+// ani-tenant-* 命名空间中真的请求 GPU 扩展资源的 Running Pod——仅凭租户 label
+// 会把 VM virt-launcher、探针、作业 Pod 等 CPU-only 工作负载误算成 GPU 占用。
 func (api *gpuInventoryAPI) fetchPodOccupancyFromK8s(ctx context.Context, tenantID string) []gpuPodOccupancy {
 	if api.k8sClient == nil {
 		return nil
 	}
-	namespace := instanceTenantNamespace(tenantID)
-	selector := url.QueryEscape("ani.kubercloud.io/tenant-id=" + tenantID)
-	endpoint := api.k8sClient.Host() + "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods?labelSelector=" + selector
+	tenantID = strings.TrimSpace(tenantID)
+	var endpoint string
+	if tenantID != "" {
+		selector := url.QueryEscape(runtimeadapter.GPUTenantLabel + "=" + tenantID)
+		endpoint = api.k8sClient.Host() + "/api/v1/namespaces/" + url.PathEscape(instanceTenantNamespace(tenantID)) + "/pods?labelSelector=" + selector
+	} else {
+		selector := url.QueryEscape(runtimeadapter.GPUTenantLabel)
+		endpoint = api.k8sClient.Host() + "/api/v1/pods?labelSelector=" + selector
+	}
 	body, _, err := api.k8sClient.Do(ctx, http.MethodGet, endpoint, "", nil)
-	if err != nil || len(body) == 0 {
+	if err != nil {
 		return nil
 	}
-	var podList struct {
-		Items []struct {
-			Metadata struct {
-				Name   string            `json:"name"`
-				Labels map[string]string `json:"labels"`
-			} `json:"metadata"`
-			Spec struct {
-				NodeName string `json:"nodeName"`
-			} `json:"spec"`
-			Status struct {
-				Phase string `json:"phase"`
-			} `json:"status"`
-		} `json:"items"`
-	}
-	if json.Unmarshal(body, &podList) != nil {
+	records, err := runtimeadapter.ParseRunningGPUPodOccupancy(body)
+	if err != nil {
 		return nil
 	}
-	pods := make([]gpuPodOccupancy, 0, len(podList.Items))
-	for _, pod := range podList.Items {
+	pods := make([]gpuPodOccupancy, 0, len(records))
+	for _, record := range records {
+		// ParseRunningGPUPodOccupancy 已按 Running 过滤，这里回填该 phase
+		// 供上游循环的 phase 判定使用。
 		pods = append(pods, gpuPodOccupancy{
-			InstanceName: pod.Metadata.Labels["ani.kubercloud.io/instance"],
-			NodeName:     pod.Spec.NodeName,
-			Phase:        pod.Status.Phase,
+			TenantID:     record.TenantID,
+			InstanceName: record.InstanceName,
+			NodeName:     record.NodeName,
+			Phase:        "Running",
 		})
 	}
 	return pods
