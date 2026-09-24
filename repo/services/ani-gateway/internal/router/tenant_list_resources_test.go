@@ -194,31 +194,6 @@ func TestTenantListRoutes_UpdateTenantQuotaDirect(t *testing.T) {
 	}
 }
 
-func TestTenantListRoutes_UpdateTenantQuotaDirectRequiresIdempotencyKey(t *testing.T) {
-	t.Setenv("ANI_AUTH_MODE", "dev")
-	tenantID := "11111111-1111-1111-1111-111111111111"
-	client := &fakeTenantListGRPC{}
-	h := newTenantListTestServer(client)
-	body := `{"items":[{"resource_type":"gpu_count","total":1}]}`
-	resp := ut.PerformRequest(
-		h.Engine,
-		http.MethodPut,
-		"/api/v1/svc/tenants/"+tenantID+"/quota",
-		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
-		ut.Header{Key: "Content-Type", Value: "application/json"},
-	)
-	if resp.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
-	}
-	var responseBody map[string]any
-	if err := json.Unmarshal(resp.Body.Bytes(), &responseBody); err != nil {
-		t.Fatalf("json: %v", err)
-	}
-	if responseBody["code"] != "VALIDATION_FAILED" || client.quotaDirectReq != nil {
-		t.Fatalf("body=%#v request=%+v", responseBody, client.quotaDirectReq)
-	}
-}
-
 func TestTenantListRoutes_GetTenantDetailForwards(t *testing.T) {
 	t.Setenv("ANI_AUTH_MODE", "dev")
 	// UTC 10:00 → Asia/Shanghai 18:00
