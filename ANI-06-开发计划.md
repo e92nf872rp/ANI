@@ -23,6 +23,8 @@
 
 > **MODEL-REPOSITORY-REMOTE-IMPORT（2026-09-04）：** 远程模型导入 Task 1–6 及完整性/快照 follow-up 已完成 local/logic verified：Gateway 202 入口、租户隔离/幂等导入任务与 outbox、公共 HTTPS Hugging Face/ModelScope source、ModelScope 根目录遍历与 branch→40-hex commit 解析、确定性 `model.tar.gz`、租约 worker、fetcher 有界安全解压、archive runtime 目录和 real-k8s-lab worker/config contract。remote-import 增量未新增 v1/protobuf 字段；Gateway 通用默认仍为 `main`，ModelScope 仅在 `main` 返回明确空历史时有界回退一次 `master`，随后固定到 40-hex commit。尚未 live；worker/fetcher 镜像 digest、MinIO/PG Secret、mTLS/workload identity、NetworkPolicy 与真实 PG/MinIO/集群验证是前置。记录：[`repo/development-records/model-repository-remote-import.md`](repo/development-records/model-repository-remote-import.md)；不得标 runtime/production ready。
 
+> **METERING-LIFECYCLE-EVENTS-A（2026-09-24，live verified）：** 修复新租户 GPU workload running 后 BOSS 计量恒为 0（`instance_gpu_seconds=0` 且无计量记录）。六层根因：outbox 注入与 `GPU_QUOTA_ENABLED` 耦合、outbox payload 不符合 metering `InstanceLifecycleEvent` 契约、publisher NATS subject 与 metering 订阅 `ani.events.instance.>` 不匹配、payload 无 event_seq、metering `gpu_status` 大写 `"Count"` 解析失败、Reconciler 只停不启。修复跨 gateway/task-service/metering-service 三服务（outbox 写入与配额开关解耦、subject 映射 + event_seq 注入、大写 Count 兼容、Reconciler 双向校准补启动），无契约/DB 迁移/生成物变更。live E2E：GPU 容器创建后 `instance_gpu_seconds=60/period` 正确写入；删除后 outbox 事件 500ms 内发布、metering 事件驱动停止（0.48 秒）。遗留：创建 confirmed 事件在详情轮询场景被 live 状态合成抢先绕过（单独评估）。记录：[`repo/development-records/metering-lifecycle-events-a.md`](repo/development-records/metering-lifecycle-events-a.md)。
+
 ### 文档职责
 
 | 文档 | 职责 | 使用时机 |

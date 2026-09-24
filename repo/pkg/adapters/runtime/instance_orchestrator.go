@@ -34,6 +34,11 @@ type LocalInstanceOrchestrator struct {
 	// (same transaction as Cancel/Release on Apply failure). nil falls back
 	// to the non-transactional store.UpsertStatus.
 	storeTx ports.WorkloadInstanceStoreTx
+	// outboxWriter emits instance lifecycle events inside the same tenant
+	// transaction as the status write (plan.md §6.3.2). nil skips outbox
+	// events. Independent of GPU_QUOTA_ENABLED: metering-service is
+	// event-driven and needs create-time transitions even when quota is off.
+	outboxWriter OutboxWriter
 	// translator converts spec_id to Volcano Pod resource requests, node
 	// selector, schedulerName and queue annotation. This is a Core capability
 	// that must work regardless of GPU_QUOTA_ENABLED (plan.md §4.7: "节点标签
@@ -95,6 +100,15 @@ func WithInstanceOrchestratorStoreTx(storeTx ports.WorkloadInstanceStoreTx) Inst
 func WithInstanceOrchestratorTranslator(translator *VolcanoResourceTranslator) InstanceOrchestratorOption {
 	return func(orchestrator *LocalInstanceOrchestrator) {
 		orchestrator.translator = translator
+	}
+}
+
+// WithInstanceOrchestratorOutboxWriter injects the outbox event writer used to
+// emit lifecycle events inside the same tenant transaction as the status
+// write. Independent of GPU_QUOTA_ENABLED.
+func WithInstanceOrchestratorOutboxWriter(w OutboxWriter) InstanceOrchestratorOption {
+	return func(orchestrator *LocalInstanceOrchestrator) {
+		orchestrator.outboxWriter = w
 	}
 }
 
@@ -328,6 +342,7 @@ func (o *LocalInstanceOrchestrator) persistWithQuotaTransition(ctx context.Conte
 		"quota_tx_ids", record.QuotaTxIDs,
 		"has_tx_quota", o.hasTransactionalQuotaSupport(),
 	)
+	eventType := orchestratorTransitionOutboxEvent(previous, next)
 	if !o.hasTransactionalQuotaSupport() {
 		slog.Warn("persistWithQuotaTransition: no tx quota support, plain UpsertStatus",
 			"instance_id", record.InstanceID,
@@ -341,25 +356,16 @@ func (o *LocalInstanceOrchestrator) persistWithQuotaTransition(ctx context.Conte
 		next == ports.WorkloadStateFailed &&
 		len(record.QuotaTxIDs) > 0
 	if !needsConfirm && !needsCancel {
-		slog.Info("persistWithQuotaTransition: no TCC action, plain UpsertStatus",
+		slog.Info("persistWithQuotaTransition: no TCC action, status + outbox in tx",
 			"instance_id", record.InstanceID,
 			"previous", previous,
 			"next", next,
 			"quota_tx_ids_len", len(record.QuotaTxIDs),
+			"event_type", eventType,
 		)
-		return o.store.UpsertStatus(ctx, record)
 	}
-	action := "Confirm"
-	if needsCancel {
-		action = "Cancel"
-	}
-	slog.Info("persistWithQuotaTransition: executing TCC action in tx",
-		"instance_id", record.InstanceID,
-		"action", action,
-		"quota_tx_ids", record.QuotaTxIDs,
-	)
 	return o.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
-		if o.quotaService != nil {
+		if o.quotaService != nil && (needsConfirm || needsCancel) {
 			if needsConfirm {
 				if err := o.quotaService.Confirm(txCtx, tx, record.QuotaTxIDs, record.InstanceID); err != nil {
 					slog.Error("persistWithQuotaTransition: Confirm failed",
@@ -384,8 +390,28 @@ func (o *LocalInstanceOrchestrator) persistWithQuotaTransition(ctx context.Conte
 				)
 			}
 		}
+		if eventType != "" {
+			writeInstanceOutboxTx(txCtx, tx, o.outboxWriter, eventType, record)
+		}
 		return o.storeTx.UpsertStatusTx(txCtx, tx, record)
 	})
+}
+
+// orchestratorTransitionOutboxEvent maps a create-time status transition to
+// the outbox event_type (plan.md §6.3.2 conventions). Empty string means the
+// transition carries no lifecycle event (e.g. provisioning → provisioning).
+func orchestratorTransitionOutboxEvent(previous, next ports.WorkloadState) string {
+	switch next {
+	case ports.WorkloadStateRunning:
+		if previous == ports.WorkloadStateFailed {
+			return "instance.retried"
+		}
+		return "instance.confirmed"
+	case ports.WorkloadStateFailed:
+		return "instance.cancelled"
+	default:
+		return ""
+	}
 }
 
 // markApplyFailed persists the instance with state=failed after an Apply
@@ -428,6 +454,7 @@ func (o *LocalInstanceOrchestrator) markApplyFailed(
 				)
 			}
 		}
+		writeInstanceOutboxTx(txCtx, tx, o.outboxWriter, "instance.create_failed", record)
 		return o.storeTx.UpsertStatusTx(txCtx, tx, record)
 	})
 }
@@ -461,6 +488,7 @@ func (o *LocalInstanceOrchestrator) Delete(ctx context.Context, record ports.Wor
 				return err
 			}
 		}
+		writeInstanceOutboxTx(txCtx, tx, o.outboxWriter, "instance.deleted", record)
 		return o.storeTx.UpsertStatusTx(txCtx, tx, record)
 	})
 }

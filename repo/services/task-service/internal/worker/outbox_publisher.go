@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strconv"
 	"time"
@@ -69,6 +70,28 @@ func (p *OutboxPublisher) Run(ctx context.Context) {
 	}
 }
 
+// injectEventSeq 把 outbox 行 ID 作为 event_seq 注入 payload（uint64，全局
+// 单调递增），供 metering consumer 做同实例事件序判定。payload 解析失败时
+// 原样返回（consumer 端 event_seq=0 退化为无序事件，Start/Stop 幂等兜底）。
+func injectEventSeq(payload []byte, seq int64, logger *slog.Logger) []byte {
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		if logger != nil {
+			logger.Warn("outbox publisher: inject event_seq failed, publish raw payload", "err", err)
+		}
+		return payload
+	}
+	decoded["event_seq"] = seq
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("outbox publisher: re-encode payload failed, publish raw payload", "err", err)
+		}
+		return payload
+	}
+	return encoded
+}
+
 func (p *OutboxPublisher) publishOnce(ctx context.Context) error {
 	tx, err := sharedrepo.BeginOutboxTx(ctx, p.db)
 	if err != nil {
@@ -88,16 +111,28 @@ func (p *OutboxPublisher) publishOnce(ctx context.Context) error {
 
 	ids := make([]int64, 0, len(events))
 	for _, event := range events {
-		p.logger.Info("outbox event dispatching", "event_id", event.ID, "subject", event.EventType)
+		subject := event.EventType
+		payload := event.Payload
+		// Workload instance lifecycle events target the metering consumer,
+		// which subscribes "ani.events.instance.>" (plan-metering-consumer-v2
+		// §Subject 契约：上游发布 ani.events.instance.<instance_id>)。The raw
+		// event_type (instance.confirmed/...) is kept as envelope metadata in
+		// headers. event_seq (outbox row ID, globally monotonic) is injected so
+		// the metering consumer's per-instance seenSeq ordering works.
+		if event.AggregateType == "workload_instance" {
+			subject = "ani.events.instance." + event.AggregateID.String()
+			payload = injectEventSeq(event.Payload, event.ID, p.logger)
+		}
+		p.logger.Info("outbox event dispatching", "event_id", event.ID, "subject", subject)
 		if err := p.bus.Publish(ctx, ports.EventEnvelope{
 			TenantID:      event.TenantID.String(),
 			AggregateID:   event.AggregateID.String(),
 			AggregateType: event.AggregateType,
 			EventType:     event.EventType,
-			Payload:       event.Payload,
+			Payload:       payload,
 			OccurredAt:    event.CreatedAt,
 		}, ports.PublishOptions{
-			Subject: event.EventType,
+			Subject: subject,
 			Key:     strconv.FormatInt(event.ID, 10),
 		}); err != nil {
 			return err

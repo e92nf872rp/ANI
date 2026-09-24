@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -83,4 +85,76 @@ func encodeOutboxPayload(payload any) ([]byte, error) {
 		return nil, fmt.Errorf("encode outbox payload: %w", err)
 	}
 	return raw, nil
+}
+
+// encodeInstanceLifecyclePayload builds the metering InstanceLifecycleEvent
+// payload (pkg/ports/instance_events.go) from a workload instance record. The
+// consumer routes on new_status and extracts GPU count from gpu_spec;
+// event_seq is injected at publish time by the outbox publisher.
+func encodeInstanceLifecyclePayload(record ports.WorkloadInstanceRecord) ([]byte, error) {
+	var gpuSpec *ports.GPUEventSpec
+	if record.GPU != nil && record.GPU.Count > 0 {
+		gpuSpec = &ports.GPUEventSpec{Count: record.GPU.Count}
+	}
+	return encodeOutboxPayload(map[string]any{
+		"instance_id":   record.InstanceID,
+		"tenant_id":     record.TenantID,
+		"name":          record.Name,
+		"workload_kind": string(record.Kind),
+		"new_status":    string(record.Status.State),
+		"gpu_spec":      gpuSpec,
+	})
+}
+
+// writeInstanceOutboxTx emits an instance lifecycle outbox event inside the
+// given tenant transaction. Best-effort: invalid aggregate/tenant UUIDs,
+// payload encoding failures and write errors are logged and skipped so the
+// business state change (quota + status) still commits. No-op when the writer
+// is nil (outbox disabled).
+func writeInstanceOutboxTx(ctx context.Context, tx ports.MetadataTx, w OutboxWriter, eventType string, record ports.WorkloadInstanceRecord) {
+	if w == nil || tx == nil {
+		return
+	}
+	// The outbox_events table casts aggregate_id and tenant_id to UUID.
+	// instance_id is "inst_<uuid>" which is NOT a valid UUID, so the INSERT
+	// would fail with SQLSTATE 22P02 and abort the entire PostgreSQL
+	// transaction. Extract the UUID part from "inst_<uuid>" before writing;
+	// skip the outbox write entirely when no valid UUID can be extracted.
+	aggregateID := extractUUIDFromInstanceID(record.InstanceID)
+	if aggregateID == "" {
+		slog.Warn("writeInstanceOutboxTx: instance_id has no valid UUID, skipping outbox",
+			"instance_id", record.InstanceID,
+			"event_type", eventType,
+		)
+		return
+	}
+	if _, err := uuid.Parse(record.TenantID); err != nil {
+		slog.Warn("writeInstanceOutboxTx: tenant_id is not a valid UUID, skipping outbox",
+			"tenant_id", record.TenantID,
+			"event_type", eventType,
+		)
+		return
+	}
+	payload, err := encodeInstanceLifecyclePayload(record)
+	if err != nil {
+		slog.Warn("writeInstanceOutboxTx: encode payload failed, skipping outbox",
+			"instance_id", record.InstanceID,
+			"event_type", eventType,
+			"err", err,
+		)
+		return
+	}
+	if err := w.WriteTx(ctx, tx, OutboxEvent{
+		AggregateType: "workload_instance",
+		AggregateID:   aggregateID,
+		EventType:     eventType,
+		TenantID:      record.TenantID,
+		Payload:       payload,
+	}); err != nil {
+		slog.Warn("writeInstanceOutboxTx: outbox write failed, skipping (business state still commits)",
+			"instance_id", record.InstanceID,
+			"event_type", eventType,
+			"err", err,
+		)
+	}
 }
