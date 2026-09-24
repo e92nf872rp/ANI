@@ -65,6 +65,7 @@ type MinIOObjectStore struct {
 var _ ports.ObjectStore = (*MinIOObjectStore)(nil)
 var _ ports.ObjectStoreContentVerifier = (*MinIOObjectStore)(nil)
 var _ ports.ObjectStorePolicyApplier = (*MinIOObjectStore)(nil)
+var _ ports.MultipartObjectStore = (*MinIOObjectStore)(nil)
 
 func NewMinIOObjectStore(config MinIOObjectStoreConfig) (*MinIOObjectStore, error) {
 	endpoints, err := parseMinIOEndpoints(config.Endpoint, config.Endpoints, config.Secure)

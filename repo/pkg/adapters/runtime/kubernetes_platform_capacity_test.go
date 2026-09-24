@@ -14,20 +14,27 @@ import (
 // platformCapacityFakeGPUInventory 固定返回可预测的 GPU 节点清单：
 // gpu-node-a Ready 2 设备（zone az-a）、gpu-node-b Ready 1 设备（zone az-b）、
 // gpu-node-c NotReady 1 设备（fault）。
+// gpuNodeADevices 覆盖 gpu-node-a 的设备数（>0 时生效），供需要在
+// 非截断场景下断言 in_use 的用例使用。
 type platformCapacityFakeGPUInventory struct {
-	fail bool
+	fail            bool
+	gpuNodeADevices int
 }
 
 func (f *platformCapacityFakeGPUInventory) ListNodeClasses(ctx context.Context, filter ports.GPUDiscoveryFilter) ([]ports.GPUNodeClass, error) {
 	if f.fail {
 		return nil, errors.New("inventory unavailable")
 	}
+	nodeADevices := f.gpuNodeADevices
+	if nodeADevices <= 0 {
+		nodeADevices = 2
+	}
 	return []ports.GPUNodeClass{
 		{
 			NodeName:    "gpu-node-a",
 			Ready:       true,
 			Labels:      map[string]string{"topology.kubernetes.io/zone": "az-a"},
-			Devices:     []ports.GPUDeviceClass{{Model: "A100"}, {Model: "A100"}},
+			Devices:     make([]ports.GPUDeviceClass, nodeADevices),
 			Allocatable: map[string]string{"cpu": "31.5", "memory": "120Gi"},
 		},
 		{
@@ -95,12 +102,12 @@ func newPlatformCapacityTestClient(t *testing.T, rt http.RoundTripper) *Kubernet
 func TestKubernetesPlatformCapacityOverview(t *testing.T) {
 	requested := ""
 	rt := &platformCapacityPodsRoundTripper{requested: &requested, body: `{"items":[
-		{"spec":{"nodeName":"gpu-node-a"},"status":{"phase":"Running"}},
-		{"spec":{"nodeName":"gpu-node-a"},"status":{"phase":"Running"}},
-		{"spec":{"nodeName":"gpu-node-b"},"status":{"phase":"Running"}},
-		{"spec":{"nodeName":"gpu-node-b"},"status":{"phase":"Pending"}},
-		{"spec":{"nodeName":"gpu-node-c"},"status":{"phase":"Running"}},
-		{"spec":{"nodeName":""},"status":{"phase":"Running"}}
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"volcano.sh/vgpu-number":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t2"},"spec":{"nodeName":"gpu-node-b","containers":[{"resources":{"limits":{"nvidia.com/vgpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t2"},"spec":{"nodeName":"gpu-node-b","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Pending"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-c","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}}
 	]}`}
 	service := NewKubernetesPlatformCapacityService(
 		&platformCapacityFakeGPUInventory{},
@@ -140,12 +147,44 @@ func TestKubernetesPlatformCapacityOverview(t *testing.T) {
 	}
 }
 
+// TestKubernetesPlatformCapacityExcludesNonGPUPods 锁定占用口径：只有
+// ani-tenant-* 命名空间中真的请求 GPU 扩展资源的 Running Pod 才算 in_use。
+// 节点设备数远大于 Pod 数，确保断言不被 min(设备数, Pod 数) 截断掩盖。
+func TestKubernetesPlatformCapacityExcludesNonGPUPods(t *testing.T) {
+	rt := &platformCapacityPodsRoundTripper{body: `{"items":[
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"volcano.sh/vgpu-number":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"cpu":"2","memory":"4Gi"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"cpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"cpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-system"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}}
+	]}`}
+	service := NewKubernetesPlatformCapacityService(
+		&platformCapacityFakeGPUInventory{gpuNodeADevices: 8},
+		newPlatformCapacityTestClient(t, rt),
+		nil,
+	)
+
+	overview, err := service.GetCapacityOverview(context.Background())
+	if err != nil {
+		t.Fatalf("GetCapacityOverview() error = %v", err)
+	}
+	region := overview.Regions[0]
+	// gpu_total = 8（node-a）+ 1（node-b）+ 1（node-c） = 10，fault = 1（node-c NotReady）。
+	// 仅 2 个 GPU Pod 计入 in_use：3 个 CPU-only 租户 Pod（VM/探针/作业形态）
+	// 与 1 个平台命名空间 Pod 都被排除；若被计入则 in_use=min(8,3)=3。
+	// gpu_free = 10 - 2 - 1 = 7。
+	if region.Capacity.GPUTotal != 10 || region.Capacity.GPUFree != 7 {
+		t.Fatalf("capacity = %+v, want gpu_total=10 gpu_free=7 (只统计真的请求 GPU 的租户 Pod)", region.Capacity)
+	}
+}
+
 func TestKubernetesPlatformCapacityPodCountTruncatedByDevices(t *testing.T) {
 	rt := &platformCapacityPodsRoundTripper{body: `{"items":[
-		{"spec":{"nodeName":"gpu-node-a"},"status":{"phase":"Running"}},
-		{"spec":{"nodeName":"gpu-node-a"},"status":{"phase":"Running"}},
-		{"spec":{"nodeName":"gpu-node-a"},"status":{"phase":"Running"}},
-		{"spec":{"nodeName":"gpu-node-a"},"status":{"phase":"Running"}}
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t1"},"spec":{"nodeName":"gpu-node-a","containers":[{"resources":{"limits":{"nvidia.com/gpu":"1"}}}]},"status":{"phase":"Running"}}
 	]}`}
 	service := NewKubernetesPlatformCapacityService(
 		&platformCapacityFakeGPUInventory{},

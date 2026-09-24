@@ -451,7 +451,7 @@ func materializationBodyWithConfig(mat domain.ModelMaterialization, modelService
 	if parsed, err := url.Parse(mat.ObjectRef); err == nil {
 		if name := path.Base(parsed.Path); name != "." && name != "/" && name != "" {
 			targetPath = "/models/" + mat.ModelVersionID.String() + "/" + name
-			if isArchiveObjectRef(mat.ObjectRef) {
+			if isModelDirectoryObjectRef(mat.ObjectRef) {
 				targetPath = "/models/" + mat.ModelVersionID.String()
 			}
 		}
@@ -463,12 +463,12 @@ func materializationBodyWithConfig(mat domain.ModelMaterialization, modelService
 	}
 }
 
-func isArchiveObjectRef(raw string) bool {
+func isModelDirectoryObjectRef(raw string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme != "object" || parsed.Host != "models" || parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || parsed.Scheme != "object" || parsed.Host != "models" || parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" || strings.Contains(parsed.Path, "..") {
 		return false
 	}
-	return strings.HasSuffix(parsed.Path, "/model.tar.gz") && !strings.Contains(parsed.Path, "..")
+	return strings.HasSuffix(parsed.Path, "/model.tar.gz") || strings.HasSuffix(parsed.Path, "/snapshot/manifest.json")
 }
 
 // acceleratorBody 把推理加速器映射到 Core platform-workloads。

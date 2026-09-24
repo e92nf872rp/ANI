@@ -51,3 +51,10 @@ type ModelObjectStoreContentVerifier interface {
 	ModelObjectStore
 	VerifyObject(ctx context.Context, ref ModelObjectRef, expectedSize int64, expectedChecksum string) error
 }
+
+// ModelObjectStoreReader is an optional bounded reader used for small control
+// objects such as snapshot manifests. Implementations must stop reading after
+// maxBytes and must not expose an unbounded object body to callers.
+type ModelObjectStoreReader interface {
+	ReadObject(context.Context, ModelObjectRef, int64) ([]byte, error)
+}

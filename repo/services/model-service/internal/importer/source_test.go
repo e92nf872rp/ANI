@@ -149,12 +149,27 @@ func TestHuggingFaceListRejectsUnsafeOrUnboundedPagination(t *testing.T) {
 
 func TestHuggingFaceListRejectsTreeFileBudgetOverflow(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		body := `[{"type":"file","path":"weights.bin","size":` + fmt.Sprintf("%d", WorkerArchiveMaxBytes+1) + `}]`
+		half := int64(^uint64(0)>>1)/2 + 1
+		body := `[{"type":"file","path":"weights-a.bin","size":` + fmt.Sprintf("%d", half) + `},{"type":"file","path":"weights-b.bin","size":` + fmt.Sprintf("%d", half) + `}]`
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 	})}
 	_, err := mustHuggingFaceSource(t, client, "https://huggingface.co").List(context.Background(), Repository{Source: "huggingface", RepoID: "Qwen/Qwen3", Revision: "main"})
 	if err == nil {
-		t.Fatal("List() accepted a tree larger than the worker budget")
+		t.Fatal("List() accepted a tree whose total size overflows int64")
+	}
+}
+
+func TestHuggingFaceListAcceptsSnapshotFilesLargerThanLegacyArchiveBudget(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `[{"type":"file","path":"weights.bin","size":` + fmt.Sprintf("%d", WorkerArchiveMaxBytes+1) + `}]`
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+	})}
+	files, err := mustHuggingFaceSource(t, client, "https://huggingface.co").List(context.Background(), Repository{Source: "huggingface", RepoID: "Qwen/Qwen3", Revision: "main"})
+	if err != nil {
+		t.Fatalf("List() rejected a snapshot file larger than the legacy archive budget: %v", err)
+	}
+	if len(files) != 1 || files[0].Size != WorkerArchiveMaxBytes+1 {
+		t.Fatalf("List() = %+v, want one large snapshot file", files)
 	}
 }
 
@@ -869,6 +884,227 @@ func TestSourceErrorsStayRedacted(t *testing.T) {
 	_, err := mustModelScopeSource(t, client, "https://www.modelscope.cn").List(context.Background(), Repository{Source: "modelscope", RepoID: "org/model", Revision: testModelScopeCommit})
 	if err == nil || strings.Contains(err.Error(), want.Error()) || strings.Contains(err.Error(), "org/model") {
 		t.Fatalf("List() error = %v, contains transport/repository details", err)
+	}
+}
+
+func TestSourceOpenRangeStreamsValidatedPartialContent(t *testing.T) {
+	tests := []struct {
+		name       string
+		repository Repository
+		makeSource func(*http.Client) RangeSource
+		wantPath   string
+	}{
+		{
+			name:       "huggingface",
+			repository: Repository{Source: "huggingface", RepoID: "Qwen/Qwen3", Revision: "0123456789abcdef0123456789abcdef01234567"},
+			makeSource: func(client *http.Client) RangeSource { return newHuggingFaceSource(client, "https://huggingface.co") },
+			wantPath:   "/Qwen/Qwen3/resolve/0123456789abcdef0123456789abcdef01234567/config.json",
+		},
+		{
+			name:       "modelscope",
+			repository: Repository{Source: "modelscope", RepoID: "Qwen/Qwen3", Revision: testModelScopeCommit},
+			makeSource: func(client *http.Client) RangeSource { return newModelScopeSource(client, "https://www.modelscope.cn") },
+			wantPath:   "/api/v1/models/Qwen/Qwen3/repo",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var got *http.Request
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				got = req.Clone(req.Context())
+				return &http.Response{
+					StatusCode:    http.StatusPartialContent,
+					Header:        http.Header{"Content-Range": []string{"bytes 2-4/10"}},
+					Body:          io.NopCloser(strings.NewReader("cde")),
+					ContentLength: 3,
+					Request:       req,
+				}, nil
+			})}
+			source := tc.makeSource(client)
+			body, err := source.OpenRange(context.Background(), tc.repository, "config.json", 2, 3)
+			if err != nil {
+				t.Fatalf("OpenRange() error = %v", err)
+			}
+			defer func() { _ = body.Close() }()
+			data, err := io.ReadAll(body)
+			if err != nil || string(data) != "cde" {
+				t.Fatalf("OpenRange() body = %q, err=%v; want cde", data, err)
+			}
+			if got == nil || got.Header.Get("Range") != "bytes=2-4" || got.URL.Path != tc.wantPath {
+				t.Fatalf("range request = %#v; want Range bytes=2-4 and path %q", got, tc.wantPath)
+			}
+		})
+	}
+}
+
+func TestSourceOpenRangeRejectsIgnoredRangeAndInvalidContentRange(t *testing.T) {
+	tests := []struct {
+		name       string
+		repository Repository
+		makeSource func(*http.Client) RangeSource
+	}{
+		{
+			name:       "huggingface",
+			repository: Repository{Source: "huggingface", RepoID: "Qwen/Qwen3", Revision: "0123456789abcdef0123456789abcdef01234567"},
+			makeSource: func(client *http.Client) RangeSource { return newHuggingFaceSource(client, "https://huggingface.co") },
+		},
+		{
+			name:       "modelscope",
+			repository: Repository{Source: "modelscope", RepoID: "Qwen/Qwen3", Revision: testModelScopeCommit},
+			makeSource: func(client *http.Client) RangeSource { return newModelScopeSource(client, "https://www.modelscope.cn") },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name+"-ignored", func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("cde")), Request: req}, nil
+			})}
+			_, err := tc.makeSource(client).OpenRange(context.Background(), tc.repository, "config.json", 2, 3)
+			if err == nil {
+				t.Fatal("OpenRange() accepted a 200 response that ignored Range")
+			}
+		})
+
+		for _, contentRange := range []string{"bytes 3-5/10", "bytes 2-3/10", "bytes 2-4/4", "not-a-range"} {
+			t.Run(tc.name+"-content-range-"+strings.ReplaceAll(contentRange, " ", "_"), func(t *testing.T) {
+				client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: http.StatusPartialContent, Header: http.Header{"Content-Range": []string{contentRange}}, Body: io.NopCloser(strings.NewReader("cde")), Request: req}, nil
+				})}
+				_, err := tc.makeSource(client).OpenRange(context.Background(), tc.repository, "config.json", 2, 3)
+				if err == nil {
+					t.Fatalf("OpenRange() accepted Content-Range %q", contentRange)
+				}
+			})
+		}
+	}
+}
+
+func TestSourceOpenRangeRejectsTruncatedBodyWhenRead(t *testing.T) {
+	tests := []struct {
+		name       string
+		repository Repository
+		makeSource func(*http.Client) RangeSource
+	}{
+		{
+			name:       "huggingface",
+			repository: Repository{Source: "huggingface", RepoID: "Qwen/Qwen3", Revision: "0123456789abcdef0123456789abcdef01234567"},
+			makeSource: func(client *http.Client) RangeSource { return newHuggingFaceSource(client, "https://huggingface.co") },
+		},
+		{
+			name:       "modelscope",
+			repository: Repository{Source: "modelscope", RepoID: "Qwen/Qwen3", Revision: testModelScopeCommit},
+			makeSource: func(client *http.Client) RangeSource { return newModelScopeSource(client, "https://www.modelscope.cn") },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusPartialContent, Header: http.Header{"Content-Range": []string{"bytes 2-4/10"}}, Body: io.NopCloser(strings.NewReader("cd")), Request: req}, nil
+			})}
+			body, err := tc.makeSource(client).OpenRange(context.Background(), tc.repository, "config.json", 2, 3)
+			if err != nil {
+				t.Fatalf("OpenRange() error = %v", err)
+			}
+			defer func() { _ = body.Close() }()
+			if _, err := io.ReadAll(body); err == nil {
+				t.Fatal("reading OpenRange() accepted a truncated body")
+			}
+		})
+	}
+}
+
+func TestSourceOpenRangeRejectsExtraBodyBytesWhenRead(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusPartialContent, Header: http.Header{"Content-Range": []string{"bytes 2-4/10"}}, Body: io.NopCloser(strings.NewReader("cdef")), Request: req}, nil
+	})}
+	source := newHuggingFaceSource(client, "https://huggingface.co")
+	body, err := source.OpenRange(context.Background(), Repository{Source: "huggingface", RepoID: "Qwen/Qwen3", Revision: "0123456789abcdef0123456789abcdef01234567"}, "config.json", 2, 3)
+	if err != nil {
+		t.Fatalf("OpenRange() error = %v", err)
+	}
+	defer func() { _ = body.Close() }()
+	if _, err := io.ReadAll(body); err == nil {
+		t.Fatal("reading OpenRange() accepted extra bytes")
+	}
+}
+
+func TestSourceOpenRangePreservesRangeAcrossAllowlistedRedirects(t *testing.T) {
+	tests := []struct {
+		name       string
+		repository Repository
+		makeSource func(*http.Client) RangeSource
+		location   string
+	}{
+		{
+			name:       "huggingface",
+			repository: Repository{Source: "huggingface", RepoID: "Qwen/Qwen3", Revision: "0123456789abcdef0123456789abcdef01234567"},
+			makeSource: func(client *http.Client) RangeSource { return newHuggingFaceSource(client, "https://huggingface.co") },
+			location:   "https://cdn-lfs-us-1.hf.co/object",
+		},
+		{
+			name:       "modelscope",
+			repository: Repository{Source: "modelscope", RepoID: "Qwen/Qwen3", Revision: testModelScopeCommit},
+			makeSource: func(client *http.Client) RangeSource { return newModelScopeSource(client, "https://www.modelscope.cn") },
+			location:   "https://cdn-lfs-cn-1.modelscope.cn/object",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests []*http.Request
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests = append(requests, req.Clone(req.Context()))
+				if len(requests) == 1 {
+					return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": []string{tc.location}}, Body: io.NopCloser(strings.NewReader("redirect")), Request: req}, nil
+				}
+				return &http.Response{StatusCode: http.StatusPartialContent, Header: http.Header{"Content-Range": []string{"bytes 2-4/10"}}, Body: io.NopCloser(strings.NewReader("cde")), Request: req}, nil
+			})}
+			body, err := tc.makeSource(client).OpenRange(context.Background(), tc.repository, "config.json", 2, 3)
+			if err != nil {
+				t.Fatalf("OpenRange() error = %v", err)
+			}
+			defer func() { _ = body.Close() }()
+			if _, err := io.ReadAll(body); err != nil {
+				t.Fatalf("reading OpenRange() error = %v", err)
+			}
+			if len(requests) != 2 || requests[0].Header.Get("Range") != "bytes=2-4" || requests[1].Header.Get("Range") != "bytes=2-4" {
+				t.Fatalf("redirect requests did not preserve Range: %#v", requests)
+			}
+		})
+	}
+}
+
+func TestSourceOpenRangeRequiresImmutableRevision(t *testing.T) {
+	tests := []struct {
+		name       string
+		repository Repository
+		makeSource func(*http.Client) RangeSource
+	}{
+		{
+			name:       "huggingface",
+			repository: Repository{Source: "huggingface", RepoID: "Qwen/Qwen3", Revision: "main"},
+			makeSource: func(client *http.Client) RangeSource { return newHuggingFaceSource(client, "https://huggingface.co") },
+		},
+		{
+			name:       "modelscope",
+			repository: Repository{Source: "modelscope", RepoID: "Qwen/Qwen3", Revision: "master"},
+			makeSource: func(client *http.Client) RangeSource { return newModelScopeSource(client, "https://www.modelscope.cn") },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: http.StatusPartialContent, Header: http.Header{"Content-Range": []string{"bytes 0-0/1"}}, Body: io.NopCloser(strings.NewReader("x")), Request: req}, nil
+			})}
+			_, err := tc.makeSource(client).OpenRange(context.Background(), tc.repository, "config.json", 0, 1)
+			if err == nil {
+				t.Fatal("OpenRange() accepted a mutable revision")
+			}
+			if calls != 0 {
+				t.Fatalf("mutable revision triggered %d network calls", calls)
+			}
+		})
 	}
 }
 
