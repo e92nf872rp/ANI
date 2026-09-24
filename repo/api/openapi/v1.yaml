@@ -9871,6 +9871,8 @@ paths:
       summary: BOSS 分页查询租户配额列表
       description: |
         BOSS 平台级分页查询所有租户配额。按租户维度展示配额分配总览。
+        仅返回 active/frozen 状态租户；已禁用租户的配额行保留但不在此列表中展示
+        （禁用租户配额可通过 /admin/tenants/{tenant_id}/quota 显式查询或清理）。
       tags: [QuotaAdmin]
       x-ani-rbac-scope: "scope:quota:read"
       parameters:

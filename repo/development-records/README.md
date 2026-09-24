@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### /quotas 配额列表过滤已禁用租户（2026-09-24，local verified 未部署，分支 hotfix/quotas-list-filter-disabled）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| QUOTA-LIST-DISABLED-FILTER-A | 用户报障 BOSS 配额列表 `GET /api/v1/quotas` 返回 48 条而【活跃】+【冻结】租户共 47 个。**根因两层**：① `PostgresQuota.List` 分页第一步 SQL `SELECT DISTINCT tenant_id FROM resource_quota` 直接按配额表枚举租户，不 JOIN `tenants`、不过滤 `status`，禁用租户照常出现；② `TenantService.DisableTenant` 是终态转换且注释明确「不释放资源」，`resource_quota`/`resource_reservations` 行全部保留（清理能力 `DeleteTenantQuota` 是独立管理端点，禁用流程不自动触发）。**修复（方案 A）**：step1 SQL 改 `JOIN tenants` 并过滤 `t.status IN ('active', 'frozen')`（keyset cursor 仍原生 UUID 比较走索引）；指定 `tenant_id` 的单租户显式查询（`GetMy` 路径）不过滤、继续可用；**`resource_quota` 行保留，「禁用不释放资源」语义不变**；新增回归测试 `TestPostgresQuotaStoreListFiltersDisabledTenants` 断言 step1 SQL 必须含 `JOIN tenants` 与状态过滤；`v1.yaml /quotas` description 同步声明新口径（仅 description 文字，无 schema/端点变更，非破坏性）。门禁：GO_PACKAGES 全量 `go test` 通过（仅既有 Windows sandbox symlink 两用例环境性失败，与本批次无关）、`validate_openapi_spec`（2 spec）、`validate_component_imports`、`validate_auth_gateway_contract`、`validate_gateway_authz_drift`（no drift）、`validate_core_gateway_authz_routes`（324 路由 / 250 registry / 0 error）、gofmt、`git diff --check` 全绿。**未部署、未做 live 验证**：生效需部署新 gateway 镜像后复测 `/api/v1/quotas` 分页计数 vs `tenants` 表 active+frozen 计数对齐。遗留：禁用租户从列表消失后其历史配额只能按 tenant_id 显式查询（数据在库）；如需「列表带状态标注」属契约/前端独立批次；`result.Total` 仍为本页条数语义未改 | quota-list-disabled-filter-a.md |
+
 ### GPU 占用口径统一与 30080 台账迁移补齐（2026-09-23，live verified，分支 hotfix/gpu-occupancy-scope）
 
 | 批次 | 内容摘要 | 文件 |

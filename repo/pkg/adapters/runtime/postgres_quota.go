@@ -399,7 +399,8 @@ func (q *PostgresQuota) Put(ctx context.Context, idempotencyKey string, req port
 
 // List 列租户配额（BOSS）。自开 WithPlatformTx (bypass RLS)。
 // 无 tenant_id 时按租户级 keyset 分页（cursor=tenant_id，多查 1 条判断 hasMore，
-// limit 默认 50、上限 100）；有 tenant_id 时直接调 GetMy 不分页。
+// limit 默认 50、上限 100），只返回 active/frozen 租户（禁用租户配额行保留但不列出）；
+// 有 tenant_id 时直接调 GetMy 不分页。
 func (q *PostgresQuota) List(ctx context.Context, req ports.QuotaListRequest) (ports.QuotaListResult, error) {
 	var result ports.QuotaListResult
 
@@ -422,12 +423,16 @@ func (q *PostgresQuota) List(ctx context.Context, req ports.QuotaListRequest) (p
 		}
 
 		// 第一步：查一页租户列表（DISTINCT tenant_id，keyset 分页，cursor = 上页末尾 tenant_id）
+		// JOIN tenants 只出 active/frozen 租户：禁用是终态且禁用不清理 resource_quota 行，
+		// 不过滤会导致已禁用租户继续出现在平台配额列表中。
 		// 用原生 UUID 比较（$1::uuid）走索引；limit+1 多查一条判断是否还有下一页
 		tenantRows, err := tx.Query(ctx, `
-			SELECT DISTINCT tenant_id::text
-			FROM resource_quota
-			WHERE ($1 = '' OR tenant_id > $1::uuid)
-			ORDER BY tenant_id
+			SELECT DISTINCT rq.tenant_id::text
+			FROM resource_quota rq
+			JOIN tenants t ON t.id = rq.tenant_id
+			WHERE t.status IN ('active', 'frozen')
+			  AND ($1 = '' OR rq.tenant_id > $1::uuid)
+			ORDER BY rq.tenant_id
 			LIMIT $2
 		`, req.Cursor, limit+1)
 		if err != nil {
