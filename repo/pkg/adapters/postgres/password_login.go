@@ -91,7 +91,7 @@ func (s *passwordLoginStore) LoadRoles(ctx context.Context, userID uuid.UUID) ([
 // (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), ”)::uuid)
 // 对 tenant_id NOT NULL 的行求值为 false，INSERT 会被拒绝
 // （生产 ani_app_user 无 BYPASSRLS；dev superuser 绕过 RLS 会掩盖此 bug）。
-func (s *passwordLoginStore) FinalizeLogin(ctx context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
+func (s *passwordLoginStore) FinalizeLogin(ctx context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, loginAt, expiresAt time.Time) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin finalize login: %w", err)
@@ -110,7 +110,7 @@ func (s *passwordLoginStore) FinalizeLogin(ctx context.Context, tenantID, userID
 		return fmt.Errorf("insert refresh token: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, `UPDATE users SET last_login_at=$1, updated_at=$1 WHERE id=$2`, expiresAt, userID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE users SET last_login_at=$1, updated_at=$1 WHERE id=$2`, loginAt, userID); err != nil {
 		return fmt.Errorf("touch last login: %w", err)
 	}
 
@@ -187,7 +187,7 @@ func (s *platformLoginStore) LoadRoles(ctx context.Context, userID uuid.UUID) ([
 // FinalizeLogin 在单事务内插入平台 refresh token + 更新 last_login_at。
 // 平台账号 tenant_id=NULL，refresh_tokens 的 RLS 策略对 tenant_id IS NULL 的行
 // 直接放行，无需 SetDBTenant。与租户版保持一致的事务语义。
-func (s *platformLoginStore) FinalizeLogin(ctx context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
+func (s *platformLoginStore) FinalizeLogin(ctx context.Context, userID uuid.UUID, tokenHash string, roles []string, loginAt, expiresAt time.Time) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin finalize platform login: %w", err)
@@ -201,7 +201,7 @@ func (s *platformLoginStore) FinalizeLogin(ctx context.Context, userID uuid.UUID
 		return fmt.Errorf("insert platform refresh token: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, `UPDATE users SET last_login_at=$1, updated_at=$1 WHERE id=$2`, expiresAt, userID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE users SET last_login_at=$1, updated_at=$1 WHERE id=$2`, loginAt, userID); err != nil {
 		return fmt.Errorf("touch platform last login: %w", err)
 	}
 
