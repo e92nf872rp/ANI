@@ -44,6 +44,13 @@ type GPUNodeClass struct {
 	Annotations   map[string]string
 	Taints        []string
 	Devices       []GPUDeviceClass
+	// PhysicalCards 是该节点的去重物理卡数，由 adapter 派生：
+	// vGPU 节点（volcano.sh/node-vgpu-register 注解）为注解中的物理卡段数，
+	// 整卡节点为设备记录数。0 表示未提供（旧实现/其他 inventory），
+	// 消费方需回退为按设备记录数计（整卡语义）。
+	// 注意 Devices 在 vGPU 节点是切片粒度（每条记录=1 个切片），
+	// 不能用 len(Devices) 推物理卡数。
+	PhysicalCards int
 	// Allocatable preserves the raw Kubernetes node allocatable map so
 	// PlanScheduling can check vendor-specific resource names such as
 	// nvidia.com/gpu (whole-card) and nvidia.com/vgpu (vGPU slice).

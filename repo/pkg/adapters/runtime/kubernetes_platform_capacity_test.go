@@ -112,7 +112,12 @@ func TestKubernetesPlatformCapacityOverview(t *testing.T) {
 	service := NewKubernetesPlatformCapacityService(
 		&platformCapacityFakeGPUInventory{},
 		newPlatformCapacityTestClient(t, rt),
-		&platformCapacityFakeTenantService{tenants: []ports.TenantSummary{{ID: "t1"}, {ID: "t2"}}},
+		&platformCapacityFakeTenantService{tenants: []ports.TenantSummary{
+			{ID: "t1", Status: ports.TenantStatusActive},
+			{ID: "t2", Status: ports.TenantStatusActive},
+			{ID: "t3", Status: ports.TenantStatusFrozen},
+			{ID: "t4", Status: ports.TenantStatusDisabled},
+		}},
 	)
 
 	overview, err := service.GetCapacityOverview(context.Background())
@@ -140,7 +145,7 @@ func TestKubernetesPlatformCapacityOverview(t *testing.T) {
 		t.Fatalf("azs = %v, want [az-a az-b]（Ready 节点 zone 去重）", region.AZs)
 	}
 	if region.TenantCount != 2 {
-		t.Fatalf("tenant_count = %d, want 2", region.TenantCount)
+		t.Fatalf("tenant_count = %d, want 2（只计 active，frozen/disabled 不计入）", region.TenantCount)
 	}
 	if !overview.DevProfile.RealProvider || overview.DevProfile.Mode != "real" {
 		t.Fatalf("dev_profile = %+v, want real provider", overview.DevProfile)

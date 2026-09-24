@@ -1232,7 +1232,7 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: "可用租户数（status <> 'disabled'）；租户服务不可用时为 0 并写入 dev_profile.reason。"
+          description: "活跃租户数（status = 'active'，不含 frozen/disabled）；租户服务不可用时为 0 并写入 dev_profile.reason。"
         capacity:
           $ref: '#/components/schemas/PlatformRegionCapacity'
 
@@ -4052,8 +4052,8 @@ components:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         vgpu_count:      { type: integer, minimum: 0, description: "vGPU 模式设备数" }
         wholecard_count: { type: integer, minimum: 0, description: "整卡模式设备数" }
-        physical_card_count: { type: integer, minimum: 0, description: "物理卡数：按 node × 物理卡 index 去重计数（与设备记录数同口径）" }
-        logical_card_count:  { type: integer, minimum: 0, description: "逻辑卡数：整卡数 + vGPU 切片数合计（整卡 shares=1，vGPU 卡按切分份数累计）" }
+        physical_card_count: { type: integer, minimum: 0, description: "物理卡数：按节点去重的物理 GPU 卡数（vGPU 节点取 node-vgpu-register 注解的物理卡段数，整卡节点为设备记录数）" }
+        logical_card_count:  { type: integer, minimum: 0, description: "逻辑卡数：整卡数 + vGPU 切片数合计，即全部可调度设备记录总数（整卡记录与 vGPU 切片记录各计 1）" }
         maintenance_count:   { type: integer, minimum: 0, description: "人工维护中（maintenance）设备数" }
         unavailable_count:   { type: integer, minimum: 0, description: "人工标记不可用（unavailable）设备数" }
         tenant_count:        { type: integer, minimum: 0, description: "当前占用设备覆盖的租户数（in_use 记录按 tenant_id 去重）" }
@@ -9889,6 +9889,8 @@ paths:
       summary: BOSS 分页查询租户配额列表
       description: |
         BOSS 平台级分页查询所有租户配额。按租户维度展示配额分配总览。
+        仅返回 active/frozen 状态租户；已禁用租户的配额行保留但不在此列表中展示
+        （禁用租户配额可通过 /admin/tenants/{tenant_id}/quota 显式查询或清理）。
       tags: [QuotaAdmin]
       x-ani-rbac-scope: "scope:quota:read"
       parameters:
