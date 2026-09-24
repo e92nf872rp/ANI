@@ -1232,7 +1232,7 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: "可用租户数（status <> 'disabled'）；租户服务不可用时为 0 并写入 dev_profile.reason。"
+          description: "活跃租户数（status = 'active'，不含 frozen/disabled）；租户服务不可用时为 0 并写入 dev_profile.reason。"
         capacity:
           $ref: '#/components/schemas/PlatformRegionCapacity'
 

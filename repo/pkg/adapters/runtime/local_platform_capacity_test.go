@@ -89,15 +89,21 @@ func (f *platformCapacityFakeTenantService) ListTenantLifecycle(context.Context,
 
 func TestLocalPlatformCapacityServiceTenantCount(t *testing.T) {
 	service := NewLocalPlatformCapacityService(&platformCapacityFakeTenantService{
-		tenants: []ports.TenantSummary{{ID: "t1"}, {ID: "t2"}, {ID: "t3"}},
+		tenants: []ports.TenantSummary{
+			{ID: "t1", Status: ports.TenantStatusActive},
+			{ID: "t2", Status: ports.TenantStatusActive},
+			{ID: "t3", Status: ports.TenantStatusFrozen},
+			{ID: "t4", Status: ports.TenantStatusDisabled},
+		},
 	})
 
 	overview, err := service.GetCapacityOverview(context.Background())
 	if err != nil {
 		t.Fatalf("GetCapacityOverview() error = %v", err)
 	}
-	if overview.Regions[0].TenantCount != 3 || overview.Summary.TenantCount != 3 {
-		t.Fatalf("tenant_count = %d/%d, want 3/3", overview.Regions[0].TenantCount, overview.Summary.TenantCount)
+	if overview.Regions[0].TenantCount != 2 || overview.Summary.TenantCount != 2 {
+		t.Fatalf("tenant_count = %d/%d, want 2/2（只计 active，frozen/disabled 不计入）",
+			overview.Regions[0].TenantCount, overview.Summary.TenantCount)
 	}
 }
 
