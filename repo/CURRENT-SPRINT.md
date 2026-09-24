@@ -550,6 +550,7 @@ git diff --check
 | #004 | 9 集成测试场景（事件驱动/保底/幂等/rebuild/seenSeq 乱序/失败重投/租户 mismatch/poison/DB UNIQUE）9/9 PASS | ✅ 已完成 | `pr-m4-metering-consumer.md` |
 | #005 | 部署清单 metering-service-live-deps.yaml + Live Gate 4 缺陷修复 + NATS 事件验证 | ✅ 已完成 | `pr-m5-metering-consumer.md` |
 | #006 | 计量查询 PG adapter（V3 方案）：ports 扩展 + PgMeteringService（租户 RLS / 平台 BYPASSRLS）+ Gateway METERING_PROVIDER_MODE 装配 + 平台查询 handler + pilot 鉴权接入 + 前端同步 | ✅ 已完成 | `pr-m6-metering-query-pg-adapter.md` |
+| #007 | 计量 period 桶标签按 Asia/Shanghai 本地化：`hour`/`day` 由 `SUBSTR` 纯文本截取改为 `to_char(SUBSTR(period,1,16)::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai', ...)`（SELECT 与 GROUP BY 共用，WHERE 保持 UTC 字符串比较），修复桶标签早 8 小时与 `group_by=day` 落在 UTC 日界的缺陷；契约 `period` 补 description；ani-system live verified（`14/15/16`、跨日界单桶与库内真值逐字一致），实测后已回滚镜像 | ✅ 已完成 | `metering-period-tz-a.md` |
 
 Live Gate 修复详情（2026-08-14，真实 K8s 集群部署后）：
 

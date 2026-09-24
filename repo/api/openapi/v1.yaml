@@ -2221,7 +2221,7 @@ components:
         resource_type:  { type: string, enum: [instance_cpu_seconds, instance_memory_gib_seconds, instance_gpu_seconds, token_input, token_output, token_total] }
         total_quantity: { type: number, format: double }
         unit:           { type: string }
-        period:         { type: string, nullable: true }
+        period:         { type: string, nullable: true, description: "统计周期桶标签，按 Asia/Shanghai（UTC+8）本地时间输出；group_by=day 为 YYYY-MM-DD，group_by=hour 为 YYYY-MM-DDTHH；无时间聚合时为 null" }
         tenant_id:      { type: string, nullable: true }
 
     MeteringUsageResponse:
@@ -8765,7 +8765,7 @@ paths:
                         resource_type: { type: string }
                         total_quantity: { type: number }
                         unit:           { type: string }
-                        period:         { type: string }
+                        period:         { type: string, description: "统计周期桶标签，按 Asia/Shanghai（UTC+8）本地时间输出；group_by=day 为 YYYY-MM-DD，group_by=hour 为 YYYY-MM-DDTHH；无时间聚合时为空" }
                   total: { type: integer }
                   dev_profile:
                     $ref: '#/components/schemas/CoreDevProfileInfo'
