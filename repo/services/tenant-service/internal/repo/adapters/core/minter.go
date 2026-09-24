@@ -19,7 +19,7 @@ const (
 	// /admin/tenants*（V2 policy，resource=tenants）+ /admin/quota-meta（V2，resource=quota）
 	// + 其余 legacy /admin/* 路径（roles=[platform-admin] 放行，不读 permissions）。
 	mintPermissions = "scope:tenants:*,scope:quota:read"
-	mintTTLSeconds = 300
+	mintTTLSeconds  = 300
 	// mintRefreshWindow 是 token 剩余寿命低于该窗口时提前刷新。
 	mintRefreshWindow = 30 * time.Second
 )
@@ -77,10 +77,10 @@ func (m *Minter) Token(ctx context.Context) (string, error) {
 
 	issued, err := m.client.IssueServiceToken(ctx, &authv1.IssueServiceTokenRequest{
 		CallerService:    mintCaller,
-		CallerSecret:    m.secret,
+		CallerSecret:     m.secret,
 		CredentialDomain: "platform",
 		Permissions:      strings.Split(mintPermissions, ","),
-		TtlSeconds:      mintTTLSeconds,
+		TtlSeconds:       mintTTLSeconds,
 	})
 	if err != nil {
 		return "", err

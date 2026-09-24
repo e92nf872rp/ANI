@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>250</dd></div>
-          <div><dt>Schemas</dt><dd>352</dd></div>
+          <div><dt>Operations</dt><dd>251</dd></div>
+          <div><dt>Schemas</dt><dd>353</dd></div>
         </dl>
       </section>
 
@@ -366,6 +366,14 @@
           <td>更新租户绑定套餐</td>
           <td><code>scope:tenant:write</code></td>
           <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants/{tenant_id}/provision</code></td>
+          <td><code>provisionTenant</code></td>
+          <td>初始化租户基础设施</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 400, 401, 403, 404, 500</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -2479,6 +2487,7 @@
         <li><code>TenantAuthSummary</code></li>
         <li><code>TenantAuthUpdateRequest</code></li>
         <li><code>TenantCreateRequest</code></li>
+        <li><code>TenantInfraProvisionResponse</code></li>
         <li><code>TenantLifecycleEntry</code></li>
         <li><code>TenantLifecycleListResponse</code></li>
         <li><code>TenantListItem</code></li>

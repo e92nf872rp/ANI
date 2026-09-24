@@ -11,8 +11,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
-	"github.com/kubercloud/ani/pkg/ports"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
+	"github.com/kubercloud/ani/pkg/ports"
 )
 
 type stubAdminTenantService struct{}
@@ -73,8 +73,8 @@ func (stubProvisionTenantService) GetTenant(context.Context, string) (ports.Tena
 
 type stubEnsureProjectRegistry struct {
 	ports.ImageRegistry // 嵌入接口：测试仅覆盖 EnsureProject，其余方法不可达
-	ensured    []string
-	ensureErr  error
+	ensured             []string
+	ensureErr           error
 }
 
 func (s *stubEnsureProjectRegistry) EnsureProject(_ context.Context, projectID string) error {
