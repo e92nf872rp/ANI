@@ -250,28 +250,42 @@ func (s *PgMeteringService) ReportTokenUsage(ctx context.Context, request ports.
 	return s.local.ReportTokenUsage(ctx, request)
 }
 
+// meteringPeriodTimeZone 是计量 period 桶标签的输出时区。
+// 存储侧 period 是 UTC 裸字符串（分钟对齐，无时区标记），若直接截取子串输出，
+// 消费方会把它当本地时间直显，导致桶标签整体早 8 小时、group_by=day 的日期归属落在 UTC 日界上。
+// 平台面向国内用户，hour/day 桶统一按该时区切分并输出本地字面值。
+const meteringPeriodTimeZone = "Asia/Shanghai"
+
+// meteringPeriodLocalExpr 把分钟对齐的 UTC period 文本转成平台时区的本地 timestamp（无时区类型）：
+// SUBSTR 取到分钟 → 字面值 timestamp → AT TIME ZONE 'UTC' 解释为 UTC 时刻
+// → AT TIME ZONE 平台时区得到本地字面值，再交给 to_char 渲染小时/日期桶标签。
+const meteringPeriodLocalExpr = "SUBSTR(period, 1, 16)::timestamp AT TIME ZONE 'UTC' AT TIME ZONE '" + meteringPeriodTimeZone + "'"
+
 // buildUsageQuery 构建聚合查询 SQL 和参数。
 // SQL 始终输出固定列，确保 scan 列数与 SQL 列数一致：
 //
 //	租户视角: resource_type, total_quantity, unit, period（4 列）
 //	平台视角: tenant_id, resource_type, total_quantity, unit, period（5 列）
 //
-// period 列在无时间聚合（group_by 为空/resource_type/tenant_id）时输出 NULL::text 占位。
+// period 列在无时间聚合（group_by 为空/resource_type/tenant_id）时输出 NULL::text 占位；
+// 有时间聚合（day/hour）时按平台时区输出本地桶标签（见 meteringPeriodLocalExpr）。
 //
 // isPlatform=true 时，SQL 包含 tenant_id 输出列（平台视角），WHERE 不依赖 RLS。
 // isPlatform=false 时，SQL 不含 tenant_id 输出列，WHERE 依赖 RLS 自动过滤（租户视角）。
 func buildUsageQuery(request ports.MeteringUsageQueryRequest, isPlatform bool) (string, []any) {
-	// period 表达式：有时间聚合时取子串，无聚合时输出 NULL
+	// period 表达式：有时间聚合时按平台时区输出本地桶标签，无聚合时输出 NULL。
+	// WHERE 的时间区间仍是绝对时刻，库里 UTC 文本与 to_char(... AT TIME ZONE 'UTC') 边界
+	// 同为 UTC 字面量、字符串序即时间序，故过滤条件不随标签本地化改动。
 	var periodExpr, periodGroupExpr string
 	switch request.GroupBy {
 	case "day":
-		// period 格式 "2026-08-18T10:05" → 取前 10 字符 "2026-08-18"
-		periodExpr = "SUBSTR(period, 1, 10)"
-		periodGroupExpr = "SUBSTR(period, 1, 10)"
+		// 本地日期桶，例如 "2026-09-24"
+		periodExpr = fmt.Sprintf("to_char(%s, 'YYYY-MM-DD')", meteringPeriodLocalExpr)
+		periodGroupExpr = periodExpr
 	case "hour":
-		// 取前 13 字符 "2026-08-18T10"
-		periodExpr = "SUBSTR(period, 1, 13)"
-		periodGroupExpr = "SUBSTR(period, 1, 13)"
+		// 本地小时桶，例如 "2026-09-24T16"
+		periodExpr = fmt.Sprintf(`to_char(%s, 'YYYY-MM-DD"T"HH24')`, meteringPeriodLocalExpr)
+		periodGroupExpr = periodExpr
 	default:
 		// 空 / resource_type / tenant_id：不按时间聚合，period 输出 NULL，不参与 GROUP BY。
 		// 注意：平台视角下 tenant_id 始终参与 GROUP BY（见下方 groupByParts 构造），
