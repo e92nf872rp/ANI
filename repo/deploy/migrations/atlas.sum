@@ -1,4 +1,4 @@
-h1:LFQ9f/SMHC8InTbY8qaa5OYXCSykko1QrstYvYEZXVc=
+h1:gHVyGsMmrbjAkZC19SJza2oJ63hv2gek8cG3eauvApw=
 20260501000100_init_schema.sql h1:M4G3Wd+Bw2Zt4FUz5wq1kw519PAMb37SpkfRhS02ubI=
 20260502000200_operations_idempotency.sql h1:c79fYzupq5/lgRDB2t4xMUB4eRKrzpNnJ0UT5ZAOnqQ=
 20260502000300_permissions_schema.sql h1:7E8kXUbRLQZrNrMkGdqIrHvTZjl/7v2IxsPZhz8KIe0=
@@ -58,3 +58,4 @@ h1:LFQ9f/SMHC8InTbY8qaa5OYXCSykko1QrstYvYEZXVc=
 20260916120000_network_security_groups_vpc_id.sql h1:5VV1Xpw6G3kHrDq0U4hrmy9ioMEgBgItmHQLWYTbXAY=
 20260917010000_network_security_group_rules.sql h1:obvIuaTYX9W7cMvpdxeJoGeCXJJ+vrOxT94CGRAu0Uw=
 20260920120000_k8s_clusters.sql h1:0ZR5TY/F++S3daGclNvfWTHW60sPW9ytIcoa9Et7opM=
+20260924000100_kb_tables_rls_fix.sql h1:wF1ubZSalwNAZRHiRbRzg16mr7xT8SzPTCcFmuG8aW8=
