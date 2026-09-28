@@ -15,6 +15,15 @@ at-least-once: a process crash between NATS publish and the published=TRUE
 marking causes a duplicate publish on the next poll, so the rag-engine
 parse_worker MUST be idempotent on doc_id (rag-engine SPEC covers this).
 
+PUBLISH TRANSPORT: events are published through JetStream (awaiting the
+server PubAck) rather than core NATS fire-and-forget. Core publish returns
+as soon as the bytes reach the local socket buffer, so a silently dropped
+TCP connection marks an event published=TRUE even though it never reached
+the server — the document then stays parse_status=pending forever with no
+error. Awaiting the JetStream PubAck makes published=TRUE mean "durably in
+the ANI_TASKS stream"; if the stream is unavailable the dispatcher falls
+back to core publish (logged) so the loop still makes progress.
+
 The dispatcher runs as an independent coroutine started by main.py; it is
 independent of the gRPC servicer and survives per-request failures. NATS is
 not required for NotifyDocumentUploaded to succeed — the event is durably
@@ -83,6 +92,19 @@ class OutboxDispatcher:
         self._subject_overrides = subject_overrides or {}
         self._task: asyncio.Task | None = None
         self._stopped = False
+        # JetStream publish context, resolved lazily in start() from the
+        # nats client. Publishing through JetStream (instead of core
+        # fire-and-forget) makes publish await a server PubAck: a message
+        # is only marked published=TRUE once the server has durably
+        # accepted it into the ANI_TASKS stream. Core publish returns as
+        # soon as the bytes hit the local socket buffer, so a silently
+        # dropped TCP connection (NodePort/LB) marks events published
+        # even though they never reached the server — documents then
+        # stay parse_status=pending forever with no error anywhere.
+        self._js: Any | None = None
+        # Pending "ensure stream" coroutine scheduled by start(); awaited
+        # as the poll loop's first action (start() is sync by contract).
+        self._stream_ensure: Any | None = None
         # Backoff state for persistent-error log dedup.
         self._consecutive_failures = 0
         self._last_error_logged = 0.0  # monotonic time of last traceback log
@@ -92,6 +114,29 @@ class OutboxDispatcher:
         if self._task is not None and not self._task.done():
             return self._task
         self._stopped = False
+        # Resolve the JetStream context up front (best-effort): the
+        # ANI_TASKS stream must exist before the first publish. If the
+        # stream is missing and could not be ensured, publishing to a
+        # JetStream context would hang/err on every event — fall back to
+        # the client's core publish so the loop still makes progress.
+        if self._nats is not None and self._js is None:
+            try:
+                from app.consumers.jetstream import ensure_ani_tasks_stream
+
+                js = self._nats.jetstream()
+                # ensure_ani_tasks_stream is async; the dispatcher's task
+                # is created here but the poll loop runs on the same event
+                # loop, so schedule the ensure as the loop's first action
+                # instead of blocking start() (which is sync by contract).
+                self._js = js
+                self._stream_ensure = ensure_ani_tasks_stream(js)
+            except Exception:  # noqa: BLE001 — fall back to core publish
+                logger.warning(
+                    "outbox dispatcher: JetStream unavailable; using core "
+                    "publish (at-most-once risk on silent disconnect)",
+                    exc_info=True,
+                )
+                self._js = None
         self._task = asyncio.create_task(self._run_loop(), name="outbox-dispatcher")
         return self._task
 
@@ -115,6 +160,21 @@ class OutboxDispatcher:
         window (at most once per MAX_BACKOFF_INTERVAL_SECONDS).
         """
         import time
+
+        # First action: complete the async stream-ensure scheduled by
+        # start() so the ANI_TASKS stream exists before any JS publish.
+        if self._stream_ensure is not None:
+            try:
+                await self._stream_ensure
+            except Exception:  # noqa: BLE001 — fall back to core publish
+                logger.warning(
+                    "outbox dispatcher: ensure ANI_TASKS stream failed; "
+                    "falling back to core publish",
+                    exc_info=True,
+                )
+                self._js = None
+            finally:
+                self._stream_ensure = None
 
         while not self._stopped:
             try:
@@ -180,15 +240,23 @@ class OutboxDispatcher:
             subject = self._subject_overrides.get(
                 str(row.get("event_type") or ""), self._subject
             )
-            # Bounded publish: a dead NATS TCP connection must not hang the
-            # loop forever. On timeout the event stays un-dispatched and is
-            # retried on the next poll (at-least-once semantics preserved).
-            await asyncio.wait_for(
-                self._nats.publish(
-                    subject, payload_str.encode("utf-8")
-                ),
-                timeout=self._publish_timeout,
-            )
+            # Bounded publish. With JetStream the await covers the server
+            # PubAck, so a published=t row is guaranteed durable in the
+            # stream. Without JS (fallback) it is core fire-and-forget on
+            # a possibly-dead TCP connection — bounded so it cannot hang
+            # the loop forever. On timeout/error the event stays
+            # un-dispatched and is retried on the next poll (at-least-once).
+            payload_bytes = payload_str.encode("utf-8")
+            if self._js is not None:
+                await asyncio.wait_for(
+                    self._js.publish(subject, payload_bytes),
+                    timeout=self._publish_timeout,
+                )
+            else:
+                await asyncio.wait_for(
+                    self._nats.publish(subject, payload_bytes),
+                    timeout=self._publish_timeout,
+                )
             published_ids.append(event_id)
         # Batch-mark all published events in one UPDATE on one connection.
         async with self._pool.acquire() as conn:

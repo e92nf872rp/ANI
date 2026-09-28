@@ -119,6 +119,11 @@ def _vector_store_name(kb_id: str) -> str:
     return f"kb_{kb_id.replace('-', '')}"
 
 
+# Allowed values for the ListKBs status filter (ListKBsRequest.status).
+# 'deleted' rows are always excluded from listing regardless of the filter.
+_KB_LIST_STATUSES = frozenset({"active", "rebuilding"})
+
+
 class KBServiceServicer(pb_grpc.KBServiceServicer):
     """KBService servicer: 10 P0 RPCs wired (US-009) + 3 P1 UNIMPLEMENTED."""
 
@@ -443,11 +448,19 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         if self._pool is None:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
+        status = (request.status or "").strip()
+        if status and status not in _KB_LIST_STATUSES:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "status must be one of: " + ", ".join(sorted(_KB_LIST_STATUSES)),
+            )
+            return
         limit = request.page.limit or 20
         cursor = request.page.cursor or None
         async with self._pool.acquire() as conn:
             rows, total = await kb_repo.list_kbs(
-                conn, tenant_id=request.tenant_id, limit=limit, cursor=cursor
+                conn, tenant_id=request.tenant_id, limit=limit, cursor=cursor,
+                status=status,
             )
         kbs = [_kb_row_to_pb(r) for r in rows]
         next_cursor = str(rows[-1]["id"]) if rows and len(rows) >= limit else ""

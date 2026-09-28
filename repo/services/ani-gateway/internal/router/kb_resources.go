@@ -193,6 +193,11 @@ type updateKnowledgeBaseConfigRequest struct {
 
 // ── 11 P0 handlers (gRPC passthrough) ───────────────────────────────────────
 
+// kbListStatuses is the whitelist for the ListKBs status query filter
+// (mirrors kb-service's _KB_LIST_STATUSES). 'deleted' rows are always
+// excluded by the service regardless of the filter.
+var kbListStatuses = map[string]bool{"active": true, "rebuilding": true}
+
 func (a *kbAPI) listKnowledgeBases(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
 		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
@@ -203,7 +208,12 @@ func (a *kbAPI) listKnowledgeBases(ctx context.Context, c *app.RequestContext) {
 		limit = 20
 	}
 	cursor := string(c.QueryArgs().Peek("cursor"))
-	resp, err := a.client.ListKBs(ctx, instanceTenantID(c), int32(limit), cursor)
+	status := strings.TrimSpace(string(c.QueryArgs().Peek("status")))
+	if status != "" && !kbListStatuses[status] {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "status must be one of: active, rebuilding")
+		return
+	}
+	resp, err := a.client.ListKBs(ctx, instanceTenantID(c), int32(limit), cursor, status)
 	if err != nil {
 		writeKBError(c, err)
 		return

@@ -47,6 +47,29 @@ class _MockNATS:
         self.published.append((subject, payload))
 
 
+class _MockJetStream:
+    """Records JS publish calls; the returned PubAck stands in for the
+    server ack that makes a publish durable in the ANI_TASKS stream."""
+
+    def __init__(self):
+        self.published: list[tuple[str, bytes]] = []
+
+    async def publish(self, subject: str, payload: bytes):
+        self.published.append((subject, payload))
+        return object()  # PubAck stand-in
+
+
+class _MockJetStreamNATS(_MockNATS):
+    """NATS client exposing a JetStream context (start() path)."""
+
+    def __init__(self):
+        super().__init__()
+        self.js = _MockJetStream()
+
+    def jetstream(self):
+        return self.js
+
+
 def _make_event(
     event_id: int,
     payload: dict | None = None,
@@ -529,3 +552,44 @@ async def test_subject_overrides_none_equals_empty_dict():
         "ani.tasks.kb.parse.v2",
         "ani.tasks.kb.parse.v2",
     ]
+
+
+# ── JetStream publish (server PubAck durability) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_dispatch_once_publishes_via_jetstream_when_available():
+    """When a JetStream context is resolved, events go through js.publish
+    (server PubAck) rather than core nats.publish — so published=TRUE means
+    the message is durably in the ANI_TASKS stream, not merely handed to a
+    possibly-dead socket."""
+    rows = [_make_event(1), _make_event(2)]
+    pool = _MockPool(rows=rows)
+    nats = _MockJetStreamNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2"
+    )
+    dispatcher._js = nats.js  # simulate the context resolved in start()
+    dispatched = await dispatcher._dispatch_once()
+    assert dispatched == 2
+    # Every event went through JetStream; none through core publish.
+    assert len(nats.js.published) == 2
+    assert nats.published == []
+    assert all(s == "ani.tasks.kb.parse.v2" for s, _ in nats.js.published)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_once_falls_back_to_core_publish_without_jetstream():
+    """Fallback path: with no JetStream context the dispatcher uses core
+    publish (previous behavior) so the loop still makes progress."""
+    rows = [_make_event(1)]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2"
+    )
+    assert dispatcher._js is None
+    dispatched = await dispatcher._dispatch_once()
+    assert dispatched == 1
+    assert len(nats.published) == 1
+
