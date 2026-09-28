@@ -36,7 +36,7 @@ type PasswordLoginStore interface {
 	// 实现必须在事务内调用 types.SetDBTenant 以满足 refresh_tokens 的 RLS 策略：
 	//   tenant_id IS NULL OR tenant_id = current_setting('app.current_tenant_id')
 	// 任一步失败则回滚整事务，避免 access token 已签发但 refresh token 未入库的孤立状态。
-	FinalizeLogin(ctx context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error
+	FinalizeLogin(ctx context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, loginAt, expiresAt time.Time) error
 }
 
 // PlatformUser represents a platform admin user looked up for platform password login.
@@ -69,5 +69,5 @@ type PlatformLoginStore interface {
 	// FinalizeLogin 在单事务内完成"持久化平台 refresh token + 更新 last_login_at"。
 	// 平台账号无租户上下文，无需 SetDBTenant；refresh_tokens 的 RLS 策略
 	// 对 tenant_id IS NULL 的行直接放行。
-	FinalizeLogin(ctx context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error
+	FinalizeLogin(ctx context.Context, userID uuid.UUID, tokenHash string, roles []string, loginAt, expiresAt time.Time) error
 }

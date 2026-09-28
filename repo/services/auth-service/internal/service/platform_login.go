@@ -73,9 +73,10 @@ func (m *platformLoginManager) Login(ctx context.Context, username, password str
 	if err != nil {
 		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate refresh token"))
 	}
+	loginAt := m.now()
 	// 事务内插入平台 refresh token + 更新 last_login_at。
 	// 平台账号 tenant_id=NULL，refresh_tokens 的 RLS 策略直接放行，无需 SetDBTenant。
-	if err := m.store.FinalizeLogin(ctx, user.ID, hashRefreshToken(rawRefresh), roles, m.now().Add(defaultRefreshTokenTTL)); err != nil {
+	if err := m.store.FinalizeLogin(ctx, user.ID, hashRefreshToken(rawRefresh), roles, loginAt, loginAt.Add(defaultRefreshTokenTTL)); err != nil {
 		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to persist refresh token"))
 	}
 
@@ -83,6 +84,6 @@ func (m *platformLoginManager) Login(ctx context.Context, username, password str
 		AccessToken:  accessToken,
 		RefreshToken: rawRefresh,
 		ExpiresIn:    int32(defaultAccessTokenTTL.Seconds()),
-		IssuedAt:     timestamppb.New(m.now()),
+		IssuedAt:     timestamppb.New(loginAt),
 	}, nil
 }
