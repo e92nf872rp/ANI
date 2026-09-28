@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>142</dd></div>
-          <div><dt>Schemas</dt><dd>154</dd></div>
+          <div><dt>Operations</dt><dd>143</dd></div>
+          <div><dt>Schemas</dt><dd>158</dd></div>
         </dl>
       </section>
 
@@ -1256,6 +1256,14 @@
           <td>200, 401, 403, 404, 502</td>
         </tr>
         <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenants/{tenantId}/quota</code></td>
+          <td><code>updateTenantQuotaDirect</code></td>
+          <td>直接修改租户配额（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422, 502</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenants/{tenantId}/quota-requests</code></td>
           <td><code>listQuotaChangeRequests</code></td>
@@ -1435,8 +1443,10 @@
         <li><code>TenantPlanListItem</code></li>
         <li><code>TenantPlanListResponse</code></li>
         <li><code>TenantPlanStateChangeRequest</code></li>
+        <li><code>TenantQuotaTotalInput</code></li>
         <li><code>TenantQuotaViewItem</code></li>
         <li><code>TenantQuotaViewResponse</code></li>
+        <li><code>TenantQuotaWriteItem</code></li>
         <li><code>TenantRef</code></li>
         <li><code>TenantRole</code></li>
         <li><code>UpdateInferenceServicePoliciesRequest</code></li>
@@ -1449,6 +1459,8 @@
         <li><code>UpdateSsoConfigRequest</code></li>
         <li><code>UpdateTenantMfaRequest</code></li>
         <li><code>UpdateTenantPlanRequest</code></li>
+        <li><code>UpdateTenantQuotaDirectRequest</code></li>
+        <li><code>UpdateTenantQuotaDirectResponse</code></li>
         <li><code>UpdateTenantRequest</code></li>
         <li><code>UpdateTenantRoleRequest</code></li>
         <li><code>UpdateTenantSsoRequest</code></li>

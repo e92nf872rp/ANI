@@ -415,6 +415,93 @@ func TestHAMiRemoved(t *testing.T) {
 	}
 }
 
+// TestListNodeClassesDerivesPhysicalCards 验证 GPUNodeClass.PhysicalCards 的
+// 两条派生路径：vGPU 注解路径取物理卡段数（设备记录是切片粒度），整卡路径取
+// 设备记录数。这是 occupancy 物理卡/逻辑卡口径的数据源。
+func TestListNodeClassesDerivesPhysicalCards(t *testing.T) {
+	// vGPU 注解路径：2 张物理卡 × 每卡 4 切片 → 8 条切片记录、物理卡=2。
+	vgpuBody := `{
+  "items": [{
+    "metadata": {
+      "name": "vgpu-node-1",
+      "labels": {"kubernetes.io/hostname": "vgpu-node-1"},
+      "annotations": {
+        "volcano.sh/node-vgpu-register": "GPU-aaa,4,4914,NVIDIA-RTX4090,true,hami-core:GPU-bbb,4,4914,NVIDIA-RTX4090,true,hami-core:"
+      }
+    },
+    "status": {
+      "capacity": {"volcano.sh/vgpu-number": "8"},
+      "nodeInfo": {"kubeletVersion": "v1.36.1"},
+      "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
+    }
+  }]
+}`
+	inv := newTestGPUInventory(t, vgpuBody)
+	nodes, err := inv.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListNodeClasses error = %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(nodes))
+	}
+	if len(nodes[0].Devices) != 8 {
+		t.Fatalf("devices = %d, want 8 (2 卡 × 4 切片)", len(nodes[0].Devices))
+	}
+	if nodes[0].PhysicalCards != 2 {
+		t.Fatalf("PhysicalCards = %d, want 2（注解段数，不是设备记录数）", nodes[0].PhysicalCards)
+	}
+
+	// 整卡路径（无注解）：2 张整卡 → 2 条记录、物理卡=2。
+	wholeBody := `{
+  "items": [{
+    "metadata": {
+      "name": "whole-node-1",
+      "labels": {"kubernetes.io/hostname": "whole-node-1"}
+    },
+    "status": {
+      "capacity": {"nvidia.com/gpu": "2"},
+      "nodeInfo": {"kubeletVersion": "v1.36.1"},
+      "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
+    }
+  }]
+}`
+	inv2 := newTestGPUInventory(t, wholeBody)
+	nodes2, err := inv2.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListNodeClasses(whole) error = %v", err)
+	}
+	if len(nodes2[0].Devices) != 2 || nodes2[0].PhysicalCards != 2 {
+		t.Fatalf("wholecard devices=%d PhysicalCards=%d, want 2/2", len(nodes2[0].Devices), nodes2[0].PhysicalCards)
+	}
+
+	// 回退路径（无注解、volcano 切片资源 + gpu.count label）：
+	// 8 切片 × gpu.count=2 → PhysicalCards=2（不是切片数 8）。
+	fallbackBody := `{
+  "items": [{
+    "metadata": {
+      "name": "fallback-node-1",
+      "labels": {"kubernetes.io/hostname": "fallback-node-1", "nvidia.com/gpu.count": "2"}
+    },
+    "status": {
+      "capacity": {"volcano.sh/vgpu-number": "8", "volcano.sh/vgpu-memory": "39312"},
+      "nodeInfo": {"kubeletVersion": "v1.36.1"},
+      "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
+    }
+  }]
+}`
+	inv3 := newTestGPUInventory(t, fallbackBody)
+	nodes3, err := inv3.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListNodeClasses(fallback) error = %v", err)
+	}
+	if len(nodes3[0].Devices) != 8 {
+		t.Fatalf("fallback devices = %d, want 8", len(nodes3[0].Devices))
+	}
+	if nodes3[0].PhysicalCards != 2 {
+		t.Fatalf("fallback PhysicalCards = %d, want 2（gpu.count label）", nodes3[0].PhysicalCards)
+	}
+}
+
 // TestParseVolcanoVGPUAnnotation verifies parsing of the
 // volcano.sh/node-vgpu-register annotation for vGPU device count.
 func TestParseVolcanoVGPUAnnotation(t *testing.T) {

@@ -127,7 +127,9 @@ func (s *KubernetesPlatformCapacityService) GetCapacityOverview(ctx context.Cont
 		}
 	}
 
-	// 2. 租户数（status <> 'disabled'）。
+	// 2. 活跃租户数（status = 'active'，不含 frozen/disabled）。
+	// ListAvailableTenants 语义为 status <> 'disabled'（邀请管理员等共享场景），
+	// 这里在其结果上按 active 过滤，不改变共享方法本身口径。
 	if s.tenantService == nil {
 		degraded = append(degraded, "tenant service not configured")
 	} else {
@@ -135,7 +137,13 @@ func (s *KubernetesPlatformCapacityService) GetCapacityOverview(ctx context.Cont
 		if err != nil {
 			degraded = append(degraded, "tenant list failed: "+err.Error())
 		} else {
-			region.TenantCount = int64(len(tenants))
+			var activeCount int64
+			for _, t := range tenants {
+				if t.Status == ports.TenantStatusActive {
+					activeCount++
+				}
+			}
+			region.TenantCount = activeCount
 		}
 	}
 

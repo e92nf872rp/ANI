@@ -19,7 +19,9 @@ import (
 
 // adminTenantAPI holds Core tenant service for /admin/tenants/*.
 type adminTenantAPI struct {
-	tenant ports.TenantService
+	tenant    ports.TenantService
+	registry  ports.ImageRegistry
+	kubeApply runtimeadapter.TenantNamespaceApplier
 }
 
 // registerAdminTenantResources registers Core tenant endpoints:
@@ -30,13 +32,14 @@ type adminTenantAPI struct {
 //	GET  /admin/tenants/:tenant_id
 //	PUT  /admin/tenants/:tenant_id
 //	POST /admin/tenants/:tenant_id/freeze|unfreeze|disable
+//	POST /admin/tenants/:tenant_id/provision
 //	GET/PUT /admin/tenants/:tenant_id/auth
 //	GET  /admin/tenants/:tenant_id/lifecycle
-func registerAdminTenantResources(v1 *route.RouterGroup, tenant ports.TenantService) {
+func registerAdminTenantResources(v1 *route.RouterGroup, tenant ports.TenantService, registry ports.ImageRegistry, kubeApply runtimeadapter.TenantNamespaceApplier) {
 	if tenant == nil {
 		return
 	}
-	api := &adminTenantAPI{tenant: tenant}
+	api := &adminTenantAPI{tenant: tenant, registry: registry, kubeApply: kubeApply}
 	v1.GET("/admin/tenant-admins/available-tenants", api.listAvailableTenants)
 	v1.POST("/admin/tenants", api.createTenant)
 	v1.GET("/admin/tenants", api.listTenants)
@@ -45,6 +48,7 @@ func registerAdminTenantResources(v1 *route.RouterGroup, tenant ports.TenantServ
 	v1.POST("/admin/tenants/:tenant_id/freeze", api.freezeTenant)
 	v1.POST("/admin/tenants/:tenant_id/unfreeze", api.unfreezeTenant)
 	v1.POST("/admin/tenants/:tenant_id/disable", api.disableTenant)
+	v1.POST("/admin/tenants/:tenant_id/provision", api.provisionTenant)
 	v1.GET("/admin/tenants/:tenant_id/auth", api.getTenantAuth)
 	v1.PUT("/admin/tenants/:tenant_id/auth", api.updateTenantAuth)
 	v1.GET("/admin/tenants/:tenant_id/lifecycle", api.listTenantLifecycle)
@@ -230,6 +234,57 @@ func (api *adminTenantAPI) stateTransition(
 		return
 	}
 	c.JSON(http.StatusOK, toAdminTenantResponse(tenant))
+}
+
+// provisionTenant 幂等确保租户基础设施（Core POST /admin/tenants/:tenant_id/provision）：
+// Harbor 镜像仓库项目（与 tenant_id 同名）+ K8s 命名空间 ani-tenant-<tenant_id>。
+// 业务层自幂等（EnsureProject + SSA），不要求 Idempotency-Key。
+// registry 未注入按 local no-op 处理；K8s 客户端未配置时 namespace 步骤
+// 降级跳过（ensured=false + reason），配置态不算失败、不报错。
+func (api *adminTenantAPI) provisionTenant(ctx context.Context, c *app.RequestContext) {
+	// 步骤 1：tenant_id 解析（含 GetTenant 存在性校验，防幽灵 ID 乱建项目）
+	if api.tenant == nil {
+		writeDemoError(c, http.StatusServiceUnavailable, "TENANT_UNAVAILABLE", "tenant service unavailable")
+		return
+	}
+	tenantID := strings.TrimSpace(c.Param("tenant_id"))
+	if _, err := uuid.Parse(tenantID); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "tenant_id must be a uuid")
+		return
+	}
+	if _, err := api.tenant.GetTenant(ctx, tenantID); err != nil {
+		writeAdminTenantError(c, err)
+		return
+	}
+	// 步骤 2：Harbor 项目 ensure（local registry 模式为 no-op 成功）
+	registryEnsured := true
+	if api.registry != nil {
+		if err := api.registry.EnsureProject(ctx, tenantID); err != nil {
+			writeDemoError(c, http.StatusInternalServerError, "INFRA_PROVISION_FAILED", err.Error())
+			return
+		}
+	}
+	// 步骤 3：K8s 命名空间 ensure；未配置（本地/无凭证环境）降级跳过
+	namespaceEnsured := true
+	var namespaceReason any
+	if api.kubeApply == nil {
+		namespaceEnsured = false
+		namespaceReason = "kubernetes client not configured"
+	} else if err := runtimeadapter.EnsureTenantNamespace(ctx, api.kubeApply, tenantID); err != nil {
+		writeDemoError(c, http.StatusInternalServerError, "INFRA_PROVISION_FAILED", err.Error())
+		return
+	}
+	// 步骤 4：返回 ensured 结果（不区分新建 vs 已存在）
+	c.JSON(http.StatusOK, map[string]any{
+		"tenant_id": tenantID,
+		"registry_project": map[string]any{
+			"ensured": registryEnsured,
+		},
+		"namespace": map[string]any{
+			"ensured": namespaceEnsured,
+			"reason":  namespaceReason,
+		},
+	})
 }
 
 // withTenantLifecycleCtx 统一解析 request_id / actor_user_id 并注入 ctx，

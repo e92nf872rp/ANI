@@ -548,16 +548,21 @@ func (api *gpuInventoryAPI) gpuOccupancyFromNodes(ctx context.Context, nodes []p
 	tenants := map[string]bool{}
 	buckets := map[string]*gpuOccupancyTypeBucket{}
 	for _, node := range nodes {
+		// 物理卡：优先用 adapter 派生的节点级去重物理卡数（vGPU 节点的设备
+		// 记录是切片粒度，len(Devices) 是切片数不是卡数）；未提供时回退按
+		// 记录数计（整卡节点语义，与旧实现兼容）。
+		if node.PhysicalCards > 0 {
+			response.PhysicalCardCount += node.PhysicalCards
+		} else {
+			response.PhysicalCardCount += len(node.Devices)
+		}
 		for index, device := range node.Devices {
 			item := api.gpuInventoryRecordFromDevice(ctx, node, device, index, occupancy, surface)
 			response.Total++
-			// 物理卡口径：每条设备记录即一张物理卡；逻辑卡按 shares 累计。
-			response.PhysicalCardCount++
-			shares := item.Shares
-			if shares <= 0 {
-				shares = 1
-			}
-			response.LogicalCardCount += shares
+			// 逻辑卡：整卡数 + vGPU 切片数合计 = 设备记录总数（每条记录即一个
+			// 可调度单元，各计 1）。不能按 Shares 累计——Shares 是该记录所属
+			// 物理卡的切分份数，按它累加会得到 切片数×每卡切分数 的双重计数。
+			response.LogicalCardCount++
 			switch item.GPUMode {
 			case "vgpu":
 				response.VGPUCount++

@@ -124,7 +124,10 @@ func (i *JWTIssuer) IssueServiceTokenPayload(payload jwtPayload, ttl time.Durati
 }
 
 // resolveIssueServiceTokenClaims 将 IssueServiceTokenRequest 映射为 V2 JWT claims。
-// 同时写入 V2 规范字段（credential_domain + permissions）与 deprecated legacy projection。
+// inference-service 调 /platform-workloads*（legacy policy），签 service 主体形态不变；
+// tenant-service / platform-settings-service 调 /admin/*（V2 policy 只允许 PrincipalUser），
+// 按服务扮演签 platform user 形态：principal_kind=user + credential_domain=platform
+// + roles=[platform-admin] + scope=platform，permissions 冗余保留供审计。
 func resolveIssueServiceTokenClaims(req *authv1.IssueServiceTokenRequest) (jwtPayload, error) {
 	//nolint:staticcheck // scope 字段虽在 proto 标 deprecated，但 V2 兼容路径必须读取旧字段
 	legacyScope := strings.TrimSpace(req.GetScope())
@@ -169,6 +172,28 @@ func resolveIssueServiceTokenClaims(req *authv1.IssueServiceTokenRequest) (jwtPa
 	}
 	if domain != "tenant" && domain != "platform" {
 		return jwtPayload{}, status.Error(codes.InvalidArgument, "invalid credential_domain")
+	}
+
+	// 平台管理面服务（tenant-service / platform-settings-service）：按服务扮演签
+	// platform user 形态。V2 policy 的 PrincipalKinds 只允许 user，service 主体进不去；
+	// uid 沿用 magic UUID，避免服务名泄漏到 legacy wire 契约的 user_id 字段。
+	if isPlatformAdminMintCaller(req.GetCallerService()) {
+		if domain != "platform" || strings.TrimSpace(req.GetTenantId()) != "" {
+			return jwtPayload{}, status.Error(codes.InvalidArgument,
+				"platform admin caller must use platform credential domain without tenant")
+		}
+		return jwtPayload{
+			PrincipalKind:    "user",
+			TenantID:         "",
+			Subject:          req.GetCallerService(),
+			UserID:           serviceActorUserID.String(),
+			CredentialDomain: "platform",
+			Permissions:      permissions,
+			// deprecated legacy projection：scope=platform + roles=[platform-admin]
+			// 与 IssuePlatformAccessToken 的平台用户形态保持一致，legacy 链直接放行。
+			Scope: "platform",
+			Roles: []string{"platform-admin"},
+		}, nil
 	}
 
 	return jwtPayload{

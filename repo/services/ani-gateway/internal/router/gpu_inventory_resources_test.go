@@ -329,6 +329,54 @@ func TestGPUInventoryOccupancyCountsInUseWhenInstanceEchoed(t *testing.T) {
 	}
 }
 
+// TestGPUOccupancyPhysicalAndLogicalCardCounts 锁定 BOSS 统计卡口径：
+// 物理卡 = 节点级去重物理卡数（vGPU 节点不能拿切片记录数当卡数）；
+// 逻辑卡 = 整卡数 + vGPU 切片数合计 = 设备记录总数（不能按 Shares 累计，
+// 那会得到 切片数×每卡切分数 的双重计数 96）。
+// 场景对齐真实集群：3 节点 × 2 物理卡 × 4 切片 → 正确 6/24，错误实现 24/96。
+func TestGPUOccupancyPhysicalAndLogicalCardCounts(t *testing.T) {
+	vgpuDevices := make([]ports.GPUDeviceClass, 0, 8)
+	for i := 0; i < 8; i++ {
+		vgpuDevices = append(vgpuDevices, ports.GPUDeviceClass{
+			Vendor:             ports.GPUVendorNVIDIA,
+			Model:              "NVIDIA-RTX4090",
+			ResourceName:       "volcano.sh/vgpu-number",
+			VirtualizationMode: ports.GPUVirtualizationVGPU,
+			Shares:             4,
+		})
+	}
+	nodes := []ports.GPUNodeClass{
+		{NodeName: "vgpu-node-1", Ready: true, Devices: vgpuDevices, PhysicalCards: 2, GPUMode: "vgpu"},
+		{NodeName: "vgpu-node-2", Ready: true, Devices: append([]ports.GPUDeviceClass(nil), vgpuDevices...), PhysicalCards: 2, GPUMode: "vgpu"},
+		{NodeName: "vgpu-node-3", Ready: true, Devices: append([]ports.GPUDeviceClass(nil), vgpuDevices...), PhysicalCards: 2, GPUMode: "vgpu"},
+		// 整卡节点：PhysicalCards 未提供（0）→ 回退按记录数计。
+		{NodeName: "whole-node-1", Ready: true, Devices: []ports.GPUDeviceClass{
+			{Vendor: ports.GPUVendorNVIDIA, Model: "NVIDIA-A100", ResourceName: "nvidia.com/gpu", Shares: 1},
+			{Vendor: ports.GPUVendorNVIDIA, Model: "NVIDIA-A100", ResourceName: "nvidia.com/gpu", Shares: 1},
+		}},
+	}
+	api := newGPUInventoryAPIWithStore(fakeGPUInventory{nodes: nodes}, nil, nil)
+
+	records, err := api.inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListNodeClasses error = %v", err)
+	}
+	occ := api.gpuOccupancyFromNodes(context.Background(), records, gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{}}, emptySurfaceState())
+
+	if occ.Total != 26 {
+		t.Fatalf("Total = %d, want 26（24 切片 + 2 整卡）", occ.Total)
+	}
+	if occ.PhysicalCardCount != 8 {
+		t.Fatalf("PhysicalCardCount = %d, want 8（3 vGPU 节点 × 2 卡 + 2 整卡；错误实现会得 26）", occ.PhysicalCardCount)
+	}
+	if occ.LogicalCardCount != 26 {
+		t.Fatalf("LogicalCardCount = %d, want 26（整卡 + 切片各计 1；错误实现会得 24×4+2=98）", occ.LogicalCardCount)
+	}
+	if occ.VGPUCount != 24 {
+		t.Fatalf("VGPUCount = %d, want 24", occ.VGPUCount)
+	}
+}
+
 func TestGPUInventoryListWithNilStoreFallsBackToNoEcho(t *testing.T) {
 	// Scenario: no InstanceStore injected (local/dev profile); behaviour
 	// matches the old hardcoded nil path.

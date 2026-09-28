@@ -118,6 +118,16 @@ message ReviewQuotaChangeRequestRequest {
   string idempotency_key = 4;  // required UUID
 }
 
+message UpdateTenantQuotaDirectRequest {
+  string tenant_id = 1;
+  repeated TenantQuotaTotalInput items = 2;  // min 1; unique resource_type per batch
+  string idempotency_key = 3;                 // required UUID
+}
+
+message UpdateTenantQuotaDirectResponse {
+  repeated TenantQuotaWriteItem items = 1;
+}
+
 message ListTenantLifecycleRequest {
   string tenant_id = 1;
   string action = 2;  // create | freeze | unfreeze | disable; empty = all
@@ -216,6 +226,19 @@ message TenantQuotaViewItem {
   int64 used = 3;
   int64 total = 4;
   string unit = 5;
+}
+
+message TenantQuotaTotalInput {
+  string resource_type = 1;
+  int64 total = 2;
+}
+
+message TenantQuotaWriteItem {
+  string resource_type = 1;
+  int64 total = 2;    // effective total; tightened when Core clamps the request
+  int64 used = 3;
+  int64 reserved = 4;
+  bool tightened = 5;
 }
 
 message QuotaChangeRequestInput {

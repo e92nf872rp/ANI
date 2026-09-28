@@ -9,7 +9,7 @@ import (
 // LocalPlatformCapacityService local/dev profile 降级实现：
 // 复用 LocalGPUInventory 派生确定性容量值（ani-gpu-a Ready 2×A100、
 // ani-gpu-b NotReady 1×L40S → gpu_total=3、gpu_free=2、fault=1、nodes=1、azs=[]），
-// tenant_count 取注入的本地 TenantService 条数（无则 0）。
+// tenant_count 取注入的本地 TenantService 中 active 租户数（无则 0）。
 type LocalPlatformCapacityService struct {
 	inventory     ports.GPUInventory
 	tenantService ports.TenantService
@@ -83,5 +83,12 @@ func localPlatformCapacityTenantCount(ctx context.Context, tenantService ports.T
 	if err != nil {
 		return 0
 	}
-	return int64(len(tenants))
+	// 与 real adapter 同口径：只统计 active 租户（不含 frozen/disabled）。
+	var activeCount int64
+	for _, t := range tenants {
+		if t.Status == ports.TenantStatusActive {
+			activeCount++
+		}
+	}
+	return activeCount
 }
