@@ -337,19 +337,18 @@ func main() {
 	// 开物复用实例运行时的 Kubernetes REST client；没有真实 Kubernetes
 	// client 时读取器保持 nil，处理函数会失败关闭。
 	kaiwuRuntimeReader := newGatewayKaiwuRuntimeReader(kubernetesRESTClient, gatewayKaiwuRuntimeConfigFromEnv())
-	kaiwuProxyHTTPClient := newGatewayKaiwuProxyHTTPClient()
-	kaiwuCookieConfig, err := gatewayKaiwuCookieConfigFromEnv()
+	kaiwuPublicEntry, err := gatewayKaiwuPublicEntryConfigFromEnv()
 	if err != nil {
-		logger.Error("failed to configure Kaiwu proxy cookies", "err", err)
+		logger.Error("failed to configure Kaiwu public origin entry", "err", err)
 		os.Exit(1)
 	}
-	kaiwuCookieSigner, err := newGatewayKaiwuCookieSigner(kaiwuCookieConfig)
-	if err != nil {
-		logger.Error("failed to configure Kaiwu proxy cookie signer", "err", err)
-		os.Exit(1)
-	}
-	if kaiwuCookieSigner == nil {
-		logger.Warn("Kaiwu proxy cookie signing secret is not configured; Kaiwu entry APIs will fail closed")
+	if kaiwuPublicEntry.ConsoleURL != "" || kaiwuPublicEntry.BossURL != "" {
+		logger.Info("Kaiwu public origin entry configured",
+			"console", kaiwuPublicEntry.ConsoleURL,
+			"boss", kaiwuPublicEntry.BossURL,
+			"token_ttl", kaiwuPublicEntry.TokenTTL)
+	} else {
+		logger.Warn("Kaiwu public origins are not configured; Kaiwu entry APIs will fail closed")
 	}
 	router.RegisterWithOptions(h, router.RegisterOptions{
 		K8sClusterService:                     k8sClusterService,
@@ -391,8 +390,9 @@ func main() {
 		ComponentMetricsReader:                componentMetricsReader,
 		ComponentLogReader:                    componentLogReader,
 		KaiwuRuntimeReader:                    kaiwuRuntimeReader,
-		KaiwuCookieSigner:                     kaiwuCookieSigner,
-		KaiwuProxyHTTPClient:                  kaiwuProxyHTTPClient,
+		KaiwuConsolePublicURL:                 kaiwuPublicEntry.ConsoleURL,
+		KaiwuBossPublicURL:                    kaiwuPublicEntry.BossURL,
+		KaiwuEntryTokenTTL:                    kaiwuPublicEntry.TokenTTL,
 	})
 	runtimeAdmin, err := startGatewayRuntimeAdmin(logger)
 	if err != nil {

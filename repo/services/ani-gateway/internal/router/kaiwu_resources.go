@@ -10,7 +10,6 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/utils"
-	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
@@ -27,8 +26,12 @@ const (
 // KaiwuRuntimeReader 读取某个开物客户端当前可用的运行时连接信息。
 //
 // 实现方必须返回开物 ClusterIP Service 的内部访问地址，以及 DSH 启动时
-// 发布到 Kubernetes Secret 的 webToken。这两个值只能留在服务端请求处理
-// 内存中：调用方不得把它们返回给浏览器、写入公开 URL，或记录到日志。
+// 发布到 Kubernetes Secret 的 webToken。内部 ClusterIP 目标只能留在
+// 服务端请求处理内存中：调用方不得把它返回给浏览器或记录到日志。
+//
+// webToken 作为 DSH 原生的一次性启动参数出现在返回给浏览器的入口地址中
+// （开物独占 origin，Gateway 不做子路径反向代理）。因此入口地址必须视为
+// 凭据：只允许即时跳转，不得写入日志、工单、埋点或任何持久化存储。
 type KaiwuRuntimeReader interface {
 	// GetKaiwuRuntime 返回指定开物客户端的当前运行时目标和 webToken。
 	//
@@ -42,11 +45,6 @@ type KaiwuRuntimeReader interface {
 	GetKaiwuRuntime(ctx context.Context, client string) (target *url.URL, webToken string, err error)
 }
 
-// kaiwuRuntimeReader 由 RegisterWithOptions 注入，供后续开物入口和代理
-// 处理函数使用。nil 表示 Kubernetes 运行时未配置，后续处理函数必须按
-// 503 失败关闭，不得降级为公开入口。
-var kaiwuRuntimeReader KaiwuRuntimeReader
-
 const (
 	kaiwuConsoleTenantName = "tenant-a"
 	kaiwuEntryExpiresIn    = 120
@@ -55,13 +53,27 @@ const (
 // kaiwuAPI 保存开物入口处理函数使用的权威数据存储和运行时读取器。
 type kaiwuAPI struct {
 	runtimeReader     KaiwuRuntimeReader
-	cookieSigner      KaiwuCookieSigner
 	tenantService     ports.TenantService
 	platformUserStore ports.PlatformUserAdminStore
+	publicEntry       KaiwuPublicEntryConfig
 }
 
-// kaiwuEntryResponse 是公开 JSON 契约；它永远不包含内部 ClusterIP 目标
-// 或 DSH webToken。
+// KaiwuPublicEntryConfig 描述开物独占 origin 的入口配置。开物页面依赖
+// 根路径绝对资源（/assets、/plugins、/api），无法在子路径下运行，因此
+// 部署让开物独占一个 origin（NodePort 或独立域名），Gateway 只负责
+// 鉴权并返回该 origin 的绝对入口地址。
+type KaiwuPublicEntryConfig struct {
+	// ConsoleURL 是开物 Console 对外暴露的 origin 基址，例如
+	// http://10.10.1.66:30088。为空表示该客户端未配置，入口按 503 失败关闭。
+	ConsoleURL string
+	// BossURL 是开物 BOSS 对外暴露的 origin 基址，语义同 ConsoleURL。
+	BossURL string
+	// TokenTTL 是入口地址有效期提示，零值或负值使用 kaiwuEntryExpiresIn。
+	TokenTTL time.Duration
+}
+
+// kaiwuEntryResponse 是公开 JSON 契约；它永远不包含内部 ClusterIP 目标。
+// entry_url 是开物自身 origin 的绝对地址，按设计携带一次性启动 token。
 type kaiwuEntryResponse struct {
 	Client    string `json:"client"`
 	EntryURL  string `json:"entry_url"`
@@ -70,12 +82,12 @@ type kaiwuEntryResponse struct {
 
 // registerKaiwuResources 注册两个 Services 入口操作。即使运行时读取器
 // 为 nil 也始终注册路由，以便发现契约漂移；处理函数随后按 503 失败关闭。
-func registerKaiwuResources(svc *route.RouterGroup, reader KaiwuRuntimeReader, cookieSigner KaiwuCookieSigner, tenantService ports.TenantService, platformUserStore ports.PlatformUserAdminStore) {
+func registerKaiwuResources(svc *route.RouterGroup, reader KaiwuRuntimeReader, tenantService ports.TenantService, platformUserStore ports.PlatformUserAdminStore, publicEntry KaiwuPublicEntryConfig) {
 	api := kaiwuAPI{
 		runtimeReader:     reader,
-		cookieSigner:      cookieSigner,
 		tenantService:     tenantService,
 		platformUserStore: platformUserStore,
+		publicEntry:       publicEntry,
 	}
 	svc.GET("/integrations/kaiwu/console/entry", api.consoleEntry)
 	svc.GET("/integrations/kaiwu/boss/entry", api.bossEntry)
@@ -119,21 +131,16 @@ func (api *kaiwuAPI) consoleEntry(ctx context.Context, c *app.RequestContext) {
 		writeKaiwuError(c, http.StatusForbidden, "KAIWU_TENANT_NOT_ACTIVE", "tenant is not active")
 		return
 	}
-	cookie, err := api.issueKaiwuBootstrapCookie(c, KaiwuCookieIdentity{
-		Client:   kaiwuClientConsole,
-		Scope:    "tenant",
-		TenantID: tenantID,
-		UserID:   strings.TrimSpace(middleware.GetUserID(c)),
-	})
+	baseURL := api.publicEntryBaseURL(kaiwuClientConsole)
+	if baseURL == "" {
+		writeKaiwuError(c, http.StatusServiceUnavailable, "KAIWU_BACKEND_UNAVAILABLE", "Kaiwu console origin not configured")
+		return
+	}
+	_, webToken, err := api.readRuntime(ctx, c, kaiwuClientConsole)
 	if err != nil {
 		return
 	}
-
-	target, webToken, err := api.readRuntime(ctx, c, kaiwuClientConsole)
-	if err != nil {
-		return
-	}
-	writeKaiwuEntry(c, kaiwuClientConsole, target, webToken, cookie)
+	writeKaiwuPublicEntry(c, kaiwuClientConsole, kaiwuPublicEntryURL(baseURL, webToken), api.publicEntryTTLSeconds())
 }
 
 // bossEntry 授权当前平台用户，并返回共享 Kaiwu BOSS 实例的 Gateway
@@ -175,20 +182,16 @@ func (api *kaiwuAPI) bossEntry(ctx context.Context, c *app.RequestContext) {
 		writeKaiwuError(c, http.StatusForbidden, "KAIWU_PLATFORM_USER_NOT_ACTIVE", "platform user is not active")
 		return
 	}
-	cookie, err := api.issueKaiwuBootstrapCookie(c, KaiwuCookieIdentity{
-		Client: kaiwuClientBoss,
-		Scope:  "platform",
-		UserID: userID,
-	})
+	baseURL := api.publicEntryBaseURL(kaiwuClientBoss)
+	if baseURL == "" {
+		writeKaiwuError(c, http.StatusServiceUnavailable, "KAIWU_BACKEND_UNAVAILABLE", "Kaiwu boss origin not configured")
+		return
+	}
+	_, webToken, err := api.readRuntime(ctx, c, kaiwuClientBoss)
 	if err != nil {
 		return
 	}
-
-	target, webToken, err := api.readRuntime(ctx, c, kaiwuClientBoss)
-	if err != nil {
-		return
-	}
-	writeKaiwuEntry(c, kaiwuClientBoss, target, webToken, cookie)
+	writeKaiwuPublicEntry(c, kaiwuClientBoss, kaiwuPublicEntryURL(baseURL, webToken), api.publicEntryTTLSeconds())
 }
 
 // readRuntime 调用指定客户端的注入读取器，并执行本地纵深防御校验。
@@ -209,60 +212,38 @@ func (api *kaiwuAPI) readRuntime(ctx context.Context, c *app.RequestContext, cli
 	return target, webToken, nil
 }
 
-// issueKaiwuBootstrapCookie 签名授权后的浏览器身份，并根据请求协议
-// 设置 Secure Cookie 属性。
-func (api *kaiwuAPI) issueKaiwuBootstrapCookie(c *app.RequestContext, identity KaiwuCookieIdentity) (KaiwuCookie, error) {
-	if api.cookieSigner == nil {
-		writeKaiwuError(c, http.StatusServiceUnavailable, "KAIWU_BACKEND_UNAVAILABLE", "Kaiwu cookie signer unavailable")
-		return KaiwuCookie{}, ports.ErrUnavailable
+// publicEntryBaseURL 返回指定客户端配置的独占 origin 基址。未配置时返回
+// 空字符串，调用方按 503 失败关闭。
+func (api *kaiwuAPI) publicEntryBaseURL(client string) string {
+	if client == kaiwuClientBoss {
+		return strings.TrimSpace(api.publicEntry.BossURL)
 	}
-	cookie, err := api.cookieSigner.IssueKaiwuBootstrapCookie(identity, time.Now(), isKaiwuSecureRequest(c))
-	if err != nil {
-		writeKaiwuError(c, http.StatusServiceUnavailable, "KAIWU_BACKEND_UNAVAILABLE", "Kaiwu cookie signer unavailable")
-		return KaiwuCookie{}, err
-	}
-	return cookie, nil
+	return strings.TrimSpace(api.publicEntry.ConsoleURL)
 }
 
-// writeKaiwuEntry 设置签名 HttpOnly Cookie，并只返回公开代理路径和 TTL。
-// 内部目标与 DSH token 不会被序列化。
-func writeKaiwuEntry(c *app.RequestContext, client string, _ *url.URL, _ string, cookie KaiwuCookie) {
-	entryURL := "/kaiwu/console"
-	if client == kaiwuClientBoss {
-		entryURL = "/kaiwu/boss"
+// publicEntryTTLSeconds 返回独占 origin 入口地址的有效期提示（秒）。
+func (api *kaiwuAPI) publicEntryTTLSeconds() int {
+	if api.publicEntry.TokenTTL > 0 {
+		return int(api.publicEntry.TokenTTL / time.Second)
 	}
-	setKaiwuCookie(c, cookie)
-	expiresIn := int(cookie.MaxAge / time.Second)
+	return kaiwuEntryExpiresIn
+}
+
+// kaiwuPublicEntryURL 拼接开物独占 origin 的绝对入口地址。DSH 收到
+// ?token= 后会立即以 303 跳转到根路径并下发自身会话 Cookie，token 不会
+// 长期停留在地址栏，但该地址在有效期内等同凭据。
+func kaiwuPublicEntryURL(baseURL string, webToken string) string {
+	return strings.TrimRight(baseURL, "/") + "/?token=" + url.QueryEscape(webToken)
+}
+
+// writeKaiwuPublicEntry 返回开物独占 origin 的绝对入口地址。Gateway 不
+// 签发任何代理 Cookie，也不承担子路径反向代理。
+func writeKaiwuPublicEntry(c *app.RequestContext, client string, entryURL string, expiresIn int) {
 	c.JSON(http.StatusOK, kaiwuEntryResponse{
 		Client:    client,
 		EntryURL:  entryURL,
 		ExpiresIn: expiresIn,
 	})
-}
-
-// setKaiwuCookie 为签名 Gateway Cookie 统一设置 HttpOnly、SameSite=Lax、
-// 客户端路径，以及由协议推导的 Secure 属性。
-func setKaiwuCookie(c *app.RequestContext, cookie KaiwuCookie) {
-	c.SetCookie(
-		cookie.Name,
-		cookie.Value,
-		int(cookie.MaxAge/time.Second),
-		cookie.Path,
-		"",
-		protocol.CookieSameSiteLaxMode,
-		cookie.Secure,
-		true,
-	)
-}
-
-// isKaiwuSecureRequest 识别直接 HTTPS 请求，或可信 TLS 终止反向代理
-// 传入的 X-Forwarded-Proto Header。
-func isKaiwuSecureRequest(c *app.RequestContext) bool {
-	if strings.EqualFold(string(c.Request.URI().Scheme()), "https") {
-		return true
-	}
-	forwardedProto := strings.TrimSpace(string(c.GetHeader("X-Forwarded-Proto")))
-	return strings.EqualFold(forwardedProto, "https")
 }
 
 // isKaiwuBearerUser 接受传统 bearer 用户和生成的 bearer 用户，但拒绝

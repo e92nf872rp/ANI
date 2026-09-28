@@ -69,14 +69,22 @@ type kaiwuTestIdentity struct {
 	credentialScheme string
 }
 
+// testKaiwuPublicEntry 返回测试用的独占 origin 入口配置。
+func testKaiwuPublicEntry() KaiwuPublicEntryConfig {
+	return KaiwuPublicEntryConfig{
+		ConsoleURL: "http://kaiwu-console.test:30088",
+		BossURL:    "http://kaiwu-boss.test:30089",
+	}
+}
+
 // setupKaiwuEntryTestServer 构建带测试身份上下文的服务器，并直接注册
 // 开物入口处理函数。
 func setupKaiwuEntryTestServer(
 	identity kaiwuTestIdentity,
 	reader KaiwuRuntimeReader,
-	cookieSigner KaiwuCookieSigner,
 	tenantService ports.TenantService,
 	platformUserStore ports.PlatformUserAdminStore,
+	publicEntry KaiwuPublicEntryConfig,
 ) *server.Hertz {
 	h := server.New()
 	h.Use(func(ctx context.Context, c *app.RequestContext) {
@@ -87,29 +95,13 @@ func setupKaiwuEntryTestServer(
 		c.Set("credential_scheme", identity.credentialScheme)
 		c.Next(ctx)
 	})
-	registerKaiwuResources(h.Group("/api/v1/svc"), reader, cookieSigner, tenantService, platformUserStore)
+	registerKaiwuResources(h.Group("/api/v1/svc"), reader, tenantService, platformUserStore, publicEntry)
 	return h
 }
 
 // performKaiwuEntryRequest 执行一个 entry 请求，并返回原始响应。
 func performKaiwuEntryRequest(h *server.Hertz, path string) *protocol.Response {
 	return ut.PerformRequest(h.Engine, http.MethodGet, path, nil).Result()
-}
-
-// performKaiwuEntryRequestWithHeaders 执行带额外 Header 的 entry 请求，
-// 用于协议相关的 Cookie 断言。
-func performKaiwuEntryRequestWithHeaders(h *server.Hertz, path string, headers ...ut.Header) *protocol.Response {
-	return ut.PerformRequest(h.Engine, http.MethodGet, path, nil, headers...).Result()
-}
-
-// kaiwuCookieAttributes 将 Set-Cookie Header 解析为小写标准化属性，避免
-// 断言依赖 Hertz 的大小写输出。
-func kaiwuCookieAttributes(header string) map[string]bool {
-	attributes := make(map[string]bool)
-	for _, part := range strings.Split(header, ";") {
-		attributes[strings.ToLower(strings.TrimSpace(part))] = true
-	}
-	return attributes
 }
 
 // decodeKaiwuJSON 将 Kaiwu 响应解码为通用对象，用于契约断言。
@@ -122,16 +114,12 @@ func decodeKaiwuJSON(t *testing.T, resp *protocol.Response) map[string]any {
 	return payload
 }
 
-// TestRegisterWithOptionsWiresAndRegistersKaiwuResources 验证 reader 注入
-// 生效，并确认两个 entry 路由均已暴露。
-func TestRegisterWithOptionsWiresAndRegistersKaiwuResources(t *testing.T) {
-	reader := &fakeKaiwuRuntimeReader{}
+// TestRegisterWithOptionsRegistersKaiwuResources 验证两个 entry 路由均已
+// 通过 RegisterWithOptions 暴露。
+func TestRegisterWithOptionsRegistersKaiwuResources(t *testing.T) {
 	h := server.New()
-	RegisterWithOptions(h, RegisterOptions{KaiwuRuntimeReader: reader})
+	RegisterWithOptions(h, RegisterOptions{KaiwuRuntimeReader: &fakeKaiwuRuntimeReader{}})
 
-	if kaiwuRuntimeReader != reader {
-		t.Fatal("KaiwuRuntimeReader was not wired through RegisterOptions")
-	}
 	for _, path := range []string{
 		"/api/v1/svc/integrations/kaiwu/console/entry",
 		"/api/v1/svc/integrations/kaiwu/boss/entry",
@@ -140,12 +128,10 @@ func TestRegisterWithOptionsWiresAndRegistersKaiwuResources(t *testing.T) {
 			t.Fatalf("Kaiwu route was not registered: %s", path)
 		}
 	}
-
-	kaiwuRuntimeReader = nil
 }
 
-// TestKaiwuConsoleEntry_AllowedTenant 验证被允许的 active 租户能获得公开
-// 代理入口，且响应不包含运行时秘密。
+// TestKaiwuConsoleEntry_AllowedTenant 验证被允许的 active 租户能获得开物
+// 独占 origin 的绝对入口地址，且响应不包含内部 ClusterIP。
 func TestKaiwuConsoleEntry_AllowedTenant(t *testing.T) {
 	tenantID := "11111111-1111-1111-1111-111111111111"
 	reader := &fakeKaiwuRuntimeReader{
@@ -165,9 +151,9 @@ func TestKaiwuConsoleEntry_AllowedTenant(t *testing.T) {
 			principalKind: "user",
 		},
 		reader,
-		newTestKaiwuCookieSigner(t),
 		tenantService,
 		nil,
+		testKaiwuPublicEntry(),
 	)
 
 	resp := performKaiwuEntryRequest(h, "/api/v1/svc/integrations/kaiwu/console/entry")
@@ -175,27 +161,19 @@ func TestKaiwuConsoleEntry_AllowedTenant(t *testing.T) {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
 	}
 	payload := decodeKaiwuJSON(t, resp)
-	if payload["client"] != "console" || payload["entry_url"] != "/kaiwu/console" || payload["expires_in"] != float64(120) {
+	if payload["client"] != "console" ||
+		payload["entry_url"] != "http://kaiwu-console.test:30088/?token=test-dsh-console-token" ||
+		payload["expires_in"] != float64(120) {
 		t.Fatalf("payload=%v", payload)
 	}
-	body := string(resp.Body())
-	if strings.Contains(body, "test-dsh-console-token") || strings.Contains(body, "10.0.0.1") || strings.Contains(body, "webToken") {
-		t.Fatalf("response leaked runtime details: %s", body)
+	if cookieHeader := resp.Header.Get("Set-Cookie"); cookieHeader != "" {
+		t.Fatalf("entry API must not set a Gateway cookie: %s", cookieHeader)
+	}
+	if body := string(resp.Body()); strings.Contains(body, "10.0.0.1") || strings.Contains(body, "webToken") {
+		t.Fatalf("response leaked internal runtime details: %s", body)
 	}
 	if len(reader.calls) != 1 || reader.calls[0] != "console" {
 		t.Fatalf("reader calls=%v", reader.calls)
-	}
-	cookieHeader := resp.Header.Get("Set-Cookie")
-	cookieAttributes := kaiwuCookieAttributes(cookieHeader)
-	if !strings.Contains(cookieHeader, "ani_kaiwu_bootstrap_console=") ||
-		!cookieAttributes["path=/kaiwu/console"] ||
-		!cookieAttributes["httponly"] ||
-		!cookieAttributes["samesite=lax"] ||
-		!cookieAttributes["max-age=120"] {
-		t.Fatalf("Console cookie attributes = %s", cookieHeader)
-	}
-	if cookieAttributes["secure"] || strings.Contains(cookieHeader, "test-dsh-console-token") || strings.Contains(cookieHeader, "10.0.0.1") {
-		t.Fatalf("Console cookie leaked details or used Secure over HTTP: %s", cookieHeader)
 	}
 }
 
@@ -209,6 +187,7 @@ func TestKaiwuConsoleEntry_AuthorizationAndAvailability(t *testing.T) {
 		identity       kaiwuTestIdentity
 		tenantService  ports.TenantService
 		reader         KaiwuRuntimeReader
+		publicEntry    KaiwuPublicEntryConfig
 		expectedStatus int
 		expectedCode   string
 	}{
@@ -273,6 +252,17 @@ func TestKaiwuConsoleEntry_AuthorizationAndAvailability(t *testing.T) {
 			expectedCode:   "KAIWU_BACKEND_UNAVAILABLE",
 		},
 		{
+			name: "console origin not configured",
+			identity: kaiwuTestIdentity{
+				tenantID: tenantID, userID: tenantID, scope: "tenant", principalKind: "user",
+			},
+			tenantService:  &fakeKaiwuTenantService{tenant: validTenant},
+			reader:         &fakeKaiwuRuntimeReader{target: runtimeTestTarget(), webToken: "token"},
+			publicEntry:    KaiwuPublicEntryConfig{BossURL: "http://kaiwu-boss.test:30089"},
+			expectedStatus: http.StatusServiceUnavailable,
+			expectedCode:   "KAIWU_BACKEND_UNAVAILABLE",
+		},
+		{
 			name: "runtime unavailable",
 			identity: kaiwuTestIdentity{
 				tenantID: tenantID, userID: tenantID, scope: "tenant", principalKind: "user",
@@ -285,7 +275,11 @@ func TestKaiwuConsoleEntry_AuthorizationAndAvailability(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := setupKaiwuEntryTestServer(tt.identity, tt.reader, newTestKaiwuCookieSigner(t), tt.tenantService, nil)
+			publicEntry := tt.publicEntry
+			if publicEntry.ConsoleURL == "" && tt.name != "console origin not configured" {
+				publicEntry = testKaiwuPublicEntry()
+			}
+			h := setupKaiwuEntryTestServer(tt.identity, tt.reader, tt.tenantService, nil, publicEntry)
 			resp := performKaiwuEntryRequest(h, "/api/v1/svc/integrations/kaiwu/console/entry")
 			if resp.StatusCode() != tt.expectedStatus {
 				t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
@@ -297,8 +291,8 @@ func TestKaiwuConsoleEntry_AuthorizationAndAvailability(t *testing.T) {
 	}
 }
 
-// TestKaiwuBossEntry_AllowedPlatformAdmin 验证 active 平台管理员能获得公开
-// BOSS 代理入口，且响应不包含运行时秘密。
+// TestKaiwuBossEntry_AllowedPlatformAdmin 验证 active 平台管理员能获得开物
+// BOSS 独占 origin 的绝对入口地址。
 func TestKaiwuBossEntry_AllowedPlatformAdmin(t *testing.T) {
 	userID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	reader := &fakeKaiwuRuntimeReader{
@@ -308,11 +302,11 @@ func TestKaiwuBossEntry_AllowedPlatformAdmin(t *testing.T) {
 	h := setupKaiwuEntryTestServer(
 		kaiwuTestIdentity{userID: userID.String(), scope: "platform", principalKind: "user"},
 		reader,
-		newTestKaiwuCookieSigner(t),
 		nil,
 		&fakeKaiwuPlatformUserStore{user: ports.PlatformUserAdmin{
 			ID: userID, Role: "platform-admin", Status: "active",
 		}},
+		testKaiwuPublicEntry(),
 	)
 
 	resp := performKaiwuEntryRequest(h, "/api/v1/svc/integrations/kaiwu/boss/entry")
@@ -320,72 +314,19 @@ func TestKaiwuBossEntry_AllowedPlatformAdmin(t *testing.T) {
 		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
 	}
 	payload := decodeKaiwuJSON(t, resp)
-	if payload["client"] != "boss" || payload["entry_url"] != "/kaiwu/boss" || payload["expires_in"] != float64(120) {
+	if payload["client"] != "boss" ||
+		payload["entry_url"] != "http://kaiwu-boss.test:30089/?token=test-dsh-boss-token" ||
+		payload["expires_in"] != float64(120) {
 		t.Fatalf("payload=%v", payload)
 	}
-	body := string(resp.Body())
-	if strings.Contains(body, "test-dsh-boss-token") || strings.Contains(body, "10.0.0.2") || strings.Contains(body, "webToken") {
-		t.Fatalf("response leaked runtime details: %s", body)
+	if cookieHeader := resp.Header.Get("Set-Cookie"); cookieHeader != "" {
+		t.Fatalf("entry API must not set a Gateway cookie: %s", cookieHeader)
+	}
+	if body := string(resp.Body()); strings.Contains(body, "10.0.0.2") || strings.Contains(body, "webToken") {
+		t.Fatalf("response leaked internal runtime details: %s", body)
 	}
 	if len(reader.calls) != 1 || reader.calls[0] != "boss" {
 		t.Fatalf("reader calls=%v", reader.calls)
-	}
-	cookieHeader := resp.Header.Get("Set-Cookie")
-	cookieAttributes := kaiwuCookieAttributes(cookieHeader)
-	if !strings.Contains(cookieHeader, "ani_kaiwu_bootstrap_boss=") ||
-		!cookieAttributes["path=/kaiwu/boss"] ||
-		!cookieAttributes["httponly"] ||
-		!cookieAttributes["samesite=lax"] ||
-		!cookieAttributes["max-age=120"] {
-		t.Fatalf("BOSS cookie attributes = %s", cookieHeader)
-	}
-	if cookieAttributes["secure"] || strings.Contains(cookieHeader, "test-dsh-boss-token") || strings.Contains(cookieHeader, "10.0.0.2") {
-		t.Fatalf("BOSS cookie leaked details or used Secure over HTTP: %s", cookieHeader)
-	}
-}
-
-// TestKaiwuEntry_CookieSignerUnavailable 验证未配置共享签名密钥时，
-// entry API 会 fail closed。
-func TestKaiwuEntry_CookieSignerUnavailable(t *testing.T) {
-	tenantID := "11111111-1111-1111-1111-111111111111"
-	identity := kaiwuTestIdentity{tenantID: tenantID, userID: tenantID, scope: "tenant", principalKind: "user"}
-	h := setupKaiwuEntryTestServer(
-		identity,
-		&fakeKaiwuRuntimeReader{target: runtimeTestTarget(), webToken: "token"},
-		nil,
-		&fakeKaiwuTenantService{tenant: ports.Tenant{ID: tenantID, Name: "tenant-a", Status: ports.TenantStatusActive}},
-		nil,
-	)
-	resp := performKaiwuEntryRequest(h, "/api/v1/svc/integrations/kaiwu/console/entry")
-	if resp.StatusCode() != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
-	}
-	if payload := decodeKaiwuJSON(t, resp); payload["code"] != "KAIWU_BACKEND_UNAVAILABLE" {
-		t.Fatalf("code=%v", payload["code"])
-	}
-}
-
-// TestKaiwuEntry_SecureCookieFromForwardedProto 验证 HTTPS 反向代理请求
-// 会收到必需的 Secure 属性。
-func TestKaiwuEntry_SecureCookieFromForwardedProto(t *testing.T) {
-	tenantID := "11111111-1111-1111-1111-111111111111"
-	h := setupKaiwuEntryTestServer(
-		kaiwuTestIdentity{tenantID: tenantID, userID: tenantID, scope: "tenant", principalKind: "user"},
-		&fakeKaiwuRuntimeReader{target: runtimeTestTarget(), webToken: "token"},
-		newTestKaiwuCookieSigner(t),
-		&fakeKaiwuTenantService{tenant: ports.Tenant{ID: tenantID, Name: "tenant-a", Status: ports.TenantStatusActive}},
-		nil,
-	)
-	resp := performKaiwuEntryRequestWithHeaders(
-		h,
-		"/api/v1/svc/integrations/kaiwu/console/entry",
-		ut.Header{Key: "X-Forwarded-Proto", Value: "https"},
-	)
-	if resp.StatusCode() != http.StatusOK {
-		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
-	}
-	if attributes := kaiwuCookieAttributes(resp.Header.Get("Set-Cookie")); !attributes["secure"] {
-		t.Fatalf("HTTPS cookie missing Secure: %s", resp.Header.Get("Set-Cookie"))
 	}
 }
 
@@ -400,6 +341,7 @@ func TestKaiwuBossEntry_AuthorizationAndAvailability(t *testing.T) {
 		identity          kaiwuTestIdentity
 		platformUserStore ports.PlatformUserAdminStore
 		reader            KaiwuRuntimeReader
+		publicEntry       KaiwuPublicEntryConfig
 		expectedStatus    int
 		expectedCode      string
 	}{
@@ -464,6 +406,17 @@ func TestKaiwuBossEntry_AuthorizationAndAvailability(t *testing.T) {
 			expectedCode:   "KAIWU_BACKEND_UNAVAILABLE",
 		},
 		{
+			name: "boss origin not configured",
+			identity: kaiwuTestIdentity{
+				userID: userID.String(), scope: "platform", principalKind: "user",
+			},
+			platformUserStore: &fakeKaiwuPlatformUserStore{user: validUser},
+			reader:            validReader,
+			publicEntry:       KaiwuPublicEntryConfig{ConsoleURL: "http://kaiwu-console.test:30088"},
+			expectedStatus:    http.StatusServiceUnavailable,
+			expectedCode:      "KAIWU_BACKEND_UNAVAILABLE",
+		},
+		{
 			name: "runtime unavailable",
 			identity: kaiwuTestIdentity{
 				userID: userID.String(), scope: "platform", principalKind: "user",
@@ -476,7 +429,11 @@ func TestKaiwuBossEntry_AuthorizationAndAvailability(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := setupKaiwuEntryTestServer(tt.identity, tt.reader, newTestKaiwuCookieSigner(t), nil, tt.platformUserStore)
+			publicEntry := tt.publicEntry
+			if publicEntry.BossURL == "" && tt.name != "boss origin not configured" {
+				publicEntry = testKaiwuPublicEntry()
+			}
+			h := setupKaiwuEntryTestServer(tt.identity, tt.reader, nil, tt.platformUserStore, publicEntry)
 			resp := performKaiwuEntryRequest(h, "/api/v1/svc/integrations/kaiwu/boss/entry")
 			if resp.StatusCode() != tt.expectedStatus {
 				t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
@@ -526,7 +483,7 @@ func TestKaiwuEntry_RuntimeValidation(t *testing.T) {
 	for index, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reader := &fakeKaiwuRuntimeReader{target: tt.target, webToken: tt.webToken, err: tt.err}
-			h := setupKaiwuEntryTestServer(identity, reader, newTestKaiwuCookieSigner(t), tenantService, nil)
+			h := setupKaiwuEntryTestServer(identity, reader, tenantService, nil, testKaiwuPublicEntry())
 			resp := performKaiwuEntryRequest(h, "/api/v1/svc/integrations/kaiwu/console/entry")
 			expectedStatus := http.StatusOK
 			if index != 0 {
@@ -543,21 +500,60 @@ func TestKaiwuEntry_RuntimeValidation(t *testing.T) {
 	}
 }
 
+// TestKaiwuEntry_PublicOriginTokenTTL 验证 TTL 覆盖生效，且 token 经过 URL
+// 转义后拼进入口地址。
+func TestKaiwuEntry_PublicOriginTokenTTL(t *testing.T) {
+	userID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	h := setupKaiwuEntryTestServer(
+		kaiwuTestIdentity{userID: userID.String(), scope: "platform", principalKind: "user"},
+		&fakeKaiwuRuntimeReader{
+			target:   &url.URL{Scheme: "http", Host: "10.0.0.2:3080"},
+			webToken: "boss token/with+special",
+		},
+		nil,
+		&fakeKaiwuPlatformUserStore{user: ports.PlatformUserAdmin{ID: userID, Role: "platform-admin", Status: "active"}},
+		KaiwuPublicEntryConfig{BossURL: "https://kaiwu.example.com", TokenTTL: 300 * time.Second},
+	)
+
+	resp := performKaiwuEntryRequest(h, "/api/v1/svc/integrations/kaiwu/boss/entry")
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
+	}
+	payload := decodeKaiwuJSON(t, resp)
+	if payload["client"] != "boss" ||
+		payload["entry_url"] != "https://kaiwu.example.com/?token=boss+token%2Fwith%2Bspecial" ||
+		payload["expires_in"] != float64(300) {
+		t.Fatalf("payload=%v", payload)
+	}
+}
+
+// TestKaiwuEntry_PublicOriginKeepsAuthorization 验证独占 origin 模式不会
+// 跳过租户授权检查。
+func TestKaiwuEntry_PublicOriginKeepsAuthorization(t *testing.T) {
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	h := setupKaiwuEntryTestServer(
+		kaiwuTestIdentity{
+			tenantID:      tenantID,
+			userID:        tenantID,
+			scope:         "tenant",
+			principalKind: "user",
+		},
+		&fakeKaiwuRuntimeReader{target: runtimeTestTarget(), webToken: "token"},
+		&fakeKaiwuTenantService{tenant: ports.Tenant{ID: tenantID, Name: "other-tenant", Status: ports.TenantStatusActive}},
+		nil,
+		testKaiwuPublicEntry(),
+	)
+
+	resp := performKaiwuEntryRequest(h, "/api/v1/svc/integrations/kaiwu/console/entry")
+	if resp.StatusCode() != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), string(resp.Body()))
+	}
+	if payload := decodeKaiwuJSON(t, resp); payload["code"] != "KAIWU_CONSOLE_TENANT_NOT_ALLOWED" {
+		t.Fatalf("code=%v", payload["code"])
+	}
+}
+
 // runtimeTestTarget 返回 handler 测试使用的干净内部 HTTP 目标。
 func runtimeTestTarget() *url.URL {
 	return &url.URL{Scheme: "http", Host: "10.0.0.4:3080"}
-}
-
-// newTestKaiwuCookieSigner 返回固定配置的签名器，不使用真实部署密钥。
-func newTestKaiwuCookieSigner(t *testing.T) KaiwuCookieSigner {
-	t.Helper()
-	signer, err := NewKaiwuCookieSigner(
-		"0123456789abcdef0123456789abcdef",
-		120*time.Second,
-		30*time.Minute,
-	)
-	if err != nil {
-		t.Fatalf("new Kaiwu cookie signer: %v", err)
-	}
-	return signer
 }

@@ -1156,7 +1156,12 @@ components:
       required: [client, entry_url, expires_in]
       properties:
         client:      { type: string, enum: [console, boss] }
-        entry_url:   { type: string, pattern: '^/kaiwu/(console|boss)$' }
+        entry_url:
+          type: string
+          description: >-
+            开物入口地址，为开物 origin 的绝对 URL，携带一次性 DSH 启动 token，
+            前端直接 window.location.assign 跳转；打开后 DSH 会自行换取会话
+            Cookie 并把 token 从地址栏移除。未配置 KAIWU_*_PUBLIC_URL 时返回 503。
         expires_in:  { type: integer, minimum: 1, maximum: 600 }
 
     # ===== Tenant Plans (配额套餐管理) =====
@@ -3699,7 +3704,7 @@ paths:
         principal_kinds: [user]
       responses:
         "200":
-          description: 开物 Console 代理入口
+          description: 开物 Console 入口（开物独占 origin 的绝对地址）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/KaiwuEntryResponse' }
@@ -3724,7 +3729,7 @@ paths:
         principal_kinds: [user]
       responses:
         "200":
-          description: 开物 BOSS 代理入口
+          description: 开物 BOSS 入口（开物独占 origin 的绝对地址）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/KaiwuEntryResponse' }
