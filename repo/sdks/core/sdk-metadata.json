@@ -161,6 +161,12 @@
       "scope": "scope:tenant:write"
     },
     {
+      "operationId": "provisionTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/provision",
+      "scope": "scope:tenant:write"
+    },
+    {
       "operationId": "deleteTenantQuota",
       "method": "DELETE",
       "path": "/admin/tenants/{tenant_id}/quota",
@@ -1819,6 +1825,7 @@
     "TenantAuthSummary",
     "TenantAuthUpdateRequest",
     "TenantCreateRequest",
+    "TenantInfraProvisionResponse",
     "TenantLifecycleEntry",
     "TenantLifecycleListResponse",
     "TenantListItem",

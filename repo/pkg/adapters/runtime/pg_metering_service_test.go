@@ -131,10 +131,12 @@ func (s *meteringFakeStore) WithPlatformTx(ctx context.Context, fn func(context.
 	return fn(ctx, s.tx)
 }
 
-func newMeteringFakeStore(rows *meteringFakeRows) *meteringFakeStore {
+func newMeteringFakeStore(rows ...*meteringFakeRows) *meteringFakeStore {
 	tx := &meteringFakeTx{}
-	if rows != nil {
-		tx.queryResults = append(tx.queryResults, rows)
+	for _, result := range rows {
+		if result != nil {
+			tx.queryResults = append(tx.queryResults, result)
+		}
 	}
 	return &meteringFakeStore{tx: tx}
 }
@@ -266,10 +268,16 @@ func TestPgMeteringServiceQueryUsagePeriodStringComparison(t *testing.T) {
 }
 
 func TestPgMeteringServiceQueryPlatformUsageAggregatesAllTenants(t *testing.T) {
-	store := newMeteringFakeStore(&meteringFakeRows{rows: []meteringFakeRow{
-		{values: []any{"11111111-1111-1111-1111-111111111111", "instance_gpu_seconds", 120.0, "gpu_second", nil}},
-		{values: []any{"22222222-2222-2222-2222-222222222222", "instance_gpu_seconds", 60.0, "gpu_second", nil}},
-	}})
+	store := newMeteringFakeStore(
+		&meteringFakeRows{rows: []meteringFakeRow{
+			{values: []any{"11111111-1111-1111-1111-111111111111"}},
+			{values: []any{"22222222-2222-2222-2222-222222222222"}},
+		}},
+		&meteringFakeRows{rows: []meteringFakeRow{
+			{values: []any{"11111111-1111-1111-1111-111111111111", "instance_gpu_seconds", 120.0, "gpu_second", nil}},
+			{values: []any{"22222222-2222-2222-2222-222222222222", "instance_gpu_seconds", 60.0, "gpu_second", nil}},
+		}},
+	)
 	svc := NewPgMeteringService(store)
 
 	result, err := svc.QueryPlatformUsage(context.Background(), ports.MeteringUsageQueryRequest{
@@ -288,7 +296,11 @@ func TestPgMeteringServiceQueryPlatformUsageAggregatesAllTenants(t *testing.T) {
 	if result.Items[0].Period != "" {
 		t.Fatalf("period should be empty when NULL, got %q", result.Items[0].Period)
 	}
-	sql := store.tx.querySQLs[0]
+	tenantSQL := store.tx.querySQLs[0]
+	if !strings.Contains(tenantSQL, "FROM tenants") || strings.Contains(tenantSQL, "status") {
+		t.Fatalf("tenant SQL must read all tenants without status filter: %s", tenantSQL)
+	}
+	sql := store.tx.querySQLs[1]
 	if !strings.Contains(sql, "tenant_id::text AS tenant_id") {
 		t.Fatalf("SQL missing tenant_id output column: %s", sql)
 	}
@@ -298,6 +310,114 @@ func TestPgMeteringServiceQueryPlatformUsageAggregatesAllTenants(t *testing.T) {
 	// 平台视角 WHERE 不依赖 RLS，不注入 tenant_id 条件（PlatformTenantID 为空时）。
 	if strings.Contains(sql, "tenant_id = $") {
 		t.Fatalf("unexpected tenant_id WHERE filter: %s", sql)
+	}
+}
+
+func TestPgMeteringServiceQueryPlatformUsageCompletesMissingTenants(t *testing.T) {
+	store := newMeteringFakeStore(
+		&meteringFakeRows{rows: []meteringFakeRow{
+			{values: []any{"11111111-1111-1111-1111-111111111111"}},
+			{values: []any{"22222222-2222-2222-2222-222222222222"}},
+			{values: []any{"33333333-3333-3333-3333-333333333333"}},
+		}},
+		&meteringFakeRows{rows: []meteringFakeRow{
+			{values: []any{"11111111-1111-1111-1111-111111111111", "instance_gpu_seconds", 120.0, "gpu_second", nil}},
+		}},
+	)
+	svc := NewPgMeteringService(store)
+
+	result, err := svc.QueryPlatformUsage(context.Background(), ports.MeteringUsageQueryRequest{
+		GroupBy:      "tenant_id",
+		ResourceType: ports.MeteringResourceInstanceGPUSeconds,
+	})
+	if err != nil {
+		t.Fatalf("QueryPlatformUsage error = %v", err)
+	}
+	want := []struct {
+		tenantID string
+		quantity float64
+	}{
+		{"11111111-1111-1111-1111-111111111111", 120},
+		{"22222222-2222-2222-2222-222222222222", 0},
+		{"33333333-3333-3333-3333-333333333333", 0},
+	}
+	if len(result.Items) != len(want) {
+		t.Fatalf("items = %+v, want %d tenants", result.Items, len(want))
+	}
+	for index, expected := range want {
+		item := result.Items[index]
+		if item.TenantID != expected.tenantID || item.TotalQuantity != expected.quantity {
+			t.Fatalf("items[%d] = %+v, want tenant %s quantity %.0f", index, item, expected.tenantID, expected.quantity)
+		}
+		if item.ResourceType != ports.MeteringResourceInstanceGPUSeconds || item.Unit != "gpu_second" {
+			t.Fatalf("items[%d] metadata = resource %s unit %s", index, item.ResourceType, item.Unit)
+		}
+	}
+
+	wantEvents := []string{"query", "exec:SET LOCAL ROLE ani_metering_writer", "query"}
+	if len(store.tx.events) != len(wantEvents) {
+		t.Fatalf("events = %v, want %v", store.tx.events, wantEvents)
+	}
+	for index, event := range wantEvents {
+		if store.tx.events[index] != event {
+			t.Fatalf("events = %v, want %v", store.tx.events, wantEvents)
+		}
+	}
+}
+
+func TestPgMeteringServiceQueryPlatformUsageTenantFilterCompletesZero(t *testing.T) {
+	store := newMeteringFakeStore(
+		&meteringFakeRows{rows: []meteringFakeRow{
+			{values: []any{"11111111-1111-1111-1111-111111111111"}},
+		}},
+		&meteringFakeRows{},
+	)
+	svc := NewPgMeteringService(store)
+
+	result, err := svc.QueryPlatformUsage(context.Background(), ports.MeteringUsageQueryRequest{
+		GroupBy:          "tenant_id",
+		PlatformTenantID: "11111111-1111-1111-1111-111111111111",
+		ResourceType:     ports.MeteringResourceInstanceGPUSeconds,
+	})
+	if err != nil {
+		t.Fatalf("QueryPlatformUsage error = %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].TenantID != "11111111-1111-1111-1111-111111111111" || result.Items[0].TotalQuantity != 0 {
+		t.Fatalf("items = %+v, want one zero row for filtered tenant", result.Items)
+	}
+	tenantSQL := store.tx.querySQLs[0]
+	if !strings.Contains(tenantSQL, "WHERE id = $1::uuid") {
+		t.Fatalf("tenant SQL missing platform tenant filter: %s", tenantSQL)
+	}
+	usageSQL := store.tx.querySQLs[1]
+	if !strings.Contains(usageSQL, "tenant_id = $2::uuid") {
+		t.Fatalf("usage SQL missing platform tenant filter: %s", usageSQL)
+	}
+}
+
+func TestPgMeteringServiceQueryPlatformUsageEmptyUsageDefaultsToGPU(t *testing.T) {
+	store := newMeteringFakeStore(
+		&meteringFakeRows{rows: []meteringFakeRow{
+			{values: []any{"11111111-1111-1111-1111-111111111111"}},
+			{values: []any{"22222222-2222-2222-2222-222222222222"}},
+		}},
+		&meteringFakeRows{},
+	)
+	svc := NewPgMeteringService(store)
+
+	result, err := svc.QueryPlatformUsage(context.Background(), ports.MeteringUsageQueryRequest{
+		GroupBy: "tenant_id",
+	})
+	if err != nil {
+		t.Fatalf("QueryPlatformUsage error = %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items = %+v, want 2 zero rows", result.Items)
+	}
+	for _, item := range result.Items {
+		if item.TotalQuantity != 0 || item.ResourceType != ports.MeteringResourceInstanceGPUSeconds || item.Unit != "gpu_second" {
+			t.Fatalf("item = %+v, want zero GPU usage", item)
+		}
 	}
 }
 
@@ -332,6 +452,9 @@ func TestPgMeteringServiceQueryPlatformUsageRLSBypass(t *testing.T) {
 	}
 	if len(store.tx.execSQLs) != 1 || store.tx.execSQLs[0] != "SET LOCAL ROLE ani_metering_writer" {
 		t.Fatalf("execSQLs = %v, want single SET LOCAL ROLE", store.tx.execSQLs)
+	}
+	if len(store.tx.querySQLs) != 1 || strings.Contains(store.tx.querySQLs[0], "FROM tenants") {
+		t.Fatalf("querySQLs = %v, non-tenant grouping must not query tenants", store.tx.querySQLs)
 	}
 	// SET LOCAL ROLE 必须先于查询执行（角色切换后才查数据）。
 	if store.tx.events[0] != "exec:SET LOCAL ROLE ani_metering_writer" || store.tx.events[1] != "query" {

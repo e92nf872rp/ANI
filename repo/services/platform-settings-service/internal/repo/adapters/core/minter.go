@@ -20,7 +20,7 @@ const (
 	// （roles=[platform-admin] 放行，不读 permissions）；permissions 冗余携带
 	// users 域平台边界权限，供 V2 审计链与后续 policy 迁移使用。
 	mintPermissions = "scope:users:*"
-	mintTTLSeconds = 300
+	mintTTLSeconds  = 300
 	// mintRefreshWindow 是 token 剩余寿命低于该窗口时提前刷新。
 	mintRefreshWindow = 30 * time.Second
 )
@@ -77,10 +77,10 @@ func (m *Minter) Token(ctx context.Context) (string, error) {
 
 	issued, err := m.client.IssueServiceToken(ctx, &authv1.IssueServiceTokenRequest{
 		CallerService:    mintCaller,
-		CallerSecret:    m.secret,
+		CallerSecret:     m.secret,
 		CredentialDomain: "platform",
 		Permissions:      strings.Split(mintPermissions, ","),
-		TtlSeconds:      mintTTLSeconds,
+		TtlSeconds:       mintTTLSeconds,
 	})
 	if err != nil {
 		return "", err

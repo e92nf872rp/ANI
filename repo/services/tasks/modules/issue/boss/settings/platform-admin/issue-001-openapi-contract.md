@@ -36,7 +36,7 @@
   - `POST /svc/platform-admins/{userId}/enable`（enablePlatformAdmin）
   - `DELETE /svc/platform-admins/{userId}`（deletePlatformAdmin）
   - `GET /svc/platform-admins/{userId}/audit-logs`（listPlatformAdminAuditLogs）
-- [ ] Services schema 定义 `PlatformAdminListItem`（id/username/display_name/role/status/source/last_login_at，不含 email）、`PlatformAdminDetail`（含 email/created_at）、`PlatformRole`（name/label/description/permissions 为 roles.permissions JSONB 原样数组）、`PlatformAdminCreateRequest`
+- [ ] Services schema 定义 `PlatformAdminListItem`（id/email/username/display_name/role/status/source/last_login_at）、`PlatformAdminDetail`（含 email/created_at）、`PlatformRole`（name/label/description/permissions 为 roles.permissions JSONB 原样数组）、`PlatformAdminCreateRequest`
 - [ ] 各写操作（POST/PUT/DELETE）请求体含 `idempotency_key`
 - [ ] Services 错误码覆盖 SPEC §6.1 全部（LAST_PLATFORM_ADMIN / EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / PLATFORM_USER_NOT_FOUND / PASSWORD_SAME_AS_OLD / ROLE_CHANGE_INVALID / VALIDATION_FAILED / FORBIDDEN / IDEMPOTENCY_CONFLICT）
 - [ ] `make openapi-lint` 通过

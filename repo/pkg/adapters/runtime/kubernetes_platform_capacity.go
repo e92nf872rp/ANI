@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -37,10 +36,6 @@ func NewKubernetesPlatformCapacityService(inventory ports.GPUInventory, k8sClien
 		tenantService: tenantService,
 	}
 }
-
-// GPU Pod 存在性 label selector：只要带租户 label 即视为租户工作负载 Pod，
-// 配合 Running phase 过滤平台自身组件（平台组件不带该 label）。
-const platformCapacityTenantLabel = "ani.kubercloud.io/tenant-id"
 
 const (
 	platformCapacityZoneLabel          = "topology.kubernetes.io/zone"
@@ -132,7 +127,9 @@ func (s *KubernetesPlatformCapacityService) GetCapacityOverview(ctx context.Cont
 		}
 	}
 
-	// 2. 租户数（status <> 'disabled'）。
+	// 2. 活跃租户数（status = 'active'，不含 frozen/disabled）。
+	// ListAvailableTenants 语义为 status <> 'disabled'（邀请管理员等共享场景），
+	// 这里在其结果上按 active 过滤，不改变共享方法本身口径。
 	if s.tenantService == nil {
 		degraded = append(degraded, "tenant service not configured")
 	} else {
@@ -140,7 +137,13 @@ func (s *KubernetesPlatformCapacityService) GetCapacityOverview(ctx context.Cont
 		if err != nil {
 			degraded = append(degraded, "tenant list failed: "+err.Error())
 		} else {
-			region.TenantCount = int64(len(tenants))
+			var activeCount int64
+			for _, t := range tenants {
+				if t.Status == ports.TenantStatusActive {
+					activeCount++
+				}
+			}
+			region.TenantCount = activeCount
 		}
 	}
 
@@ -162,44 +165,31 @@ func (s *KubernetesPlatformCapacityService) GetCapacityOverview(ctx context.Cont
 
 // runningGPUPodCountsByNode 集群级统计各节点上的 Running 租户 GPU Pod 数。
 // 使用存在性 label selector（ani.kubercloud.io/tenant-id 存在即可）覆盖全部
-// 租户 namespace，避免逐租户查询；Pending/Failed 等 phase 不计入占用。
+// 租户 namespace，避免逐租户查询。
+//
+// 占用判定复用 ParseRunningGPUPodOccupancy：只有 ani-tenant-* 命名空间中
+// 真的请求 GPU 扩展资源的 Running Pod 才计入；仅凭「带租户 label 的 Running
+// Pod」计数会把 VM virt-launcher、探针、作业 Pod 等 CPU-only 工作负载全部
+// 误算成 GPU 占用，导致 gpu_free 恒为 0，与 occupancy 的 available 矛盾。
+//
 // k8sClient 未注入时返回 nil（in_use=0，降级语义）。
 func (s *KubernetesPlatformCapacityService) runningGPUPodCountsByNode(ctx context.Context) (map[string]int, error) {
 	if s.k8sClient == nil {
 		return nil, nil
 	}
-	selector := url.QueryEscape(platformCapacityTenantLabel)
+	selector := url.QueryEscape(GPUTenantLabel)
 	endpoint := s.k8sClient.Host() + "/api/v1/pods?labelSelector=" + selector
 	body, _, err := s.k8sClient.Do(ctx, http.MethodGet, endpoint, "", nil)
 	if err != nil {
 		return nil, err
 	}
-	if len(body) == 0 {
-		return map[string]int{}, nil
-	}
-	var podList struct {
-		Items []struct {
-			Spec struct {
-				NodeName string `json:"nodeName"`
-			} `json:"spec"`
-			Status struct {
-				Phase string `json:"phase"`
-			} `json:"status"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(body, &podList); err != nil {
+	pods, err := ParseRunningGPUPodOccupancy(body)
+	if err != nil {
 		return nil, err
 	}
 	counts := map[string]int{}
-	for _, pod := range podList.Items {
-		if !strings.EqualFold(pod.Status.Phase, "Running") {
-			continue
-		}
-		nodeName := strings.TrimSpace(pod.Spec.NodeName)
-		if nodeName == "" {
-			continue
-		}
-		counts[nodeName]++
+	for _, pod := range pods {
+		counts[pod.NodeName]++
 	}
 	return counts, nil
 }

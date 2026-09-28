@@ -229,6 +229,18 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/plan",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
+	"POST /api/v1/admin/tenants/{tenant_id}/provision": {
+		Source:               PolicySourceGenerated,
+		OperationID:          "provisionTenant",
+		Method:               "POST",
+		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/provision",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+		Version:              "v1",
+		Resource:             "tenants",
+		Action:               "update",
+		Boundary:             BoundaryPlatform,
+		PrincipalKinds:       []PrincipalKind{PrincipalUser},
+	},
 	"DELETE /api/v1/admin/tenants/{tenant_id}/quota": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "deleteTenantQuota",

@@ -393,8 +393,12 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 		// counts.
 		cardShares := parseVolcanoVGPUCardCounts(item.Metadata.Annotations)
 		var devices []ports.GPUDeviceClass
+		physicalCards := 0
 		if len(cardShares) > 0 {
 			devices = make([]ports.GPUDeviceClass, 0)
+			// 注解每段 = 一张物理卡；设备记录是切片粒度（每段生成 count 条
+			// 记录）。物理卡数必须取段数，不能用 len(devices)。
+			physicalCards = len(cardShares)
 			for _, shares := range cardShares {
 				for range shares {
 					devices = append(devices, ports.GPUDeviceClass{
@@ -472,6 +476,17 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 					Shares:             volcanoSharesPerCard,
 				})
 			}
+			// 物理卡数：整卡每条记录一张；nvidia.com/vgpu 切片记录无卡分组
+			// 信息、按 1 张/条保守计；volcano 切片按 gpu.count label 归组
+			//（label 缺失时假定单卡持有全部切片）。
+			physicalCards = wholeCount + vgpuCount
+			if volcanoNumber > 0 {
+				if cardCount > 0 {
+					physicalCards += cardCount
+				} else {
+					physicalCards++
+				}
+			}
 		}
 		nodes = append(nodes, ports.GPUNodeClass{
 			NodeName:         nodeName,
@@ -483,6 +498,7 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 			Labels:           cloneGPUStringMap(item.Metadata.Labels),
 			Annotations:      cloneGPUStringMap(item.Metadata.Annotations),
 			Devices:          devices,
+			PhysicalCards:    physicalCards,
 			Allocatable:      cloneGPUStringMap(item.Status.Allocatable),
 			Ready:            ready,
 			Reason:           reason,

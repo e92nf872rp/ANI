@@ -355,6 +355,7 @@ func platformAdminListItemJSON(item *platformsettingsv1.PlatformAdminListItem) m
 	}
 	return map[string]any{
 		"id":            item.GetId(),
+		"email":         item.GetEmail(),
 		"username":      item.GetUsername(),
 		"display_name":  item.GetDisplayName(),
 		"role_id":       item.GetRoleId(),

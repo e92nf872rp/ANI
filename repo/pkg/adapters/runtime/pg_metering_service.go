@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -69,8 +70,20 @@ func (s *PgMeteringService) QueryPlatformUsage(ctx context.Context, request port
 		return ports.MeteringUsageResult{}, ports.ErrNotConfigured
 	}
 
+	completeTenants := request.GroupBy == "tenant_id"
 	var items []ports.MeteringUsageRecord
 	err := s.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：先用连接原身份读取租户全集，不按状态过滤。
+		tenantIDs := make([]string, 0)
+		if completeTenants {
+			var queryErr error
+			tenantIDs, queryErr = queryTenantIDs(ctx, tx, request.PlatformTenantID)
+			if queryErr != nil {
+				return queryErr
+			}
+		}
+
+		// 步骤 2：切换到 ani_metering_writer，只跨租户读取计量表。
 		// 使用 SET LOCAL ROLE（事务级）切换到 ani_metering_writer（BYPASSRLS）绕过 RLS 跨租户读。
 		// ani_metering_writer 已有 GRANT SELECT（20260731_001 migration）。
 		// SET LOCAL ROLE 在 commit/rollback 时自动重置，无需显式 RESET ROLE，
@@ -78,6 +91,8 @@ func (s *PgMeteringService) QueryPlatformUsage(ctx context.Context, request port
 		if _, err := tx.Exec(ctx, "SET LOCAL ROLE ani_metering_writer"); err != nil {
 			return fmt.Errorf("set local role ani_metering_writer: %w", err)
 		}
+
+		// 步骤 3：执行既有计量聚合查询。
 		query, args := buildUsageQuery(request, true)
 		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
@@ -91,12 +106,143 @@ func (s *PgMeteringService) QueryPlatformUsage(ctx context.Context, request port
 			}
 			items = append(items, item)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		// 步骤 4：在 Go 中合并两份结果，租户存在但没有计量记录时补 0。
+		if completeTenants {
+			items = completeTenantUsage(items, tenantIDs, request)
+		}
+		return nil
 	})
 	if err != nil {
 		return ports.MeteringUsageResult{}, err
 	}
 	return ports.MeteringUsageResult{Items: items, DevProfile: pgMeteringDevProfile()}, nil
+}
+
+func queryTenantIDs(ctx context.Context, tx ports.MetadataTx, platformTenantID string) ([]string, error) {
+	query := "SELECT id::text FROM tenants ORDER BY id"
+	args := make([]any, 0)
+	if platformTenantID != "" {
+		query = "SELECT id::text FROM tenants WHERE id = $1::uuid ORDER BY id"
+		args = append(args, platformTenantID)
+	}
+
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query platform tenant ids: %w", err)
+	}
+	defer rows.Close()
+
+	tenantIDs := make([]string, 0)
+	for rows.Next() {
+		var tenantID string
+		if err := rows.Scan(&tenantID); err != nil {
+			return nil, fmt.Errorf("scan platform tenant id: %w", err)
+		}
+		tenantIDs = append(tenantIDs, tenantID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate platform tenant ids: %w", err)
+	}
+	return tenantIDs, nil
+}
+
+func completeTenantUsage(items []ports.MeteringUsageRecord, tenantIDs []string, request ports.MeteringUsageQueryRequest) []ports.MeteringUsageRecord {
+	if len(tenantIDs) == 0 {
+		return items
+	}
+
+	existingTenantIDs := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item.TenantID != "" {
+			existingTenantIDs[item.TenantID] = struct{}{}
+		}
+	}
+
+	zeroItems := zeroUsageItems(items, request.ResourceType)
+	for _, tenantID := range tenantIDs {
+		if _, exists := existingTenantIDs[tenantID]; exists {
+			continue
+		}
+		items = append(items, zeroUsageRecords(zeroItems, tenantID)...)
+	}
+
+	sort.Slice(items, func(left, right int) bool {
+		if items[left].TenantID != items[right].TenantID {
+			return items[left].TenantID < items[right].TenantID
+		}
+		if items[left].ResourceType != items[right].ResourceType {
+			return items[left].ResourceType < items[right].ResourceType
+		}
+		return items[left].Unit < items[right].Unit
+	})
+	return items
+}
+
+type meteringZeroItem struct {
+	resourceType ports.MeteringResourceType
+	unit         string
+}
+
+func zeroUsageRecords(zeroItems []meteringZeroItem, tenantID string) []ports.MeteringUsageRecord {
+	items := make([]ports.MeteringUsageRecord, 0, len(zeroItems))
+	for _, zeroItem := range zeroItems {
+		items = append(items, ports.MeteringUsageRecord{
+			TenantID:      tenantID,
+			ResourceType:  zeroItem.resourceType,
+			TotalQuantity: 0,
+			Unit:          zeroItem.unit,
+		})
+	}
+	return items
+}
+
+func zeroUsageItems(items []ports.MeteringUsageRecord, requestedResourceType ports.MeteringResourceType) []meteringZeroItem {
+	if requestedResourceType != "" {
+		for _, item := range items {
+			if item.ResourceType == requestedResourceType && item.Unit != "" {
+				return []meteringZeroItem{{resourceType: requestedResourceType, unit: item.Unit}}
+			}
+		}
+		if unit, ok := meteringUsageUnit(requestedResourceType); ok {
+			return []meteringZeroItem{{resourceType: requestedResourceType, unit: unit}}
+		}
+		return nil
+	}
+
+	seen := make(map[ports.MeteringResourceType]struct{})
+	result := make([]meteringZeroItem, 0)
+	for _, item := range items {
+		if item.Unit == "" {
+			continue
+		}
+		if _, exists := seen[item.ResourceType]; exists {
+			continue
+		}
+		seen[item.ResourceType] = struct{}{}
+		result = append(result, meteringZeroItem{resourceType: item.ResourceType, unit: item.Unit})
+	}
+	if len(result) > 0 {
+		return result
+	}
+	return []meteringZeroItem{{resourceType: ports.MeteringResourceInstanceGPUSeconds, unit: "gpu_second"}}
+}
+
+func meteringUsageUnit(resourceType ports.MeteringResourceType) (string, bool) {
+	switch resourceType {
+	case ports.MeteringResourceInstanceCPUSeconds:
+		return "cpu_second", true
+	case ports.MeteringResourceInstanceMemorySeconds:
+		return "gib_second", true
+	case ports.MeteringResourceInstanceGPUSeconds:
+		return "gpu_second", true
+	case ports.MeteringResourceTokenInput, ports.MeteringResourceTokenOutput, ports.MeteringResourceTokenTotal:
+		return "token", true
+	default:
+		return "", false
+	}
 }
 
 // ReportTokenUsage token 内存写入为已有实现，本批次不改变，委托 local adapter。

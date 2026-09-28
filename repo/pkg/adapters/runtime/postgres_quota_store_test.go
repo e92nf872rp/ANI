@@ -357,6 +357,40 @@ func TestPostgresQuotaStoreListHasMore(t *testing.T) {
 	}
 }
 
+// TestPostgresQuotaStoreListFiltersDisabledTenants 验证 List 分页第一步 SQL
+// JOIN tenants 并只保留 active/frozen 租户：禁用租户的 resource_quota 行保留
+// （禁用不释放资源），但不得出现在平台配额列表中。
+func TestPostgresQuotaStoreListFiltersDisabledTenants(t *testing.T) {
+	tx := &quotaFakeTx{}
+	// step1：租户列表仅含 active 租户 t1（t2 已禁用，由 SQL 过滤，fake 不返回）
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		{values: []any{testTenantID}},
+	}})
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		{values: []any{testTenantID, "tenant-a", string(ports.QuotaGPUCount), int64(8), int64(0), int64(0)}},
+	}})
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	result, err := q.List(context.Background(), ports.QuotaListRequest{Limit: 50})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].TenantID != testTenantID {
+		t.Fatalf("List() Items = %+v, want 仅 %q", result.Items, testTenantID)
+	}
+	// step1 SQL 必须关联 tenants 并按状态过滤
+	if len(tx.querySQLs) == 0 {
+		t.Fatalf("List() 未执行任何查询")
+	}
+	step1 := tx.querySQLs[0]
+	if !strings.Contains(step1, "JOIN tenants") {
+		t.Fatalf("List() step1 SQL 未 JOIN tenants:\n%s", step1)
+	}
+	if !strings.Contains(step1, "t.status IN ('active', 'frozen')") {
+		t.Fatalf("List() step1 SQL 未按租户状态过滤:\n%s", step1)
+	}
+}
+
 // TestPostgresQuotaStoreGetMy 验证 GetMy 返回当前租户多维度 map + GPU 预留视图。
 func TestPostgresQuotaStoreGetMy(t *testing.T) {
 	tx := &quotaFakeTx{}

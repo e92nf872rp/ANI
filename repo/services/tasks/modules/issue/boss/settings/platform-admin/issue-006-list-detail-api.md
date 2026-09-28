@@ -15,7 +15,7 @@
 ## Acceptance Criteria
 - [ ] `PlatformAdminService.List` RPC 实现替换 501 占位：调用 `CorePlatformUserClient.List(filter)` → Core SDK `GET /admin/platform-users`
 - [ ] List 支持 query 参数：limit（default 20, max 100）/ cursor / role / status / source / search
-- [ ] List 响应 CursorPage：items[]（每项含 id/username/display_name/role/status/source/last_login_at，**不含 email**）+ next_cursor
+- [ ] List 响应 CursorPage：items[]（每项含 id/email/username/display_name/role/status/source/last_login_at）+ next_cursor
 - [ ] source 推断：`oidc:` → third_party，`local:` → local
 - [ ] `PlatformAdminService.GetDetail` RPC 实现替换 501 占位：调用 `CorePlatformUserClient.Get(userId)` → Core SDK `GET /admin/platform-users/{userId}`
 - [ ] Detail 响应含全字段：id/email/username/display_name/role/status/source/last_login_at/created_at（不含 password_hash）

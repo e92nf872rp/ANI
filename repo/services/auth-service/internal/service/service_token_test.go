@@ -359,8 +359,8 @@ func newServiceTokenFixture(t *testing.T) (*AuthService, *JWTValidator) {
 		jwt:    validator,
 		issuer: issuer,
 		mintSecrets: map[string]string{
-			"inference-service":       "mint-secret",
-			"tenant-service":          "mint-secret",
+			"inference-service":         "mint-secret",
+			"tenant-service":            "mint-secret",
 			"platform-settings-service": "mint-secret",
 		},
 	}, validator
