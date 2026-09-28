@@ -48,6 +48,7 @@ func (s *passwordLoginStore) LookupUser(ctx context.Context, tenantID uuid.UUID,
 		SELECT id, password_hash, status
 		FROM users
 		WHERE tenant_id=$1 AND username=$2
+		  AND is_deleted = FALSE
 	`, tenantID, namespacedUsername).Scan(&user.ID, &user.PasswordHash, &user.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.PasswordUser{}, ports.ErrInvalidCredentials
@@ -138,12 +139,13 @@ func (s *platformLoginStore) LookupUser(ctx context.Context, namespacedUsername 
 		FROM users u
 		WHERE u.username=$1
 		  AND u.tenant_id IS NULL
+		  AND u.is_deleted = FALSE
 		  AND EXISTS (
 		    SELECT 1
 		    FROM user_roles ur
 		    JOIN roles r ON r.id = ur.role_id
 		    WHERE ur.user_id = u.id
-		      AND r.name='platform-admin'
+		      AND r.name LIKE 'platform-%'
 		      AND r.tenant_id IS NULL
 		  )
 	`, namespacedUsername).Scan(&user.ID, &user.PasswordHash, &user.Status)
