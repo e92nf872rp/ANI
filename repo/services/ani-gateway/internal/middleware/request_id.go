@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/utils"
@@ -10,7 +11,7 @@ import (
 
 const keyRequestID = "request_id"
 
-// RequestID injects a unique request ID into every request context and response header.
+// RequestID 为每个请求上下文和响应 Header 注入唯一请求 ID。
 func RequestID() app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
 		reqID := string(c.GetHeader("X-Request-ID"))
@@ -23,7 +24,7 @@ func RequestID() app.HandlerFunc {
 	}
 }
 
-// GetRequestID retrieves the request ID from context.
+// GetRequestID 从请求上下文读取请求 ID。
 func GetRequestID(c *app.RequestContext) string {
 	v, _ := c.Get(keyRequestID)
 	if id, ok := v.(string); ok {
@@ -32,7 +33,7 @@ func GetRequestID(c *app.RequestContext) string {
 	return ""
 }
 
-// GetTenantID retrieves the tenant ID set by the Auth middleware.
+// GetTenantID 读取 Auth 中间件写入的租户 ID。
 func GetTenantID(c *app.RequestContext) string {
 	v, _ := c.Get("tenant_id")
 	if id, ok := v.(string); ok {
@@ -41,7 +42,7 @@ func GetTenantID(c *app.RequestContext) string {
 	return ""
 }
 
-// GetUserID retrieves the user ID set by the Auth middleware.
+// GetUserID 读取 Auth 中间件写入的用户 ID。
 func GetUserID(c *app.RequestContext) string {
 	v, _ := c.Get("user_id")
 	if id, ok := v.(string); ok {
@@ -50,7 +51,13 @@ func GetUserID(c *app.RequestContext) string {
 	return ""
 }
 
-// respondError writes a standardized ANI error response.
+// GetCredentialScheme 读取生成式认证写入的凭据类型。传统 bearer 认证会
+// 留空；调用方必须与 GetPrincipalKind 组合判断，不能把空值视为匿名。
+func GetCredentialScheme(c *app.RequestContext) string {
+	return strings.TrimSpace(c.GetString("credential_scheme"))
+}
+
+// respondError 写入标准化的 ANI 错误响应。
 func respondError(c *app.RequestContext, statusCode int, code, message string) {
 	c.JSON(statusCode, utils.H{
 		"code":       code,

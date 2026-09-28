@@ -14,6 +14,10 @@ func TestAuthPublicPaths(t *testing.T) {
 		"/api/v1/auth/refresh",
 		"/api/v1/auth/password/login",
 		"/api/v1/auth/platform/password/login",
+		"/kaiwu/console",
+		"/kaiwu/console/assets/app.js",
+		"/kaiwu/boss",
+		"/kaiwu/boss/assets/app.js",
 	}
 	for _, path := range publicPaths {
 		if !isPublicPath(path) {
@@ -35,10 +39,9 @@ func TestAuthProtectedPaths(t *testing.T) {
 	}
 }
 
-// TestPlatformLogin_TenantIsolation verifies the scope whitelist enforced by
-// scopeAllowedForPath. Platform tokens (scope=platform) must only reach
-// /api/v1/auth/platform/* endpoints; tenant tokens (scope=tenant) must not
-// reach platform endpoints. Violations are the basis for 403 FORBIDDEN.
+// TestPlatformLogin_TenantIsolation 验证 scopeAllowedForPath 强制的白名单。
+// 平台令牌（scope=platform）只能访问 /api/v1/auth/platform/*；
+// 租户令牌（scope=tenant）不能访问平台端点，违规时返回 403 FORBIDDEN。
 func TestPlatformLogin_TenantIsolation(t *testing.T) {
 	cases := []struct {
 		name      string

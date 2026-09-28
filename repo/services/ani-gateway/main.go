@@ -334,6 +334,23 @@ func main() {
 			Provider:       strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
 		}
 	}
+	// 开物复用实例运行时的 Kubernetes REST client；没有真实 Kubernetes
+	// client 时读取器保持 nil，处理函数会失败关闭。
+	kaiwuRuntimeReader := newGatewayKaiwuRuntimeReader(kubernetesRESTClient, gatewayKaiwuRuntimeConfigFromEnv())
+	kaiwuProxyHTTPClient := newGatewayKaiwuProxyHTTPClient()
+	kaiwuCookieConfig, err := gatewayKaiwuCookieConfigFromEnv()
+	if err != nil {
+		logger.Error("failed to configure Kaiwu proxy cookies", "err", err)
+		os.Exit(1)
+	}
+	kaiwuCookieSigner, err := newGatewayKaiwuCookieSigner(kaiwuCookieConfig)
+	if err != nil {
+		logger.Error("failed to configure Kaiwu proxy cookie signer", "err", err)
+		os.Exit(1)
+	}
+	if kaiwuCookieSigner == nil {
+		logger.Warn("Kaiwu proxy cookie signing secret is not configured; Kaiwu entry APIs will fail closed")
+	}
 	router.RegisterWithOptions(h, router.RegisterOptions{
 		K8sClusterService:                     k8sClusterService,
 		EncryptionService:                     encryptionService,
@@ -373,6 +390,9 @@ func main() {
 		ComponentStatusService:                componentStatusService,
 		ComponentMetricsReader:                componentMetricsReader,
 		ComponentLogReader:                    componentLogReader,
+		KaiwuRuntimeReader:                    kaiwuRuntimeReader,
+		KaiwuCookieSigner:                     kaiwuCookieSigner,
+		KaiwuProxyHTTPClient:                  kaiwuProxyHTTPClient,
 	})
 	runtimeAdmin, err := startGatewayRuntimeAdmin(logger)
 	if err != nil {
