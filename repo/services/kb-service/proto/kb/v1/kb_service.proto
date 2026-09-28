@@ -1,0 +1,581 @@
+syntax = "proto3";
+
+package kb.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/kb/v1;kbv1";
+
+// KBService manages knowledge bases and provides RAG query capability.
+service KBService {
+  rpc CreateKB(CreateKBRequest) returns (KnowledgeBase);
+  rpc GetKB(GetKBRequest) returns (KnowledgeBase);
+  rpc ListKBs(ListKBsRequest) returns (ListKBsResponse);
+  // UpdateKB updates KB name/description; empty fields mean "no change".
+  // Pure metadata update — does not trigger index rebuild (unlike config).
+  rpc UpdateKB(UpdateKBRequest) returns (KnowledgeBase);
+  rpc DeleteKB(DeleteKBRequest) returns (google.protobuf.Empty);
+
+  // GetDocumentUploadURL returns a presigned MinIO PUT URL for direct upload.
+  // KB-SPLIT-P1I (#058, ADR §D1): kb signs against its own MinIO bucket
+  // (key {kb_id}/{doc_id}); no kb_documents row is written here — the
+  // registration moves to CompleteDocumentUpload after HeadObject verifies
+  // the object exists.
+  rpc GetDocumentUploadURL(GetDocumentUploadURLRequest) returns (GetDocumentUploadURLResponse);
+
+  // NotifyDocumentUploaded is called after the client uploads directly to MinIO.
+  // Validates the checksum, then enqueues a parse task via Outbox pattern.
+  // DEPRECATED by KB-SPLIT-P1I (#058): the upload flow is
+  // GetDocumentUploadURL → CompleteDocumentUpload; removal is tracked in #065.
+  rpc NotifyDocumentUploaded(NotifyDocumentUploadedRequest) returns (common.v1.AsyncTaskRef);
+
+  // CompleteDocumentUpload finishes the direct upload (KB-SPLIT-P1I #058,
+  // ADR §D1 three-step flow): kb HeadObject-verifies the uploaded object
+  // exists (and its size), then registers kb_documents (parse_status=pending)
+  // and enqueues the parse task via the Outbox pattern in one transaction.
+  rpc CompleteDocumentUpload(CompleteDocumentUploadRequest) returns (common.v1.AsyncTaskRef);
+
+  // GetDocument returns metadata for one document.
+  rpc GetDocument(GetDocumentRequest) returns (KBDocument);
+
+  // ListDocuments returns all documents in a knowledge base.
+  rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
+
+  // DeleteDocument removes a document and its Milvus vectors (idempotent).
+  rpc DeleteDocument(DeleteDocumentRequest) returns (google.protobuf.Empty);
+
+  // GetObjectURL returns a presigned public-view (NodePort) GET URL for a
+  // kb-owned object (KB-SPLIT-P1J #059, ADR §D1-取用). object_id carries the
+  // kb-owned object identity in `{bucket}/{key}` form — the same literal stored
+  // in markdown image placeholders `[图片: caption](object_id)`. kb validates
+  // the object belongs to the requested KB (prefix `{kb_id}/`) before signing;
+  // the caller (end-user browser, outside the cluster) fetches the bytes
+  // directly from MinIO — the gateway never proxies the payload (前端契约不变:
+  // only the gateway is perceived). The public view matches the presign-PUT
+  // endpoint: internal ClusterIP addresses do not resolve outside the cluster.
+  rpc GetObjectURL(GetObjectURLRequest) returns (GetObjectURLResponse);
+
+  // Query performs a synchronous RAG query and returns a JSON answer.
+  // For streaming answers use the SSE endpoint in the gateway directly.
+  rpc Query(QueryRequest) returns (QueryResponse);
+
+  // Retrieve performs a streaming RAG query: yields token events, a sources
+  // event, then a done event (or an error event). Server-streaming RPC.
+  // Orchestration mirrors Query (session + persistence + no-result gates);
+  // implemented in STEP-10 feature issue. This contract issue only declares
+  // the proto surface.
+  rpc Retrieve(RetrieveRequest) returns (stream RetrieveEvent);
+
+  // ── Phase A P1 RPC declarations (P0 returns UNIMPLEMENTED) ─────────────────
+  // ListKBCitations returns the citation sources used by a KB (P1).
+  rpc ListKBCitations(ListKBCitationsRequest) returns (ListKBCitationsResponse);
+  // ListKBSessions returns the chat sessions of a KB (P1).
+  rpc ListKBSessions(ListKBSessionsRequest) returns (ListKBSessionsResponse);
+  // UpdateKBPermissions updates KB access permissions (P1).
+  rpc UpdateKBPermissions(UpdateKBPermissionsRequest) returns (KnowledgeBase);
+  // GetKBPermissions returns the access permissions of a KB (P1).
+  // No kb_permissions row → returns defaults (public_read=false, empty list).
+  rpc GetKBPermissions(GetKBPermissionsRequest) returns (KBPermissions);
+  // GetKBConfig returns the ingest/query configuration of a KB (P1 #22).
+  rpc GetKBConfig(GetKBConfigRequest) returns (KBConfig);
+
+  // UpdateKBConfig updates the ingest/query config of a KB (P1 #23).
+  // embedding_model / chunk_size changes invalidate existing vectors and
+  // trigger a full rebuild in the same transaction (active→rebuilding +
+  // rebuild task + outbox event); the other four fields are query-time or
+  // next-parse settings and never trigger a rebuild. Sync 200 semantics;
+  // the implied rebuild task is attached as rebuild_task in the response.
+  rpc UpdateKBConfig(UpdateKBConfigRequest) returns (UpdateKBConfigResponse);
+
+  // ListDocumentChunks returns the chunk details of a document (P1).
+  rpc ListDocumentChunks(ListDocumentChunksRequest) returns (ListDocumentChunksResponse);
+  // GetSessionMessages returns the message history of a chat session (P1).
+  rpc GetSessionMessages(GetSessionMessagesRequest) returns (GetSessionMessagesResponse);
+  // DeleteSession removes a chat session and its messages (idempotent).
+  rpc DeleteSession(DeleteSessionRequest) returns (google.protobuf.Empty);
+
+  // ReparseDocument re-triggers parsing of an existing document.
+  // Returns 202-style async task semantics: resets the doc row and enqueues
+  // a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
+  // the NotifyDocumentUploaded event pipeline).
+  rpc ReparseDocument(ReparseDocumentRequest) returns (common.v1.AsyncTaskRef);
+
+  // RebuildKB re-parses every ready/failed document in a KB (P1 #24).
+  // Returns 202-style async task semantics: sets KB status='rebuilding'
+  // (write ops on the KB fail with FAILED_PRECONDITION while rebuilding;
+  // queries stay served from the existing index) and enqueues a rebuild
+  // task via Outbox pattern onto NATS ani.tasks.kb.rebuild.v1.
+  rpc RebuildKB(RebuildKBRequest) returns (common.v1.AsyncTaskRef);
+
+  // ListKBAuditLogs returns the management-plane audit trail of a KB (P1 #21).
+  // Keyset pagination: created_at DESC, id DESC (kb-p1-plan §6.4/§7.4).
+  rpc ListKBAuditLogs(ListKBAuditLogsRequest) returns (ListKBAuditLogsResponse);
+
+  // ListOperations lists kb operations (idempotency + progress records)
+  // for a tenant (P1C #052, ADR 0001 §D4-2). Temporary progress query
+  // surface until task-service subscribes to kb outbox events and takes
+  // over task display (ADR §五-阶段6). Keyset pagination: created_at DESC,
+  // id DESC; optional operation_type / resource_id / status filters.
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+
+  // GetOperation returns a single kb operation by id (P1C #052).
+  // Cross-tenant ids are invisible (tenant isolation) → NOT_FOUND.
+  rpc GetOperation(GetOperationRequest) returns (KBOperation);
+}
+
+// ── Request / Response messages ───────────────────────────────────────────────
+
+message CreateKBRequest {
+  string tenant_id       = 1;
+  string name            = 2;
+  string description     = 3;
+  string embedding_model = 4;   // default "bge-m3"
+  int32  chunk_size      = 5;   // default 1024
+  int32  top_k           = 6;   // default 5
+  float  score_threshold = 7;   // default 0.3
+  string retrieval_mode  = 8;   // vector | hybrid(默认) | keyword
+  string default_inference_service = 9; // default inference model (served_model_name); empty = "default"
+}
+
+message GetKBRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+}
+
+message ListKBsRequest {
+  string tenant_id = 1;
+  common.v1.CursorPageRequest page = 2;
+  // Optional status filter (active | rebuilding). Empty means no filter
+  // (soft-deleted rows are always excluded).
+  string status = 3;
+}
+
+message ListKBsResponse {
+  repeated KnowledgeBase kbs  = 1;
+  common.v1.CursorPageMeta meta = 2;
+}
+
+message DeleteKBRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+}
+
+message UpdateKBRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string idempotency_key = 3;   // client-generated; replay-safe
+  string name            = 4;   // empty = keep current name
+  string description     = 5;   // empty = keep current description
+}
+
+message GetDocumentUploadURLRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string file_name       = 3;
+  string file_type       = 4;   // pdf | docx | xlsx | pptx | md | txt
+  int64  file_size_bytes = 5;
+  string checksum_sha256 = 6;   // client-computed; validated after upload
+  string idempotency_key = 7;   // collision-safe: resubmitting returns same doc
+  string custom_metadata = 8;  // JSONB string; client-defined key-value metadata (≤ 64KB)
+}
+
+message GetDocumentUploadURLResponse {
+  string doc_id       = 1;   // pre-reserved UUID
+  string upload_url   = 2;   // presigned PUT URL (valid 15 minutes)
+  string storage_path = 3;   // MinIO object key — {kb_id}/{doc_id} (KB-SPLIT-P1I #058)
+}
+
+message NotifyDocumentUploadedRequest {
+  string tenant_id    = 1;
+  string kb_id        = 2;
+  string doc_id       = 3;
+  string storage_path = 4;
+}
+
+message CompleteDocumentUploadRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string doc_id          = 3;   // from GetDocumentUploadURL
+  string file_name       = 4;   // display name registered on the doc row
+  string file_type       = 5;   // pdf | docx | xlsx | pptx | md | txt
+  string checksum_sha256 = 6;   // client-computed; registered for post-parse verification
+  string custom_metadata = 7;  // JSONB string; client-defined key-value metadata (≤ 64KB)
+  string idempotency_key = 8;  // client-generated uuid; replay-safe, required
+}
+
+message GetDocumentRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  string doc_id    = 3;
+}
+
+message ListDocumentsRequest {
+  string tenant_id   = 1;
+  string kb_id       = 2;
+  string parse_status = 3;   // filter; empty = all
+  common.v1.CursorPageRequest page = 4;
+}
+
+message ListDocumentsResponse {
+  repeated KBDocument documents = 1;
+  common.v1.CursorPageMeta meta = 2;
+}
+
+message DeleteDocumentRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  string doc_id    = 3;
+}
+
+message GetObjectURLRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  // kb-owned object identity in `{bucket}/{key}` form (as embedded in the
+  // markdown image placeholder `[图片: caption](object_id)`).
+  string object_id = 3;
+}
+
+message GetObjectURLResponse {
+  string url             = 1;   // presigned GET URL (public/NodePort view)
+  int64  expires_seconds = 2;   // URL lifetime
+}
+
+message QueryRequest {
+  string tenant_id        = 1;
+  string kb_id            = 2;
+  string question         = 3;
+  string session_id       = 4;   // optional; empty creates new session
+  string idempotency_key  = 5;   // prevents duplicate billing on retry
+  int32  top_k            = 6;   // override KB default if nonzero
+  float  score_threshold  = 7;   // override KB default if nonzero
+  string inference_service_name = 8; // which vLLM service to use; empty = KB default_inference_service, then "default"
+  string retrieval_mode   = 9;   // override KB retrieval mode; empty = use KB
+}
+
+message QueryResponse {
+  string answer           = 1;
+  repeated SourceChunk sources = 2;
+  string session_id       = 3;
+  int32  input_tokens     = 4;
+  int32  output_tokens    = 5;
+}
+
+message SourceChunk {
+  string doc_id    = 1;
+  string file_name = 2;
+  int32  page      = 3;
+  string content   = 4;   // the cited passage
+  float  score     = 5;   // similarity score [0,1]
+}
+
+// ── Retrieve RPC messages (STEP-10 contract) ────────────────────────────────
+// RetrieveRequest mirrors QueryRequest fields (Plan §10.1).
+message RetrieveRequest {
+  string tenant_id        = 1;
+  string kb_id            = 2;
+  string question         = 3;
+  string session_id       = 4;   // optional; empty creates new session
+  string idempotency_key  = 5;   // prevents duplicate billing on retry
+  int32  top_k            = 6;   // override KB default if nonzero
+  float  score_threshold  = 7;   // override KB default if nonzero
+  string inference_service_name = 8; // which vLLM service to use; empty = KB default_inference_service, then "default"
+  string retrieval_mode   = 9;   // override KB retrieval mode; empty = use KB
+}
+
+// RetrieveEvent is a server-streaming oneof: token* → sources → done (or error).
+message RetrieveEvent {
+  oneof event {
+    RetrieveTokenEvent   token   = 1;
+    RetrieveSourcesEvent sources = 2;
+    RetrieveDoneEvent    done    = 3;
+    RetrieveErrorEvent   error   = 4;
+  }
+}
+
+message RetrieveTokenEvent {
+  string content = 1;   // incremental token text
+}
+
+message RetrieveSourcesEvent {
+  repeated SourceChunk sources = 1;
+}
+
+message RetrieveDoneEvent {
+  int32  input_tokens  = 1;
+  int32  output_tokens = 2;
+  string session_id    = 3;
+}
+
+message RetrieveErrorEvent {
+  string message = 1;
+  // Error code matching SSE error event protocol (SPEC §4.3):
+  // BAD_REQUEST | UNAUTHORIZED | KB_NOT_FOUND | INFERENCE_UNAVAILABLE |
+  // RETRIEVE_FAILED | STREAM_INTERRUPTED. Allows Gateway to faithfully
+  // transcode the gRPC error event into the SSE {"code":"...","message":"..."} format.
+  string code = 2;
+}
+
+// ── Domain messages ───────────────────────────────────────────────────────────
+
+message KnowledgeBase {
+  string tenant_id       = 1;
+  string id              = 2;
+  string name            = 3;
+  string description     = 4;
+  string embedding_model = 5;
+  int32  chunk_size      = 6;
+  int32  top_k           = 7;
+  float  score_threshold = 8;
+  string retrieval_mode  = 13;  // vector | hybrid | keyword
+  string status          = 9;   // active | rebuilding | deleted
+  int32  doc_count       = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+  string default_inference_service = 14; // default inference model (served_model_name); empty = "default"
+}
+
+message KBDocument {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string id              = 3;
+  string file_name       = 4;
+  string file_type       = 5;
+  int64  file_size_bytes = 6;
+  string parse_status    = 7;   // pending | parsing | indexing | ready | failed
+  int32  chunk_count     = 8;
+  string error_message   = 9;
+  string custom_metadata = 10;  // JSONB string; client-defined key-value metadata (≤ 64KB)
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp parsed_at  = 12;
+}
+
+// ── Phase A P1 messages (declarations only; P0 returns UNIMPLEMENTED) ─────────
+message ListKBCitationsRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  common.v1.CursorPageRequest page = 3;
+}
+
+message KBCitation {
+  string id         = 1;
+  string kb_id      = 2;
+  string doc_id     = 3;
+  string file_name  = 4;
+  int32  page       = 5;
+  string content    = 6;
+  float  score      = 7;
+  google.protobuf.Timestamp created_at = 8;
+  string message_id = 9;   // answering message id that cited this doc; empty = unknown
+  string session_id = 10;  // session the answer belongs to
+}
+
+message ListKBCitationsResponse {
+  repeated KBCitation items = 1;
+  string next_cursor        = 2;
+}
+
+message ListKBSessionsRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  common.v1.CursorPageRequest page = 3;
+}
+
+message KBSession {
+  string id             = 1;
+  string kb_id          = 2;
+  int32  message_count  = 3;
+  string last_query     = 4;
+  google.protobuf.Timestamp created_at     = 5;
+  google.protobuf.Timestamp last_active_at = 6;
+}
+
+message ListKBSessionsResponse {
+  repeated KBSession items = 1;
+  string next_cursor        = 2;
+}
+
+message UpdateKBPermissionsRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string idempotency_key = 3;
+  bool   public_read     = 4;
+  repeated string allowed_user_ids = 5;
+}
+
+message GetKBPermissionsRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+}
+
+message GetKBConfigRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+}
+
+message UpdateKBConfigRequest {
+  string tenant_id        = 1;
+  string kb_id            = 2;
+  string idempotency_key  = 3;    // client-generated uuid; replay-safe, required
+  optional string embedding_model = 4;  // unset = keep current
+  optional int32  chunk_size      = 5;  // unset = keep current
+  google.protobuf.BoolValue ocr_enabled = 6;  // tri-state: unset=keep / true / false
+  optional int32  top_k           = 7;
+  optional float  score_threshold = 8;
+  optional string retrieval_mode  = 9;   // vector | hybrid | keyword
+}
+
+message UpdateKBConfigResponse {
+  KBConfig config = 1;
+  common.v1.AsyncTaskRef rebuild_task = 2;  // set when the update triggered a full rebuild
+}
+
+message KBConfig {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string embedding_model = 3;
+  int32  chunk_size      = 4;
+  bool   ocr_enabled     = 5;
+  int32  top_k           = 6;
+  float  score_threshold = 7;
+  string retrieval_mode  = 8;   // vector | hybrid | keyword
+}
+
+message KBPermissions {
+  string kb_id                     = 1;
+  bool   public_read               = 2;
+  repeated string allowed_user_ids = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message ListKBAuditLogsRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  common.v1.CursorPageRequest page = 3;   // limit + cursor (same shape as citations/sessions)
+}
+
+message AuditLogEntry {
+  string id            = 1;
+  string kb_id         = 2;
+  string actor_user_id = 3;   // empty = internal system actor (parse/rebuild consumer)
+  string action        = 4;
+  string before_state  = 5;   // JSON-serialized; empty = none (creation-type)
+  string after_state   = 6;   // JSON-serialized; empty = none (deletion-type)
+  string error_code    = 7;   // empty = success
+  string error_msg     = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message ListKBAuditLogsResponse {
+  repeated AuditLogEntry items = 1;
+  string next_cursor            = 2;   // flat shape, aligned with ListKBCitations/ListKBSessions
+}
+
+message KBChunk {
+  string id              = 1;
+  string doc_id          = 2;
+  string kb_id           = 3;
+  string parent_chunk_id = 4;
+  string chunk_type      = 5;   // child | parent | doc_summary
+  string content         = 6;
+  string parent_content  = 7;
+  int32  page_number     = 8;
+  string content_type    = 9;
+  int32  token_count     = 10;
+  string custom_metadata = 11;  // JSONB string
+  google.protobuf.Timestamp created_at = 12;
+  string file_name       = 13;  // kb_chunks.file_name (NOT NULL)
+}
+
+message ListDocumentChunksRequest {
+  string tenant_id  = 1;
+  string kb_id      = 2;
+  string doc_id     = 3;
+  string chunk_type = 4;   // optional filter: child | parent | doc_summary
+  common.v1.CursorPageRequest page = 5;
+}
+
+message ListDocumentChunksResponse {
+  repeated KBChunk items = 1;
+  string next_cursor     = 2;
+}
+
+message KBSessionMessage {
+  string id            = 1;
+  string session_id    = 2;
+  string role          = 3;    // user | assistant
+  string content       = 4;
+  string source_chunks = 5;   // JSONB string
+  int32  input_tokens  = 6;
+  int32  output_tokens = 7;
+  int64  duration_ms   = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message GetSessionMessagesRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  string session_id = 3;
+  common.v1.CursorPageRequest page = 4;
+}
+
+message GetSessionMessagesResponse {
+  repeated KBSessionMessage items = 1;
+  string next_cursor             = 2;
+}
+
+message DeleteSessionRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  string session_id = 3;
+}
+
+message ReparseDocumentRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string doc_id          = 3;
+  string idempotency_key = 4;   // client-generated uuid; replay-safe, required
+}
+
+message RebuildKBRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string idempotency_key = 3;   // client-generated uuid; replay-safe, required
+}
+
+// ── KB-SPLIT-P1C messages (#052, ADR 0001 §D4-2): kb_operations queries ──────
+
+message ListOperationsRequest {
+  string tenant_id      = 1;
+  string operation_type = 2;   // optional filter (e.g. kb.create, doc.parse); empty = all
+  string resource_id    = 3;   // optional filter (UUID); empty = all
+  string status         = 4;   // optional filter: pending | running | completed | failed; empty = all
+  common.v1.CursorPageRequest page = 5;
+}
+
+message KBOperation {
+  string tenant_id       = 1;
+  string id              = 2;
+  string idempotency_key = 3;
+  string operation_type  = 4;
+  string resource_id     = 5;   // UUID; empty = not tied to a single resource
+  string status          = 6;   // pending | running | completed | failed
+  string payload         = 7;   // JSONB string
+  string result          = 8;   // JSONB string; empty = no result recorded yet
+  google.protobuf.Timestamp started_at   = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  google.protobuf.Timestamp created_at   = 11;
+  google.protobuf.Timestamp updated_at   = 12;
+}
+
+message ListOperationsResponse {
+  repeated KBOperation items = 1;
+  string next_cursor         = 2;   // flat shape, aligned with ListKBAuditLogs
+}
+
+message GetOperationRequest {
+  string tenant_id    = 1;
+  string operation_id = 2;
+}
