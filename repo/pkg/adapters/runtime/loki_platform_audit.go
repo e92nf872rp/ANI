@@ -68,7 +68,7 @@ func NewLokiPlatformAudit(config LokiPlatformAuditConfig) (*LokiPlatformAudit, e
 // QueryAuditLogs 查询平台审计日志。Loki 不可用/非 200 时直接返回错误
 // （过渡方案不降级，由 handler 映射为 5xx）。
 //
-// 注意：total_approx 为 best-effort（count_over_time 按 step 聚合）；若主查询成功而
+// 注意：total_approx 为 best-effort（index stats 索引统计）；若主查询成功而
 // total 查询失败，仅 total 置 0，不报错（Loki 可达主查询即认为可用）。
 func (s *LokiPlatformAudit) QueryAuditLogs(ctx context.Context, query ports.PlatformAuditLogQuery) (ports.PlatformAuditLogResult, error) {
 	now := s.now().UTC()
@@ -119,7 +119,7 @@ func (s *LokiPlatformAudit) QueryAuditLogs(ctx context.Context, query ports.Plat
 		nextAfter = items[len(items)-1].Timestamp.Format(time.RFC3339)
 	}
 
-	total := s.fetchAuditTotal(ctx, logql, start, end)
+	total := s.fetchAuditTotal(ctx, buildPlatformAuditSelector(query), start, end)
 
 	return ports.PlatformAuditLogResult{
 		Items:       items,
@@ -154,10 +154,9 @@ const (
 	maxAuditPageSize = 100
 )
 
-// buildPlatformAuditLogQL 构造审计 LogQL 选择器 {stream="kubernetes-audit", <label过滤>}，
-// 可选追加 keyword 行过滤器（|~，作用于原始 JSON 行，限时间窗使用）。
+// buildPlatformAuditSelector 构造审计 label 选择器 {stream="kubernetes-audit", <label过滤>}。
 // 不含 node 维度 → 跨多 master 的多个 node=* stream 一次拉全。
-func buildPlatformAuditLogQL(query ports.PlatformAuditLogQuery) string {
+func buildPlatformAuditSelector(query ports.PlatformAuditLogQuery) string {
 	selectors := []string{`stream="kubernetes-audit"`}
 	if query.User != "" {
 		selectors = append(selectors, `audit_user=`+strconv.Quote(query.User))
@@ -171,7 +170,13 @@ func buildPlatformAuditLogQL(query ports.PlatformAuditLogQuery) string {
 	if query.Namespace != "" {
 		selectors = append(selectors, `audit_namespace=`+strconv.Quote(query.Namespace))
 	}
-	logql := "{" + strings.Join(selectors, ",") + "}"
+	return "{" + strings.Join(selectors, ",") + "}"
+}
+
+// buildPlatformAuditLogQL 在 label 选择器基础上可选追加 keyword 行过滤器
+// （|~，作用于原始 JSON 行，限时间窗使用）。
+func buildPlatformAuditLogQL(query ports.PlatformAuditLogQuery) string {
+	logql := buildPlatformAuditSelector(query)
 	if query.Keyword != "" {
 		logql += ` |~ "` + escapeLogQLRegex(query.Keyword) + `"`
 	}
@@ -220,22 +225,19 @@ func (s *LokiPlatformAudit) fetchAuditItems(ctx context.Context, logql string, s
 	return items, nil
 }
 
-// fetchAuditTotal 用 count_over_time（按 step 聚合）返回近似总量；任意失败返回 0。
-func (s *LokiPlatformAudit) fetchAuditTotal(ctx context.Context, logql string, start, end time.Time) int64 {
-	window := end.Sub(start)
-	if window <= 0 {
-		return 0
-	}
-	rangeStr := fmt.Sprintf("%ds", int64(window.Seconds()))
-	query := "sum(count_over_time(" + logql + "[" + rangeStr + "]))"
-
+// fetchAuditTotal 调用 /loki/api/v1/index/stats 从索引元数据返回窗口内总行数（entries）。
+// 此前用 count_over_time 指标查询，Loki 必须解压扫描窗口内全部 chunk（实测 24h 窗口
+// 126 万行时 >40s，触发 gateway 10s 客户端超时且 total 恒为 0）；index stats 只查
+// 索引，同窗口实测毫秒级。任意失败返回 0（best-effort 语义不变）。
+// 注意：index stats 不支持行过滤器（keyword），total 为 label 维度近似量——契约本就
+// 声明 total_approx 为近似量，前端不应依赖精确值做分页计数。
+func (s *LokiPlatformAudit) fetchAuditTotal(ctx context.Context, selector string, start, end time.Time) int64 {
 	params := url.Values{}
-	params.Set("query", query)
+	params.Set("query", selector)
 	params.Set("start", strconv.FormatInt(start.UnixNano(), 10))
 	params.Set("end", strconv.FormatInt(end.UnixNano(), 10))
-	params.Set("step", rangeStr)
 
-	resp, err := s.getLoki(ctx, "/loki/api/v1/query_range", params)
+	resp, err := s.getLoki(ctx, "/loki/api/v1/index/stats", params)
 	if err != nil {
 		return 0
 	}
@@ -244,43 +246,13 @@ func (s *LokiPlatformAudit) fetchAuditTotal(ctx context.Context, logql string, s
 	if resp.StatusCode != http.StatusOK {
 		return 0
 	}
-	var matrix struct {
-		Data struct {
-			Result []struct {
-				Values [][]any `json:"values"`
-			} `json:"result"`
-		} `json:"data"`
+	var stats struct {
+		Entries int64 `json:"entries"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&matrix); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
 		return 0
 	}
-	var total float64
-	for _, stream := range matrix.Data.Result {
-		for _, pair := range stream.Values {
-			if len(pair) < 2 {
-				continue
-			}
-			total += lokiSampleFloat(pair[1])
-		}
-	}
-	return int64(total)
-}
-
-// lokiSampleFloat 把 Loki matrix 样本 value 解析为 float。Loki 返回的样本 value
-// 是字符串（[ts, "value"]），也兼容浮点类型的测试/降级。
-func lokiSampleFloat(v any) float64 {
-	switch val := v.(type) {
-	case float64:
-		return val
-	case string:
-		f, err := strconv.ParseFloat(val, 64)
-		if err != nil {
-			return 0
-		}
-		return f
-	default:
-		return 0
-	}
+	return stats.Entries
 }
 
 // getLoki 复用 loki_log_store 的 HTTP 基建，向 Loki 发起 GET。
