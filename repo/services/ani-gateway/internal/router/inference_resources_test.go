@@ -137,7 +137,7 @@ func sampleService() *inferencecontrolv1.InferenceService {
 		Id: "22222222-2222-2222-2222-222222222222", Name: "qwen-chat", Model: "Qwen 7B / v1",
 		ModelVersionId: "33333333-3333-3333-3333-333333333333", ServedModelName: "qwen-chat",
 		Capabilities: []string{"embedding"},
-		Replicas: 1, Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
+		Replicas:     1, Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
 		PlacementMode: "auto", Status: "pending", CurrentOperationId: "55555555-5555-5555-5555-555555555555",
 		ImageRef:  pinnedInferenceImageRef,
 		CreatedAt: timestamppb.New(time.Date(2026, 8, 15, 1, 2, 3, 0, time.UTC)),
