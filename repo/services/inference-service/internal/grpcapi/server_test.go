@@ -280,19 +280,20 @@ func TestCreateRejectsReservedEngineEnv(t *testing.T) {
 	}
 }
 
-func TestCreateRejectsMissingAndUnpinnedImage(t *testing.T) {
+func TestCreateRequiresImageRefAndAcceptsTag(t *testing.T) {
 	creator := &fakeCreator{}
 	server := NewServer(creator, &fakeController{})
 	tests := []struct {
 		name     string
 		imageID  string
 		imageRef string
+		wantErr  bool
 		code     codes.Code
 		msg      string
 	}{
-		{name: "missing", code: codes.InvalidArgument, msg: "INVALID_ARGUMENT"},
-		{name: "tag only", imageRef: "registry.local/user/vllm:latest", code: codes.FailedPrecondition, msg: "IMAGE_UNAVAILABLE"},
-		{name: "image_id without digest", imageID: "tenant/runtime:latest", code: codes.FailedPrecondition, msg: "IMAGE_UNAVAILABLE"},
+		{name: "missing", wantErr: true, code: codes.InvalidArgument, msg: "INVALID_ARGUMENT"},
+		{name: "tag only", imageRef: "registry.local/user/vllm:latest"},
+		{name: "image_id without resolved image_ref", wantErr: true, imageID: "tenant/runtime:latest", code: codes.FailedPrecondition, msg: "IMAGE_UNAVAILABLE"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -302,9 +303,17 @@ func TestCreateRejectsMissingAndUnpinnedImage(t *testing.T) {
 				Model: testModel.String(), ImageId: tt.imageID, ImageRef: tt.imageRef,
 				Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
 			})
-			assertStatus(t, err, tt.code, tt.msg)
-			if creator.calls != 0 {
-				t.Fatalf("creator calls = %d, want 0", creator.calls)
+			if tt.wantErr {
+				assertStatus(t, err, tt.code, tt.msg)
+			} else if err != nil {
+				t.Fatalf("CreateInferenceService() error = %v, want success", err)
+			}
+			wantCalls := 1
+			if tt.wantErr {
+				wantCalls = 0
+			}
+			if creator.calls != wantCalls {
+				t.Fatalf("creator calls = %d, want %d", creator.calls, wantCalls)
 			}
 		})
 	}

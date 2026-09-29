@@ -19,7 +19,7 @@
 
 ## 真实环境前置与阻塞
 
-1. `model-import-worker` 与 `model-fetcher` 必须先构建并发布 digest-pinned 镜像；profile 中空 image 会 fail-closed，不能直接作为可运行部署。
+1. `model-import-worker` 仍必须先构建并发布 digest-pinned 镜像；`model-fetcher` 运行时引用支持 tag 或 digest，但不能为空；profile 中空 image 会 fail-closed，不能直接作为可运行部署。
 2. model-service/worker 需要集群中已有的 `ani-services-runtime` 与 `ani-objectstore-production-shaped-runtime` Secret；本批次没有读取或复制任何 Secret 值。
 3. model-fetcher→model-service gRPC 客户端现在强制使用 mTLS 配置（不再提供 insecure fallback），但 live 前仍必须预置 cert-manager CA/Certificate、每个租户 namespace 的 fetcher Role/RoleBinding，以及 9105 ingress/fetcher egress NetworkPolicy。`requester`/tenant 字段仍只是 discriminator，不是身份认证；服务端必须继续以证书 URI/工作负载 allowlist 做 tenant binding。
 4. 远程 source 只接受 HTTPS。对象存储若通过 HTTP 暴露，必须显式配置受控的 insecure 例外并在 fetcher/runtime 中接线；不能因 MinIO 内网地址而默默放宽 scheme 校验。

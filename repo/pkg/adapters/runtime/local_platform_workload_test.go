@@ -149,12 +149,16 @@ func TestLocalPlatformWorkloadAcceptsAcceleratorAndRejectsLeaderWorker(t *testin
 	}
 }
 
-func TestLocalPlatformWorkloadRejectsTagImage(t *testing.T) {
+func TestLocalPlatformWorkloadAcceptsTagImage(t *testing.T) {
 	svc := NewLocalPlatformWorkloadService()
 	spec := sampleCPUPlatformWorkloadSpec("7df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-latest")
 	spec.ImageRef = "registry.ani.internal/platform/runtime:latest"
-	if _, err := svc.Create(context.Background(), "11111111-1111-1111-1111-111111111111", spec); !errors.Is(err, ports.ErrInvalid) {
+	created, err := svc.Create(context.Background(), "11111111-1111-1111-1111-111111111111", spec)
+	if err != nil {
 		t.Fatalf("tag image Create() error = %v", err)
+	}
+	if got := svc.items[created.ID].spec.ImageRef; got != spec.ImageRef {
+		t.Fatalf("stored image_ref = %q, want %q", got, spec.ImageRef)
 	}
 }
 
@@ -165,7 +169,7 @@ func TestValidatePlatformWorkloadMaterializationContract(t *testing.T) {
 		TenantID: tenant, ModelVersionID: "33333333-3333-3333-3333-333333333333",
 		ObjectRef: "object://models/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/v1/doc/model.safetensors",
 		SizeBytes: 12, ChecksumSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		ModelServiceGRPCAddr: "model-service:9090", FetcherImageRef: "registry.local/model-fetcher@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TargetPath: "/models/33333333-3333-3333-3333-333333333333/model.safetensors",
+		ModelServiceGRPCAddr: "model-service:9090", FetcherImageRef: "registry.local/model-fetcher:v1", TargetPath: "/models/33333333-3333-3333-3333-333333333333/model.safetensors",
 	}
 	if err := validatePlatformWorkloadCreate(spec); err != nil {
 		t.Fatalf("valid materialization rejected: %v", err)
@@ -187,9 +191,7 @@ func TestValidatePlatformWorkloadMaterializationContract(t *testing.T) {
 		func(m *ports.PlatformWorkloadModelMaterialization) { m.ModelServiceGRPCAddr = "" },
 		func(m *ports.PlatformWorkloadModelMaterialization) { m.TargetPath = "/models/foo/../bar" },
 		func(m *ports.PlatformWorkloadModelMaterialization) { m.TargetPath = "/models/%2e%2e/secret" },
-		func(m *ports.PlatformWorkloadModelMaterialization) {
-			m.FetcherImageRef = "registry.local/a@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		},
+		func(m *ports.PlatformWorkloadModelMaterialization) { m.FetcherImageRef = "" },
 	} {
 		copy := *spec.ModelMaterialization
 		mutate(&copy)

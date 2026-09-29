@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -20,15 +19,13 @@ import (
 
 const createOperationScope = "inference_service.create"
 
-var digestPinnedImage = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
-
 type CreateInput struct {
 	IdempotencyKey  uuid.UUID
 	Name            string
 	ModelVersionID  uuid.UUID // 产品把手：已就绪的不可变版本
 	ServedModelName string
 	ImageID         string // 仓库 Registry 镜像 ID；手填 image_ref 时可空
-	ImageRef        string // 创建前冻结的 digest 引用，是运行镜像权威
+	ImageRef        string // 手填镜像引用原样作为运行镜像权威；支持 tag、digest 及其他非空格式
 	Spec            domain.Spec
 }
 
@@ -80,8 +77,8 @@ func (c *Creator) Create(ctx context.Context, tenantID uuid.UUID, input CreateIn
 		return replay.Service, replay.Operation, nil
 	}
 	// model_version_id is the product handle. Catalog resolves the tenant-local
-	// PVC artifact and a digest-pinned vLLM/SGLang profile; Core never sees the
-	// engine name.
+	// PVC artifact and a vLLM/SGLang engine profile; the request image_ref is
+	// the runtime image authority and Core never sees the engine name.
 	version, err := c.catalog.Resolve(ctx, tenantID, input.ModelVersionID)
 	if err != nil {
 		return domain.Service{}, domain.Operation{}, err
@@ -258,10 +255,8 @@ func validateCreateInput(tenantID uuid.UUID, input CreateInput) error {
 		return fmt.Errorf("%w: memory is required", ErrInvalidInput)
 	case input.ImageID == "" && input.ImageRef == "":
 		return fmt.Errorf("%w: image_id or image_ref is required", ErrInvalidInput)
-	case input.ImageRef != "" && !digestPinnedImage.MatchString(input.ImageRef):
-		return fmt.Errorf("%w: image_ref must be digest-pinned", ErrImageUnavailable)
 	case input.ImageID != "" && input.ImageRef == "":
-		return fmt.Errorf("%w: image_id must be resolved to a digest-pinned image_ref", ErrImageUnavailable)
+		return fmt.Errorf("%w: image_id must be resolved to an image_ref", ErrImageUnavailable)
 	case input.Spec.PlacementMode != "auto" && input.Spec.PlacementMode != "single_node" && input.Spec.PlacementMode != "multi_node":
 		return fmt.Errorf("%w: placement mode must be auto, single_node, or multi_node", ErrInvalidInput)
 	case input.Spec.Accelerator == nil && input.Spec.PlacementMode == "multi_node":

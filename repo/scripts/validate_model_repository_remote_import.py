@@ -257,10 +257,9 @@ def validate_manifest(path: Path = PROFILE) -> None:
     if str(data.get("model_fetcher_allow_insecure_http", "")).strip().lower() not in {"true", "false"}:
         raise AssertionError("ConfigMap model_fetcher_allow_insecure_http must be a boolean")
     config_worker_image = str(data.get("model_import_worker_image_ref", "")).strip()
-    for key in ("model_fetcher_image_ref", "model_import_worker_image_ref"):
-        image_ref = str(data.get(key, "")).strip()
-        if image_ref and not IMAGE_DIGEST_RE.fullmatch(image_ref):
-            raise AssertionError(f"ConfigMap {key} must be digest pinned or explicitly left empty")
+    fetcher_image = str(data.get("model_fetcher_image_ref", "")).strip()
+    if not fetcher_image:
+        raise AssertionError("ConfigMap model_fetcher_image_ref must be non-empty")
     if str(data.get("model_service_grpc_addr", "")).strip() != "model-service.ani-system.svc.cluster.local:9103":
         raise AssertionError("ConfigMap model_service_grpc_addr must target model-service 9103")
     if str(data.get("model_fetcher_grpc_addr", "")).strip() != "model-service.ani-system.svc.cluster.local:9105":
