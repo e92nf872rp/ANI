@@ -252,6 +252,9 @@ func withTenantContextStrict(ctx context.Context, tenantID, userID string, roles
 }
 
 func isPublicPath(path string) bool {
+	if IsKaiwuProxyPath(path) {
+		return true
+	}
 	switch path {
 	case "/health", "/ready", "/healthz", "/readyz",
 		"/api/v1/branding",
@@ -264,6 +267,13 @@ func isPublicPath(path string) bool {
 	default:
 		return false
 	}
+}
+
+// IsKaiwuProxyPath 判断路径是否属于开物浏览器代理入口。这里 public 仅表示
+// 跳过全局 Bearer/RBAC/幂等中间件；代理处理函数仍强制校验签名 Cookie。
+func IsKaiwuProxyPath(path string) bool {
+	return path == "/kaiwu/console" || strings.HasPrefix(path, "/kaiwu/console/") ||
+		path == "/kaiwu/boss" || strings.HasPrefix(path, "/kaiwu/boss/")
 }
 
 // scopeAllowedForPath 平台 token 与租户 token 路由白名单隔离
