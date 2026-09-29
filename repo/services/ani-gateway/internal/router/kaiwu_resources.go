@@ -46,8 +46,12 @@ type KaiwuRuntimeReader interface {
 }
 
 const (
+	// kaiwuConsoleTenantName 表示允许进入开物 Console 的默认租户名。
 	kaiwuConsoleTenantName = "tenant-a"
-	kaiwuEntryExpiresIn    = 120
+	// kaiwuBossRootUsername 表示允许进入开物 BOSS 的默认 root 账号名
+	// （库内用户名带 local:/oidc: 前缀，比较前必须剥除）。
+	kaiwuBossRootUsername = "root"
+	kaiwuEntryExpiresIn   = 120
 )
 
 // kaiwuAPI 保存开物入口处理函数使用的权威数据存储和运行时读取器。
@@ -143,8 +147,9 @@ func (api *kaiwuAPI) consoleEntry(ctx context.Context, c *app.RequestContext) {
 	writeKaiwuPublicEntry(c, kaiwuClientConsole, kaiwuPublicEntryURL(baseURL, webToken), api.publicEntryTTLSeconds())
 }
 
-// bossEntry 授权当前平台用户，并返回共享 Kaiwu BOSS 实例的 Gateway
-// 代理入口。
+// bossEntry 授权默认 root 平台账号，并返回共享 Kaiwu BOSS 实例的
+// Gateway 代理入口。产品语义只对 root 账号开放：即使同为 platform-admin
+// 角色，其他平台账号也一律拒绝。
 func (api *kaiwuAPI) bossEntry(ctx context.Context, c *app.RequestContext) {
 	if !isKaiwuBearerUser(c) {
 		writeKaiwuError(c, http.StatusForbidden, "KAIWU_USER_CREDENTIAL_REQUIRED", "bearer user credential required")
@@ -175,6 +180,12 @@ func (api *kaiwuAPI) bossEntry(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	if user.Role != "platform-admin" {
+		writeKaiwuError(c, http.StatusForbidden, "KAIWU_BOSS_ROLE_REQUIRED", "platform admin role required")
+		return
+	}
+	// 精确到默认 root 账号：platform-admin 角色但用户名不是 root 的账号
+	// 同样拒绝，防止新创建的平台管理员进入开物。
+	if kaiwuBareUsername(user.Username) != kaiwuBossRootUsername {
 		writeKaiwuError(c, http.StatusForbidden, "KAIWU_BOSS_ROLE_REQUIRED", "platform admin role required")
 		return
 	}
@@ -254,6 +265,13 @@ func isKaiwuBearerUser(c *app.RequestContext) bool {
 	}
 	scheme := middleware.GetCredentialScheme(c)
 	return scheme == "" || scheme == "bearer"
+}
+
+// kaiwuBareUsername 剥除库内用户名的 local:/oidc: 命名空间前缀，返回对外
+// 账号名。与平台账号适配器 REGEXP_REPLACE 的剥前缀约定保持一致。
+func kaiwuBareUsername(username string) string {
+	username = strings.TrimPrefix(username, "local:")
+	return strings.TrimPrefix(username, "oidc:")
 }
 
 // validKaiwuRuntime 校验适配器返回的干净内部 HTTP 目标和非空令牌，
