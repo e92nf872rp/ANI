@@ -246,9 +246,18 @@ func TestEnsureRejectsBareChecksum(t *testing.T) {
 	}
 }
 
-func TestValidFetcherImageRejectsMultipleAt(t *testing.T) {
-	if validFetcherImage("registry.local/a@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
-		t.Fatal("fetcher image with multiple @ separators must be rejected")
+func TestValidFetcherImageAcceptsNonEmptyReference(t *testing.T) {
+	for _, image := range []string{
+		"registry.local/model-fetcher:v1",
+		"registry.local/model-fetcher@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"registry.local/a@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	} {
+		if !validFetcherImage(image) {
+			t.Fatalf("fetcher image %q must be accepted", image)
+		}
+	}
+	if validFetcherImage("   ") {
+		t.Fatal("empty fetcher image must be rejected")
 	}
 }
 

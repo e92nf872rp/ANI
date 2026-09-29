@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +27,6 @@ var (
 	errInvalidInferenceLogQuery  = errors.New("invalid inference log query")
 	errInferenceImageMissing     = errors.New("image_id or image_ref is required")
 	errInferenceImageUnavailable = errors.New("inference runtime image is unavailable")
-	inferenceDigestPinnedImage   = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
 )
 
 // registerInferenceServices 把产品 HTTP 挂到 /api/v1/svc。租户身份来自 auth middleware。
@@ -1160,23 +1158,13 @@ func resolveInferenceCreateImage(ctx context.Context, tenantID, imageID, imageRe
 		return "", "", errInferenceImageMissing
 	}
 	if imageID != "" {
-		digest, err := lookupInferenceRegistryImage(ctx, tenantID, imageID)
+		imageRef, err := lookupInferenceRegistryImage(ctx, tenantID, imageID)
 		if err == nil {
-			return imageID, digest, nil
-		}
-		if inferenceDigestPinnedImage.MatchString(imageID) {
-			return imageID, imageID, nil
+			return imageID, imageRef, nil
 		}
 		return "", "", errInferenceImageUnavailable
 	}
-	if inferenceDigestPinnedImage.MatchString(imageRef) {
-		return "", imageRef, nil
-	}
-	digest, err := lookupInferenceRegistryImage(ctx, tenantID, imageRef)
-	if err != nil {
-		return "", "", errInferenceImageUnavailable
-	}
-	return "", digest, nil
+	return "", imageRef, nil
 }
 
 func lookupInferenceRegistryImage(ctx context.Context, tenantID, imageRef string) (string, error) {
@@ -1200,36 +1188,13 @@ func lookupInferenceRegistryImage(ctx context.Context, tenantID, imageRef string
 		if digest != "" && item.Digest != digest {
 			continue
 		}
-		pinned, ok := pinInferenceRegistryImage(item)
-		if !ok {
+		imageRef := strings.TrimSpace(item.Image)
+		if imageRef == "" {
 			continue
 		}
-		return pinned, nil
+		return imageRef, nil
 	}
 	return "", errInferenceImageUnavailable
-}
-
-func pinInferenceRegistryImage(image ports.RegistryImage) (string, bool) {
-	if inferenceDigestPinnedImage.MatchString(strings.TrimSpace(image.Image)) {
-		return strings.TrimSpace(image.Image), true
-	}
-	digest := strings.TrimSpace(image.Digest)
-	if digest != "" && !strings.HasPrefix(digest, "sha256:") {
-		digest = "sha256:" + digest
-	}
-	name := strings.TrimSpace(image.Image)
-	if at := strings.Index(name, "@"); at >= 0 {
-		name = name[:at]
-	}
-	slash := strings.LastIndex(name, "/")
-	if colon := strings.LastIndex(name, ":"); colon > slash && colon >= 0 {
-		name = name[:colon]
-	}
-	pinned := name + "@" + digest
-	if !inferenceDigestPinnedImage.MatchString(pinned) {
-		return "", false
-	}
-	return pinned, true
 }
 
 func parseInferenceImageReference(value string) (registryHost, project, repository, tag, digest string) {

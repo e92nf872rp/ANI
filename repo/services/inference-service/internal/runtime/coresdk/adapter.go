@@ -395,8 +395,7 @@ func validateObjectMaterializationWithConfig(request runtime.EnsureRequest, mode
 }
 
 func validFetcherImage(value string) bool {
-	at := strings.LastIndex(value, "@sha256:")
-	return at > 0 && strings.Count(value, "@") == 1 && validSHA256(value[at+1:])
+	return strings.TrimSpace(value) != ""
 }
 
 func validSHA256(value string) bool {

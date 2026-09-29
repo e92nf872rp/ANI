@@ -2,7 +2,6 @@ package grpcapi
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -71,8 +70,6 @@ func domainAccessPolicy(p *inferencecontrolv1.InferenceAccessPolicy, tenantID uu
 	}
 	return result, result.Validate()
 }
-
-var digestPinnedImage = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
 
 // parseTenantID 要求 Gateway 注入真实租户 UUID，JSON 里的 tenant 字段不可信。
 func parseTenantID(raw string) (uuid.UUID, error) {
@@ -177,7 +174,7 @@ func parseCreateImage(imageID, imageRef string) (string, string, error) {
 	if imageID == "" && imageRef == "" {
 		return "", "", errInvalidArgument
 	}
-	if !digestPinnedImage.MatchString(imageRef) {
+	if imageRef == "" {
 		return "", "", service.ErrImageUnavailable
 	}
 	return imageID, imageRef, nil

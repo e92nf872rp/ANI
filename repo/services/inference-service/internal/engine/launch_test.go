@@ -41,6 +41,17 @@ func TestLaunchUsesSameEntryForCPUAndGPU(t *testing.T) {
 	}
 }
 
+func TestLaunchVLLMDefaultsMaxModelLenByCPUInferenceTask(t *testing.T) {
+	_, generateArgs := Launch(domain.Spec{ExecutionProfile: domain.ExecutionProfile{ArtifactRef: "pvc://m#/models/qwen"}}, "qwen")
+	if !containsPair(generateArgs, "--max-model-len", "4096") {
+		t.Fatalf("generate args = %#v, want default max model len 4096", generateArgs)
+	}
+	_, embedArgs := Launch(domain.Spec{ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskEmbed, ArtifactRef: "pvc://m#/models/bge"}}, "bge")
+	if containsArg(embedArgs, "--max-model-len") {
+		t.Fatalf("embed args = %#v, want model-configured max model len", embedArgs)
+	}
+}
+
 func TestLaunchVLLMEmbeddingUsesPoolingEmbedCLI(t *testing.T) {
 	tests := []struct {
 		name        string

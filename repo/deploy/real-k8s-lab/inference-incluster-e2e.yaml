@@ -49,9 +49,8 @@ metadata:
 data:
   model_service_grpc_addr: model-service.ani-system.svc.cluster.local:9103
   model_fetcher_grpc_addr: model-service.ani-system.svc.cluster.local:9105
-  # Release-provided immutable digest-pinned model-fetcher image used by
-  # object-backed inference services. Leave empty only in an unconfigured
-  # template; the profile then fails closed instead of selecting a tag.
+  # Model-fetcher image used by object-backed inference services. Tag and
+  # digest references are both accepted; the reference must be non-empty.
   model_fetcher_image_ref: docker.changqingyun.cn/ani/model-fetcher@sha256:3026fc390af93265df9f6eb1c191942d03947e61d7af3bc29644a857c17605ba
   # HTTP downloads are disabled by default. Set true only for a controlled
   # in-cluster MinIO endpoint; public object URLs must remain HTTPS.

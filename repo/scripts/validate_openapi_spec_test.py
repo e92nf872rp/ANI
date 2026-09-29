@@ -536,10 +536,11 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         self.assertIn("workers", topology["properties"])
         self.assertEqual(len(topology["allOf"]), 2)
         self.assertEqual(len(create["allOf"]), 2)
-        self.assertEqual(
-            create["properties"]["image_ref"]["pattern"],
-            r"^.+@sha256:[a-f0-9]{64}$",
-        )
+        self.assertNotIn("pattern", create["properties"]["image_ref"])
+        self.assertIn("支持 tag、digest", create["properties"]["image_ref"]["description"])
+        materialization = schemas["PlatformWorkloadModelMaterialization"]
+        self.assertNotIn("pattern", materialization["properties"]["fetcher_image_ref"])
+        self.assertIn("支持 tag、digest", materialization["properties"]["fetcher_image_ref"]["description"])
 
         workload = schemas["PlatformWorkload"]
         self.assertEqual(

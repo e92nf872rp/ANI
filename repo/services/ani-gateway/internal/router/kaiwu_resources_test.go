@@ -47,7 +47,7 @@ func (f *fakeKaiwuTenantService) GetTenant(context.Context, string) (ports.Tenan
 }
 
 // fakeKaiwuPlatformUserStore 只实现 Get，因为 BOSS entry handler 只需要
-// 校验权威 platform-admin 角色和状态。
+// 校验权威 platform-admin 角色、root 账号名和状态。
 type fakeKaiwuPlatformUserStore struct {
 	ports.PlatformUserAdminStore
 	user ports.PlatformUserAdmin
@@ -304,7 +304,7 @@ func TestKaiwuBossEntry_AllowedPlatformAdmin(t *testing.T) {
 		reader,
 		nil,
 		&fakeKaiwuPlatformUserStore{user: ports.PlatformUserAdmin{
-			ID: userID, Role: "platform-admin", Status: "active",
+			ID: userID, Username: "local:root", Role: "platform-admin", Status: "active",
 		}},
 		testKaiwuPublicEntry(),
 	)
@@ -330,11 +330,11 @@ func TestKaiwuBossEntry_AllowedPlatformAdmin(t *testing.T) {
 	}
 }
 
-// TestKaiwuBossEntry_AuthorizationAndAvailability 覆盖角色、状态、用户 ID、
-// 凭据类型、scope 和依赖不可用场景。
+// TestKaiwuBossEntry_AuthorizationAndAvailability 覆盖角色、root 账号精确
+// 匹配、状态、用户 ID、凭据类型、scope 和依赖不可用场景。
 func TestKaiwuBossEntry_AuthorizationAndAvailability(t *testing.T) {
 	userID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
-	validUser := ports.PlatformUserAdmin{ID: userID, Role: "platform-admin", Status: "active"}
+	validUser := ports.PlatformUserAdmin{ID: userID, Username: "local:root", Role: "platform-admin", Status: "active"}
 	validReader := &fakeKaiwuRuntimeReader{target: runtimeTestTarget(), webToken: "token"}
 	tests := []struct {
 		name              string
@@ -356,10 +356,20 @@ func TestKaiwuBossEntry_AuthorizationAndAvailability(t *testing.T) {
 			expectedCode:   "KAIWU_BOSS_ROLE_REQUIRED",
 		},
 		{
+			name:     "non-root platform admin",
+			identity: kaiwuTestIdentity{userID: userID.String(), scope: "platform", principalKind: "user"},
+			platformUserStore: &fakeKaiwuPlatformUserStore{user: ports.PlatformUserAdmin{
+				ID: userID, Username: "local:ops-lead", Role: "platform-admin", Status: "active",
+			}},
+			reader:         validReader,
+			expectedStatus: http.StatusForbidden,
+			expectedCode:   "KAIWU_BOSS_ROLE_REQUIRED",
+		},
+		{
 			name:     "disabled platform user",
 			identity: kaiwuTestIdentity{userID: userID.String(), scope: "platform", principalKind: "user"},
 			platformUserStore: &fakeKaiwuPlatformUserStore{user: ports.PlatformUserAdmin{
-				ID: userID, Role: "platform-admin", Status: "disabled",
+				ID: userID, Username: "local:root", Role: "platform-admin", Status: "disabled",
 			}},
 			reader:         validReader,
 			expectedStatus: http.StatusForbidden,
@@ -511,7 +521,7 @@ func TestKaiwuEntry_PublicOriginTokenTTL(t *testing.T) {
 			webToken: "boss token/with+special",
 		},
 		nil,
-		&fakeKaiwuPlatformUserStore{user: ports.PlatformUserAdmin{ID: userID, Role: "platform-admin", Status: "active"}},
+		&fakeKaiwuPlatformUserStore{user: ports.PlatformUserAdmin{ID: userID, Username: "local:root", Role: "platform-admin", Status: "active"}},
 		KaiwuPublicEntryConfig{BossURL: "https://kaiwu.example.com", TokenTTL: 300 * time.Second},
 	)
 
