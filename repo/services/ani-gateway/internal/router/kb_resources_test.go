@@ -28,6 +28,8 @@ type fakeKBClient struct {
 	lastKbID     string
 	lastDocID    string
 	lastIDemKey  string
+	lastListName string
+	lastListID   string
 
 	listKbsResp *kbv1.ListKBsResponse
 	listKbsErr  error
@@ -113,8 +115,10 @@ func (f *fakeKBClient) UpdateKB(_ context.Context, tenantID, kbID, idem, name, d
 	f.lastUpdateDesc = description
 	return f.updateKbResp, f.updateKbErr
 }
-func (f *fakeKBClient) ListKBs(_ context.Context, tenantID string, _ int32, _ string, _ string) (*kbv1.ListKBsResponse, error) {
+func (f *fakeKBClient) ListKBs(_ context.Context, tenantID string, _ int32, _ string, _ string, name string, kbID string) (*kbv1.ListKBsResponse, error) {
 	f.lastTenantID = tenantID
+	f.lastListName = name
+	f.lastListID = kbID
 	return f.listKbsResp, f.listKbsErr
 }
 func (f *fakeKBClient) DeleteKB(_ context.Context, tenantID, kbID string) (*emptypb.Empty, error) {
@@ -788,6 +792,34 @@ func TestKBRoutes_GrpcPassthroughList(t *testing.T) {
 	}
 	if body["next_cursor"] != "cursor-x" {
 		t.Fatalf("next_cursor = %v, want cursor-x", body["next_cursor"])
+	}
+}
+
+// TestKBRoutes_GrpcPassthroughListFilters verifies the list handler forwards
+// the name/id query filters to gRPC and rejects a non-UUID id with 400.
+func TestKBRoutes_GrpcPassthroughListFilters(t *testing.T) {
+	client := &fakeKBClient{listKbsResp: &kbv1.ListKBsResponse{}}
+	h := setupKBTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases?limit=10&name=3&id=550e8400-e29b-41d4-a716-446655440000", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if client.lastListName != "3" {
+		t.Fatalf("name = %q, want 3", client.lastListName)
+	}
+	if client.lastListID != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("id = %q, want uuid", client.lastListID)
+	}
+
+	bad := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases?id=not-a-uuid", nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
+	).Result()
+	if bad.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", bad.StatusCode())
 	}
 }
 

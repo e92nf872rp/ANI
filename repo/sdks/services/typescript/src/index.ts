@@ -522,6 +522,7 @@ export const cursorPaginationOperations = [
   "listInferenceServices",
   "getInferenceServiceLogs",
   "listIntegrations",
+  "listKnowledgeBases",
   "listKnowledgeBaseAuditLogs",
   "listKnowledgeBaseCitations",
   "listKnowledgeBaseDocumentChunks",

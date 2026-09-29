@@ -213,7 +213,15 @@ func (a *kbAPI) listKnowledgeBases(ctx context.Context, c *app.RequestContext) {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "status must be one of: active, rebuilding")
 		return
 	}
-	resp, err := a.client.ListKBs(ctx, instanceTenantID(c), int32(limit), cursor, status)
+	name := strings.TrimSpace(string(c.QueryArgs().Peek("name")))
+	kbID := strings.TrimSpace(string(c.QueryArgs().Peek("id")))
+	if kbID != "" {
+		if _, err := uuid.Parse(kbID); err != nil {
+			writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "id must be a uuid")
+			return
+		}
+	}
+	resp, err := a.client.ListKBs(ctx, instanceTenantID(c), int32(limit), cursor, status, name, kbID)
 	if err != nil {
 		writeKBError(c, err)
 		return
