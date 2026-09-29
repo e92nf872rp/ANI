@@ -1,4 +1,4 @@
-﻿"""Tests for Embed RPC (RAG-REFACTOR-STEP-2 / Plan Â§2.3).
+"""Tests for Embed RPC (RAG-REFACTOR-STEP-2 / Plan Â§2.3).
 
 Validates: texts â†?vectors_flat + dimension + count. Does NOT require live
 vLLM/Milvus â€?embedding model is mocked. Stubs in conftest.py.
