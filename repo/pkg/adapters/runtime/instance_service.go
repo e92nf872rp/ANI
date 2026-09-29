@@ -205,6 +205,9 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 	if err := s.provisionVMDataDisks(ctx, &request); err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
+	if err := s.validateCreateStorageModes(ctx, request); err != nil {
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
 	requestFingerprint, err := createIntentFingerprint(request.Spec)
 	if err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
@@ -974,6 +977,9 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		return ports.WorkloadInstanceRecord{}, err
 	}
 	if err := validateLifecycleIntent(record, request); err != nil {
+		return ports.WorkloadInstanceRecord{}, err
+	}
+	if err := s.validateAttachVolumeMode(ctx, record, request); err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
 	resizeGPUSpec, err := s.resolveResizeGPUSpec(ctx, record, request)
@@ -1898,7 +1904,21 @@ func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request
 	}
 	for i := range request.Spec.VM.DataDiskSpecs {
 		disk := &request.Spec.VM.DataDiskSpecs[i]
-		if strings.TrimSpace(disk.VolumeID) != "" || disk.SizeGiB <= 0 {
+		if volumeID := strings.TrimSpace(disk.VolumeID); volumeID != "" {
+			// VM disks attach as raw block devices; a volume created with
+			// volume_mode=filesystem cannot be used here, and volumeMode is
+			// immutable, so reject up front instead of letting the provider
+			// retry the hotplug forever.
+			volume, err := s.storage.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: request.Spec.TenantID, ResourceID: volumeID})
+			if err != nil {
+				return fmt.Errorf("resolve vm data disk %q: %w", volumeID, err)
+			}
+			if err := requireVolumeMode(volumeID, volume, ports.StorageVolumeModeBlock, "vm data disk"); err != nil {
+				return err
+			}
+			continue
+		}
+		if disk.SizeGiB <= 0 {
 			continue
 		}
 		name := strings.TrimSpace(disk.Name)
@@ -1912,6 +1932,7 @@ func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request
 			SizeGiB:        disk.SizeGiB,
 			StorageClass:   disk.StorageClass,
 			VolumeType:     disk.VolumeType,
+			VolumeMode:     ports.StorageVolumeModeBlock,
 			Encrypted:      disk.Encrypted,
 		})
 		if err != nil {
@@ -1920,6 +1941,54 @@ func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request
 		disk.VolumeID = record.VolumeID
 	}
 	return nil
+}
+
+// validateCreateStorageModes rejects create-time container / gpu_container
+// volume mounts whose volume is not filesystem mode (a block volume cannot be
+// mounted as a directory). VM data disks are checked in provisionVMDataDisks.
+// Runs before provider apply so a mode mismatch fails fast instead of leaving an
+// orphan instance that was created in the provider but never mounted.
+func (s *LocalInstanceService) validateCreateStorageModes(ctx context.Context, request ports.WorkloadInstanceCreateRequest) error {
+	if s.storage == nil || (request.Spec.Kind != ports.WorkloadKindContainer && request.Spec.Kind != ports.WorkloadKindGPUContainer) {
+		return nil
+	}
+	for _, attachment := range renderStorageAttachments(request.Spec) {
+		if attachment.ResourceType != "volume" {
+			continue
+		}
+		volume, err := s.storage.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: request.Spec.TenantID, ResourceID: attachment.ResourceID})
+		if err != nil {
+			return fmt.Errorf("resolve volume %q: %w", attachment.ResourceID, err)
+		}
+		if err := requireVolumeMode(attachment.ResourceID, volume, ports.StorageVolumeModeFilesystem, "container directory mount"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAttachVolumeMode enforces volume_mode compatibility for the
+// attach_volume lifecycle action: VM disks hotplug as raw block devices, while
+// container / gpu_container attachments mount a directory (filesystem). Because
+// the provider volumeMode is immutable, a mismatch is rejected before the
+// operation is recorded instead of being retried in the provider forever.
+func (s *LocalInstanceService) validateAttachVolumeMode(ctx context.Context, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) error {
+	if request.Action != ports.WorkloadLifecycleAttachVolume || s.storage == nil {
+		return nil
+	}
+	volumeID := strings.TrimSpace(request.VolumeID)
+	if volumeID == "" {
+		return nil
+	}
+	want, consumer := ports.StorageVolumeModeFilesystem, "container directory mount"
+	if record.Kind == ports.WorkloadKindVM {
+		want, consumer = ports.StorageVolumeModeBlock, "vm disk hotplug"
+	}
+	volume, err := s.storage.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: record.TenantID, ResourceID: volumeID})
+	if err != nil {
+		return fmt.Errorf("resolve volume %q: %w", volumeID, err)
+	}
+	return requireVolumeMode(volumeID, volume, want, consumer)
 }
 
 func (s *LocalInstanceService) bindCreateStorage(ctx context.Context, request ports.WorkloadInstanceCreateRequest, result ports.WorkloadInstanceCreateResult) error {

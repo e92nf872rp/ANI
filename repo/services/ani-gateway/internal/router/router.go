@@ -5,6 +5,8 @@
 package router
 
 import (
+	"time"
+
 	"github.com/cloudwego/hertz/pkg/app/server"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
@@ -90,6 +92,18 @@ type RegisterOptions struct {
 	// 为 nil 时 handler 回退 local 确定性 adapter。
 	ComponentMetricsReader ports.PlatformComponentMetricsReader
 	ComponentLogReader     ports.PlatformComponentLogReader
+	// KaiwuRuntimeReader 为开物 Console/BOSS 提供内部 ClusterIP 目标和
+	// DSH webToken。nil 表示 Kubernetes 运行时未配置，开物处理函数必须
+	// 失败关闭。
+	KaiwuRuntimeReader KaiwuRuntimeReader
+	// KaiwuConsolePublicURL 与 KaiwuBossPublicURL 声明开物独占 origin 的浏览器
+	// 入口基址（例如 http://10.10.1.66:30088）。entry API 返回该基址加一次性
+	// 启动 token 的绝对地址，Gateway 只做鉴权与跳转。为空表示该客户端未配置，
+	// 入口处理函数按 503 失败关闭。
+	KaiwuConsolePublicURL string
+	KaiwuBossPublicURL    string
+	// KaiwuEntryTokenTTL 是独占 origin 入口地址的有效期提示，零值使用默认值。
+	KaiwuEntryTokenTTL time.Duration
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -182,6 +196,11 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerPlatformAdmins(svc)
 	registerTenantList(svc)
 	registerTenantAdmins(svc)
+	registerKaiwuResources(svc, options.KaiwuRuntimeReader, options.TenantService, options.PlatformUserAdminStore, KaiwuPublicEntryConfig{
+		ConsoleURL: options.KaiwuConsolePublicURL,
+		BossURL:    options.KaiwuBossPublicURL,
+		TokenTTL:   options.KaiwuEntryTokenTTL,
+	})
 
 	// OpenAI-compatible chat traffic is served by the independent Envoy AI
 	// Gateway data plane, not by this control-plane gateway. Keep the legacy

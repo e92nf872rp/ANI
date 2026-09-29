@@ -2707,6 +2707,7 @@ components:
         storage_class: { type: string }
         zone:          { type: string, nullable: true }
         volume_type:   { type: string, enum: [ssd, hdd, high_performance_ssd], nullable: true }
+        volume_mode:   { type: string, enum: [block, filesystem], nullable: true }
         iops:          { type: integer, minimum: 0, nullable: true }
         encrypted:     { type: boolean, nullable: true }
         mount_instance_id: { type: string, nullable: true }
@@ -2854,9 +2855,10 @@ components:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
         name:            { type: string, minLength: 1, maxLength: 128 }
         size_gib:        { type: integer, format: int64, minimum: 1 }
-        storage_class:   { type: string, default: standard }
+        storage_class:   { type: string, default: ani-block }
         zone:            { type: string }
         volume_type:     { type: string, enum: [ssd, hdd, high_performance_ssd], default: ssd }
+        volume_mode:     { type: string, enum: [block, filesystem], default: filesystem, description: "卷的 Kubernetes volumeMode。filesystem（默认）用于容器/GPU 容器按目录挂载；block 用于 VM 数据盘（裸设备在线热插）。volumeMode 不可变，创建后不能切换，VM 数据盘由服务端自动使用 block。" }
         encrypted:       { type: boolean, default: false }
         mount_instance_id: { type: string, nullable: true }
         mount_route:       { type: string, nullable: true }
@@ -6756,7 +6758,9 @@ paths:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户活跃实例（pending/provisioning/starting/running/stopping）的 storage_attachments 引用" }
-        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；省略时不过滤" }
+        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；支持逗号分隔多值（如 pending,available，任一命中即返回）；省略时不过滤" }
+        - { name: volume_mode, in: query, schema: { type: string, enum: [block, filesystem] }, description: "按卷模式过滤（block=VM 数据盘/裸设备热插，filesystem=容器按目录挂载）；省略时不过滤" }
+        - { name: available_for_instance_id, in: query, schema: { type: string }, description: "按目标实例过滤可挂载卷：实例必须存在且属于本租户（否则 400 BAD_REQUEST）；仅返回 volume_mode 与实例类型匹配（VM=block，其余工作负载=filesystem）且未被任何活跃实例占用的卷" }
         - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
         - { name: keyword, in: query, schema: { type: string }, description: "按名称/id 模糊过滤（大小写不敏感）；省略时不过滤" }
       responses:
@@ -7063,7 +7067,7 @@ paths:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户 provisioning/running 状态实例的 storage_attachments 引用" }
-        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；省略时不过滤" }
+        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；支持逗号分隔多值（如 pending,available，任一命中即返回）；省略时不过滤" }
         - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
         - { name: keyword, in: query, schema: { type: string }, description: "按名称/id 模糊过滤（大小写不敏感）；省略时不过滤" }
       responses:

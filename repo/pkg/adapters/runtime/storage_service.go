@@ -133,6 +133,10 @@ func (s *LocalStorageService) CreateVolume(ctx context.Context, request ports.St
 	if request.SizeGiB <= 0 {
 		return ports.StorageVolumeRecord{}, fmt.Errorf("%w: volume size_gib must be greater than zero", ports.ErrInvalid)
 	}
+	volumeMode, err := normalizeStorageVolumeMode(request.VolumeMode)
+	if err != nil {
+		return ports.StorageVolumeRecord{}, err
+	}
 	release, err := s.acquireStorageIdempotency(ctx, "volume.create/"+idemKey)
 	if err != nil {
 		return ports.StorageVolumeRecord{}, err
@@ -165,6 +169,7 @@ func (s *LocalStorageService) CreateVolume(ctx context.Context, request ports.St
 		StorageClass:    firstNetworkNonEmpty(request.StorageClass, defaultVolumeStorageClassName),
 		Zone:            strings.TrimSpace(request.Zone),
 		VolumeType:      volumeType,
+		VolumeMode:      volumeMode,
 		IOPS:            storageVolumeIOPS(volumeType),
 		Encrypted:       request.Encrypted,
 		MountInstanceID: strings.TrimSpace(request.MountInstanceID),
@@ -235,10 +240,24 @@ func (s *LocalStorageService) ListVolumes(ctx context.Context, request ports.Sto
 		}
 		out := make([]ports.StorageVolumeRecord, 0, len(items))
 		for _, record := range items {
-			out = append(out, s.enrichStorageVolumeRecord(record))
+			// Re-observe pending volumes on list, mirroring GetVolume: a
+			// WaitForFirstConsumer PVC binds only after a consumer mounts it, so
+			// without this the Console list would stay "pending" forever.
+			out = append(out, s.enrichStorageVolumeRecord(s.reobserveVolumeState(ctx, record)))
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 		return out, nil
+	}
+	s.mu.RLock()
+	pending := make([]string, 0)
+	for id, record := range s.volumes {
+		if record.TenantID == request.TenantID && record.State == ports.StorageResourcePending {
+			pending = append(pending, id)
+		}
+	}
+	s.mu.RUnlock()
+	for _, id := range pending {
+		s.reobserveVolumeStateMemory(ctx, request.TenantID, id)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2892,16 +2911,45 @@ func (s *LocalStorageService) enrichStorageVolumeLocked(record ports.StorageVolu
 }
 
 func storageVolumeCreateFingerprint(request ports.StorageVolumeCreateRequest) string {
+	volumeMode, _ := normalizeStorageVolumeMode(request.VolumeMode)
 	return strings.Join([]string{
 		strings.TrimSpace(request.Name),
 		strconv.FormatInt(request.SizeGiB, 10),
 		strings.TrimSpace(request.StorageClass),
 		strings.TrimSpace(request.Zone),
 		strings.TrimSpace(request.VolumeType),
+		volumeMode,
 		strconv.FormatBool(request.Encrypted),
 		strings.TrimSpace(request.MountInstanceID),
 		strings.TrimSpace(request.MountRoute),
 	}, "|")
+}
+
+// normalizeStorageVolumeMode 严格归一 volume_mode：大小写不敏感、去空格，空值
+// 默认 filesystem（与契约默认一致，保护存量"按目录挂卷"的容器/GPU 容器实例）；
+// 仅接受 block/filesystem，其它值返回 ErrInvalid 包装错误。
+func normalizeStorageVolumeMode(value string) (string, error) {
+	switch normalized := strings.ToLower(strings.TrimSpace(value)); normalized {
+	case "":
+		return ports.StorageVolumeModeFilesystem, nil
+	case ports.StorageVolumeModeBlock, ports.StorageVolumeModeFilesystem:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("%w: unsupported volume_mode %q", ports.ErrInvalid, value)
+	}
+}
+
+// requireVolumeMode rejects an existing volume whose volume_mode does not match
+// the mode its consumer needs: VM data disks hotplug as raw block devices,
+// while container / gpu_container attachments mount a directory (filesystem).
+// The provider volumeMode is immutable after PVC creation, so a mismatch is
+// only fixable by recreating the volume with the right mode.
+func requireVolumeMode(resourceID string, record ports.StorageVolumeRecord, want string, consumer string) error {
+	mode, _ := normalizeStorageVolumeMode(record.VolumeMode)
+	if mode == want {
+		return nil
+	}
+	return fmt.Errorf("%w: volume %q is %s mode but %s requires volume_mode=%s (volumeMode is immutable; recreate the volume)", ports.ErrInvalid, resourceID, mode, consumer, want)
 }
 
 func (s *LocalStorageService) enrichFilesystemLocked(record ports.StorageFilesystemRecord) ports.StorageFilesystemRecord {

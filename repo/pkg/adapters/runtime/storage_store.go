@@ -58,7 +58,7 @@ func (s *MetadataStorageStore) UpsertVolume(ctx context.Context, record ports.St
 		_, err := tx.Exec(ctx, `
 			INSERT INTO storage_volumes (
 				tenant_id, volume_id, name, size_gib, storage_class, state, reason,
-				zone, volume_type, iops, encrypted,
+				zone, volume_type, volume_mode, iops, encrypted,
 				mount_instance_id, mount_route, mount_name,
 				os_init_status, os_init_device,
 				from_snapshot_id, from_snapshot_name,
@@ -66,12 +66,12 @@ func (s *MetadataStorageStore) UpsertVolume(ctx context.Context, record ports.St
 				created_at, updated_at
 			) VALUES (
 				$1::uuid, $2, $3, $4, $5, $6, NULLIF($7, ''),
-				NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, 0), $11,
-				NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''),
-				NULLIF($15, ''), NULLIF($16, ''),
-				NULLIF($17, ''), NULLIF($18, ''),
-				$19, NULLIF($20, ''), NULLIF($21, ''),
-				$22, $23
+				NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, 0), $12,
+				NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''),
+				NULLIF($16, ''), NULLIF($17, ''),
+				NULLIF($18, ''), NULLIF($19, ''),
+				$20, NULLIF($21, ''), NULLIF($22, ''),
+				$23, $24
 			)
 			ON CONFLICT (tenant_id, volume_id) DO UPDATE SET
 				name = EXCLUDED.name,
@@ -81,6 +81,7 @@ func (s *MetadataStorageStore) UpsertVolume(ctx context.Context, record ports.St
 				reason = EXCLUDED.reason,
 				zone = EXCLUDED.zone,
 				volume_type = EXCLUDED.volume_type,
+				volume_mode = COALESCE(EXCLUDED.volume_mode, storage_volumes.volume_mode),
 				iops = EXCLUDED.iops,
 				encrypted = EXCLUDED.encrypted,
 				mount_instance_id = EXCLUDED.mount_instance_id,
@@ -95,7 +96,7 @@ func (s *MetadataStorageStore) UpsertVolume(ctx context.Context, record ports.St
 				create_request_fingerprint = COALESCE(EXCLUDED.create_request_fingerprint, storage_volumes.create_request_fingerprint),
 				updated_at = EXCLUDED.updated_at
 		`, record.TenantID, record.VolumeID, record.Name, record.SizeGiB, record.StorageClass, string(record.State), record.Reason,
-			record.Zone, record.VolumeType, record.IOPS, record.Encrypted,
+			record.Zone, record.VolumeType, record.VolumeMode, record.IOPS, record.Encrypted,
 			record.MountInstanceID, record.MountRoute, record.MountName,
 			record.OSInitStatus, record.OSInitDevice,
 			record.FromSnapshotID, record.FromSnapshotName,
@@ -465,7 +466,7 @@ func (s *MetadataStorageStore) UpdateResourceState(ctx context.Context, request 
 
 const storageVolumeSelectSQL = `
 	SELECT tenant_id::text, volume_id, name, size_gib, storage_class,
-		COALESCE(zone, ''), COALESCE(volume_type, ''), COALESCE(iops, 0), COALESCE(encrypted, false),
+		COALESCE(zone, ''), COALESCE(volume_type, ''), COALESCE(volume_mode, ''), COALESCE(iops, 0), COALESCE(encrypted, false),
 		COALESCE(mount_instance_id, ''), COALESCE(mount_route, ''), COALESCE(mount_name, ''),
 		COALESCE(os_init_status, ''), COALESCE(os_init_device, ''),
 		COALESCE(from_snapshot_id, ''), COALESCE(from_snapshot_name, ''),
@@ -488,6 +489,7 @@ func scanStorageVolume(row storageScanner, record *ports.StorageVolumeRecord) er
 		&record.StorageClass,
 		&record.Zone,
 		&record.VolumeType,
+		&record.VolumeMode,
 		&record.IOPS,
 		&record.Encrypted,
 		&record.MountInstanceID,

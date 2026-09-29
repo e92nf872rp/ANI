@@ -31,6 +31,10 @@ type idempotencyRecord struct {
 // Idempotency replays completed mutating responses for repeated idempotency keys.
 func Idempotency(store GatewayStore) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
+		if IsKaiwuProxyPath(string(c.Path())) {
+			c.Next(ctx)
+			return
+		}
 		if store == nil || !idempotencyApplies(string(c.Method())) {
 			c.Next(ctx)
 			return

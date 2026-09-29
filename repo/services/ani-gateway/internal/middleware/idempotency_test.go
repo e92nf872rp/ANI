@@ -21,10 +21,9 @@ func TestIdempotentReplayReturnsSameResponseForPublicPlatformEndpoint(t *testing
 	h := server.New()
 	h.Use(
 		RequestID(),
-		// Public endpoint path: Auth middleware skips via isPublicPath; no tenant_id is set.
-		// Scope defaults to "tenant" via GetScope when unset, matching public tenant endpoints.
-		// For platform password login the idempotency key still must dedupe correctly
-		// because path is in the cache key.
+		// 公开端点路径：认证中间件通过 isPublicPath 跳过，不注入 tenant_id。
+		// 未设置 scope 时 GetScope 默认为 tenant，与公开租户端点保持一致。
+		// 平台密码登录的幂等键仍必须正确去重，因为路径参与了缓存键。
 		Idempotency(store),
 	)
 
@@ -118,6 +117,32 @@ func TestIdempotencyReplaysDeleteAndRejectsDifferentIntent(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+}
+
+// TestKaiwuProxySkipsIdempotency 验证开物代理的变更请求不会被 ANI JSON API
+// 的幂等中间件重放。
+func TestKaiwuProxySkipsIdempotency(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	h := server.New()
+	h.Use(Idempotency(store))
+	var calls int32
+	h.POST("/kaiwu/console/:path", func(ctx context.Context, c *app.RequestContext) {
+		atomic.AddInt32(&calls, 1)
+		c.Status(http.StatusOK)
+	})
+
+	headers := []ut.Header{{Key: "Idempotency-Key", Value: "same-key"}}
+	first := ut.PerformRequest(h.Engine, http.MethodPost, "/kaiwu/console/tasks", nil, headers...).Result()
+	second := ut.PerformRequest(h.Engine, http.MethodPost, "/kaiwu/console/tasks", nil, headers...).Result()
+	if first.StatusCode() != http.StatusOK || second.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d/%d", first.StatusCode(), second.StatusCode())
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls=%d, want 2", calls)
+	}
+	if replay := second.Header.Get("Idempotent-Replay"); replay != "" {
+		t.Fatalf("Idempotent-Replay=%q, want empty", replay)
 	}
 }
 
