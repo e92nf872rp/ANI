@@ -1021,6 +1021,44 @@ func TestLocalStorageServicePresignedURLRequiresObjectStore(t *testing.T) {
 	}
 }
 
+func TestLocalStorageServiceVolumeModeDefaultsAndValidation(t *testing.T) {
+	service := NewLocalStorageService()
+	defaulted, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "volume-mode-default-a",
+		Name:           "data-mode-default",
+		SizeGiB:        10,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume(default) error = %v", err)
+	}
+	if defaulted.VolumeMode != ports.StorageVolumeModeFilesystem {
+		t.Fatalf("default volume_mode = %q, want %q", defaulted.VolumeMode, ports.StorageVolumeModeFilesystem)
+	}
+	block, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "volume-mode-block-a",
+		Name:           "data-mode-block",
+		SizeGiB:        10,
+		VolumeMode:     "BLOCK", // 归一大小写
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume(block) error = %v", err)
+	}
+	if block.VolumeMode != ports.StorageVolumeModeBlock {
+		t.Fatalf("block volume_mode = %q, want %q", block.VolumeMode, ports.StorageVolumeModeBlock)
+	}
+	if _, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "volume-mode-invalid-a",
+		Name:           "data-mode-invalid",
+		SizeGiB:        10,
+		VolumeMode:     "raw",
+	}); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("CreateVolume(invalid mode) error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestLocalStorageServiceVolumeOperations(t *testing.T) {
 	service := NewLocalStorageService()
 	volume, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{

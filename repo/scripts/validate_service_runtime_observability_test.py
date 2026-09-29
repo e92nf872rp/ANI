@@ -59,6 +59,25 @@ class ValidateServiceRuntimeObservabilityTest(unittest.TestCase):
         errors = validator.validate_forbidden_changes(changed)
         self.assertEqual(1, len(errors))
 
+    def test_excluded_service_build_files_are_allowed(self) -> None:
+        # 纯构建文件不触达运行时行为（如 workspace 模式构建修复），放行；
+        # Go 源码仍 fail-closed。
+        changed = {
+            "repo/services/reconcile-worker/Dockerfile",
+            "repo/services/reconcile-worker/go.mod",
+            "repo/services/reconcile-worker/go.sum",
+        }
+        self.assertEqual([], validator.validate_forbidden_changes(changed))
+
+    def test_excluded_service_build_and_source_mixed_change_still_rejected(self) -> None:
+        changed = {
+            "repo/services/reconcile-worker/Dockerfile",
+            "repo/services/reconcile-worker/main.go",
+        }
+        errors = validator.validate_forbidden_changes(changed)
+        self.assertEqual(1, len(errors))
+        self.assertIn("main.go", errors[0])
+
     def test_envoy_authz_adapter_business_changes_are_allowed(self) -> None:
         changed = {
             "repo/services/envoy-authz-adapter/internal/extauth/server.go",

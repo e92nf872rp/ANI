@@ -326,14 +326,31 @@ func main() {
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
-			Service:        instanceRuntime.Service,
-			Store:          instanceRuntime.Store,
-			Operations:     instanceRuntime.Operations,
-			SandboxRuntime: instanceRuntime.SandboxRuntime,
-			TaskStore:      instanceRuntime.AsyncTasks,
-			RealProvider:   true,
-			Provider:       strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
+			Service:             instanceRuntime.Service,
+			Store:               instanceRuntime.Store,
+			Operations:          instanceRuntime.Operations,
+			SandboxRuntime:      instanceRuntime.SandboxRuntime,
+			TaskStore:           instanceRuntime.AsyncTasks,
+			RealProvider:        true,
+			ReconcileController: instanceRuntime.ReconcileController,
+			Provider:            strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
 		}
+	}
+	// 开物复用实例运行时的 Kubernetes REST client；没有真实 Kubernetes
+	// client 时读取器保持 nil，处理函数会失败关闭。
+	kaiwuRuntimeReader := newGatewayKaiwuRuntimeReader(kubernetesRESTClient, gatewayKaiwuRuntimeConfigFromEnv())
+	kaiwuPublicEntry, err := gatewayKaiwuPublicEntryConfigFromEnv()
+	if err != nil {
+		logger.Error("failed to configure Kaiwu public origin entry", "err", err)
+		os.Exit(1)
+	}
+	if kaiwuPublicEntry.ConsoleURL != "" || kaiwuPublicEntry.BossURL != "" {
+		logger.Info("Kaiwu public origin entry configured",
+			"console", kaiwuPublicEntry.ConsoleURL,
+			"boss", kaiwuPublicEntry.BossURL,
+			"token_ttl", kaiwuPublicEntry.TokenTTL)
+	} else {
+		logger.Warn("Kaiwu public origins are not configured; Kaiwu entry APIs will fail closed")
 	}
 	router.RegisterWithOptions(h, router.RegisterOptions{
 		K8sClusterService:                     k8sClusterService,
@@ -374,6 +391,10 @@ func main() {
 		ComponentStatusService:                componentStatusService,
 		ComponentMetricsReader:                componentMetricsReader,
 		ComponentLogReader:                    componentLogReader,
+		KaiwuRuntimeReader:                    kaiwuRuntimeReader,
+		KaiwuConsolePublicURL:                 kaiwuPublicEntry.ConsoleURL,
+		KaiwuBossPublicURL:                    kaiwuPublicEntry.BossURL,
+		KaiwuEntryTokenTTL:                    kaiwuPublicEntry.TokenTTL,
 	})
 	runtimeAdmin, err := startGatewayRuntimeAdmin(logger)
 	if err != nil {

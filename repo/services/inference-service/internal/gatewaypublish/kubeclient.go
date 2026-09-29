@@ -321,6 +321,27 @@ func sameManagedOwner(existing, expected Object, exactGeneration bool) bool {
 	return !exactGeneration || existingGeneration == expected.Generation
 }
 
+// validTenantServiceHost accepts any single-label Kubernetes Service DNS name
+// inside the owning tenant's namespace: `<name>.ani-tenant-<tenant>.svc[.cluster.local]`.
+// The service name is not pinned to the current `pw-<id>` convention because
+// models created by earlier platform versions use legacy `<uuid>` service
+// names whose Services are real and stay publishable.
+func validTenantServiceHost(hostname string, tenantID uuid.UUID) bool {
+	if hostname == "" || hostname != strings.ToLower(hostname) || strings.HasSuffix(hostname, ".") ||
+		net.ParseIP(hostname) != nil || !validDNSName(hostname) {
+		return false
+	}
+	suffix := ".ani-tenant-" + tenantID.String() + ".svc.cluster.local"
+	name, ok := strings.CutSuffix(hostname, suffix)
+	if !ok {
+		name, ok = strings.CutSuffix(hostname, ".ani-tenant-"+tenantID.String()+".svc")
+	}
+	if !ok || name == "" || strings.Contains(name, ".") {
+		return false
+	}
+	return true
+}
+
 func validManagedSpec(kind Kind, value any, name string, tenantID, serviceID uuid.UUID) bool {
 	spec, ok := value.(map[string]any)
 	if !ok {
@@ -342,9 +363,7 @@ func validManagedSpec(kind Kind, value any, name string, tenantID, serviceID uui
 		}
 		port, ok := fqdn["port"].(int)
 		hostname, hostnameOK := fqdn["hostname"].(string)
-		expectedHost := runtimeServiceHost(serviceID, tenantID)
-		shortHost := strings.TrimSuffix(expectedHost, ".cluster.local")
-		return ok && hostnameOK && (hostname == expectedHost || hostname == shortHost) && port > 0 && port <= 65535
+		return ok && hostnameOK && validTenantServiceHost(hostname, tenantID) && port > 0 && port <= 65535
 	case KindAIServiceBackend:
 		backendRef, refOK := spec["backendRef"].(map[string]any)
 		schema, schemaOK := spec["schema"].(map[string]any)

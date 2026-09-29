@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -91,6 +92,7 @@ type instanceAPI struct {
 	realProvider                  bool
 	providerName                  string
 	templates                     ports.SandboxTemplateCatalog
+	reconcileController           ports.WorkloadReconcileController
 }
 
 type InstanceRuntime struct {
@@ -101,6 +103,11 @@ type InstanceRuntime struct {
 	TaskStore      ports.AsyncTaskStore
 	RealProvider   bool
 	Provider       string
+	// ReconcileController is delegated lifecycle state transitions discovered
+	// by the read-repair path (refreshOneStoreStatus / refreshOneVMStoreStatus)
+	// so the TCC quota action and the lifecycle outbox event commit atomically
+	// with the status write instead of being bypassed by a plain UpsertStatus.
+	ReconcileController ports.WorkloadReconcileController
 }
 
 type createInstanceRequest struct {
@@ -820,6 +827,7 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 		}
 		api.realProvider = runtime.RealProvider
 		api.providerName = strings.TrimSpace(runtime.Provider)
+		api.reconcileController = runtime.ReconcileController
 		if runtime.RealProvider {
 			api.sessions = sessions
 		}
@@ -989,6 +997,40 @@ func (api *instanceAPI) refreshOneInstanceStoreStatus(ctx context.Context, recor
 	return nil
 }
 
+// commitReadRepairTransition delegates a lifecycle state transition discovered
+// by the read-repair path to the reconcile controller's ReconcileNow, so the
+// TCC quota action (Confirm/Cancel/Release) and the lifecycle outbox event
+// commit in the same tenant transaction as the status write.
+//
+// Defect being fixed: refreshOneStoreStatus / refreshOneVMStoreStatus used to
+// persist the observed state with a plain UpsertStatus, bypassing the quota
+// chain entirely. A provisioning instance that reached Running in the cluster
+// kept its reservation in `reserved` forever (used never incremented) whenever
+// the running state was first surfaced by a GET/list read-repair — Console and
+// BOSS poll these endpoints continuously, so the reconcile loop (which only
+// picks up instances whose updated_at is older than the stale threshold) never
+// saw the transition either.
+func (api *instanceAPI) commitReadRepairTransition(ctx context.Context, record *ports.WorkloadInstanceRecord, previous ports.WorkloadState) {
+	next := record.Status.State
+	if api.reconcileController == nil || previous == next || len(record.QuotaTxIDs) == 0 {
+		return
+	}
+	target := ports.ReconcileTarget{
+		TenantID:   record.TenantID,
+		InstanceID: record.InstanceID,
+		Kind:       record.Kind,
+		State:      previous,
+	}
+	if _, err := api.reconcileController.ReconcileNow(ctx, target); err != nil {
+		slog.Warn("read-repair transition delegate failed; quota TCC left to reconcile loop",
+			"instance_id", record.InstanceID,
+			"previous", string(previous),
+			"next", string(next),
+			"err", err,
+		)
+	}
+}
+
 // refreshOneStoreStatus refreshes a single store record from K8s. It reuses
 // the same Deployment GET + phase mapping as orphan discovery so the phase
 // semantics stay consistent.
@@ -1015,10 +1057,12 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 				return
 			}
 			// Deployment gone: surface as failed instead of stale provisioning.
+			previous := record.Status.State
 			record.Status.State = ports.WorkloadStateFailed
 			record.Status.Reason = "deployment not found in cluster"
 			record.Status.UpdatedAt = time.Now().UTC()
 			record.UpdatedAt = record.Status.UpdatedAt
+			api.commitReadRepairTransition(ctx, record, previous)
 			_ = api.store.UpsertStatus(ctx, *record)
 		}
 		return
@@ -1060,6 +1104,7 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	}
 	// Preserve lifecycle terminal states: a scaled-to-0 Deployment would map to
 	// "Pending", which must not resurrect a stopped/stopping instance.
+	previousState := record.Status.State
 	if record.Status.State != ports.WorkloadStateStopping && record.Status.State != ports.WorkloadStateStopped {
 		record.Status.State = mapProviderPhaseToState(phase)
 	}
@@ -1188,6 +1233,7 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	}
 	record.Status.UpdatedAt = time.Now().UTC()
 	record.UpdatedAt = record.Status.UpdatedAt
+	api.commitReadRepairTransition(ctx, record, previousState)
 	_ = api.store.UpsertStatus(ctx, *record)
 }
 
@@ -1221,6 +1267,7 @@ func (api *instanceAPI) refreshOneVMStoreStatus(ctx context.Context, record *por
 		ssh := *record.SSH
 		updated.SSH = &ssh
 	}
+	previousState := record.Status.State
 	providerState := mapProviderPhaseToState(observation.Phase)
 	if updated.Status.State != ports.WorkloadStateStopping && updated.Status.State != ports.WorkloadStateStopped {
 		updated.Status.State = providerState
@@ -1284,6 +1331,7 @@ func (api *instanceAPI) refreshOneVMStoreStatus(ctx context.Context, record *por
 	// surfaces the same values as detail instead of dropping the in-place
 	// mutation, mirroring refreshOneStoreStatus.
 	if api.store != nil {
+		api.commitReadRepairTransition(ctx, &updated, previousState)
 		if err := api.store.UpsertStatus(ctx, updated); err != nil {
 			return err
 		}
@@ -1963,9 +2011,7 @@ func (api *instanceAPI) lifecycle(ctx context.Context, c *app.RequestContext) {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
-	var (
-		record ports.WorkloadInstanceRecord
-	)
+	var record ports.WorkloadInstanceRecord
 	switch strings.ToLower(strings.TrimSpace(req.Action)) {
 	case "start":
 		record, err = api.service.Start(ctx, lifecycle)

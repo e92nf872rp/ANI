@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -782,6 +783,13 @@ func TestStorageHTTPVolumeListFiltersByKeywordAndStatus(t *testing.T) {
 	if got := countItems("?state=failed"); got != 0 {
 		t.Fatalf("state=failed count = %d, want 0", got)
 	}
+	// state 支持逗号分隔多值（any-of）：available,failed 任一命中即返回。
+	if got := countItems("?state=available,failed"); got != 2 {
+		t.Fatalf("state=available,failed count = %d, want 2", got)
+	}
+	if got := countItems("?state=failed,deleting"); got != 0 {
+		t.Fatalf("state=failed,deleting count = %d, want 0", got)
+	}
 	if got := countItems("?keyword=no_such"); got != 0 {
 		t.Fatalf("keyword=no_such count = %d, want 0", got)
 	}
@@ -805,6 +813,141 @@ func TestStorageHTTPVolumeListFiltersByKeywordAndStatus(t *testing.T) {
 	if got := countItems("?search_field=id&keyword=no-such-id"); got != 0 {
 		t.Fatalf("search_field=id&keyword=no-such-id count = %d, want 0", got)
 	}
+}
+
+func TestStorageHTTPVolumeListFiltersByVolumeMode(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	// 默认卷为 filesystem，显式创建 block 卷。
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"mode-filter-fs","name":"mode-fs","size_gib":10,"volume_mode":"filesystem"}`, http.StatusCreated)
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"mode-filter-blk","name":"mode-blk","size_gib":10,"volume_mode":"block"}`, http.StatusCreated)
+
+	countItems := func(query string) int {
+		t.Helper()
+		body := performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes"+query, "", http.StatusOK)
+		var decoded struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		return len(decoded.Items)
+	}
+
+	if got := countItems(""); got != 2 {
+		t.Fatalf("volumes count = %d, want 2", got)
+	}
+	if got := countItems("?volume_mode=block"); got != 1 {
+		t.Fatalf("volume_mode=block count = %d, want 1", got)
+	}
+	if got := countItems("?volume_mode=filesystem"); got != 1 {
+		t.Fatalf("volume_mode=filesystem count = %d, want 1", got)
+	}
+	// 大小写不敏感归一。
+	if got := countItems("?volume_mode=BLOCK"); got != 1 {
+		t.Fatalf("volume_mode=BLOCK count = %d, want 1", got)
+	}
+	// 未知取值不命中任何卷。
+	if got := countItems("?volume_mode=raw"); got != 0 {
+		t.Fatalf("volume_mode=raw count = %d, want 0", got)
+	}
+}
+
+func TestStorageHTTPVolumeListAvailableForInstance(t *testing.T) {
+	service := runtimeadapter.NewLocalStorageService()
+	created := map[string]string{}
+	for i, spec := range []struct {
+		name string
+		mode string
+	}{
+		{"avail-blk-free", "block"},
+		{"avail-blk-busy", "block"},
+		{"avail-fs", "filesystem"},
+	} {
+		volume, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+			TenantID:       "tenant-a",
+			IdempotencyKey: fmt.Sprintf("avail-for-instance-%d", i),
+			Name:           spec.name,
+			SizeGiB:        10,
+			VolumeMode:     spec.mode,
+		})
+		if err != nil {
+			t.Fatalf("CreateVolume(%s) error = %v", spec.name, err)
+		}
+		created[spec.name] = volume.VolumeID
+	}
+
+	store := newMemoryInstanceStore()
+	mustUpsert := func(record ports.WorkloadInstanceRecord) {
+		t.Helper()
+		if err := store.UpsertStatus(context.Background(), record); err != nil {
+			t.Fatalf("UpsertStatus(%s) error = %v", record.InstanceID, err)
+		}
+	}
+	// VM 挂载目标：空闲 VM（应看到 blk-free）、占用了 blk-busy 的 VM。
+	mustUpsert(ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst-vm-free", Name: "vm-free",
+		Kind: ports.WorkloadKindVM, Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	})
+	mustUpsert(ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst-vm-busy", Name: "vm-busy",
+		Kind: ports.WorkloadKindVM, Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		StorageAttachments: []ports.WorkloadStorageAttachment{storageVolumeAttach(created["avail-blk-busy"], "")},
+	})
+	// 容器挂载目标：只能看到 filesystem 卷。
+	mustUpsert(ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst-cont", Name: "cont-1",
+		Kind: ports.WorkloadKindContainer, Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+	})
+
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithServiceAndTasksAndStore(h.Group("/api/v1"), service, defaultTaskStore, store)
+
+	listIDs := func(query string) []string {
+		t.Helper()
+		body := performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes"+query, "", http.StatusOK)
+		var decoded struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		ids := make([]string, 0, len(decoded.Items))
+		for _, item := range decoded.Items {
+			id, _ := item["id"].(string)
+			ids = append(ids, id)
+		}
+		return ids
+	}
+
+	// VM 只能看到空闲的 block 卷；占用中的 block 卷不返回。
+	if got := listIDs("?available_for_instance_id=inst-vm-free"); len(got) != 1 || got[0] != created["avail-blk-free"] {
+		t.Fatalf("available_for_instance_id=inst-vm-free ids = %v, want [%s]", got, created["avail-blk-free"])
+	}
+	// 与前端一致的多值 state 组合仍命中。
+	if got := listIDs("?limit=100&state=pending,available&available_for_instance_id=inst-vm-free"); len(got) != 1 || got[0] != created["avail-blk-free"] {
+		t.Fatalf("state=pending,available + available_for_instance_id ids = %v, want [%s]", got, created["avail-blk-free"])
+	}
+	// 容器只能看到 filesystem 卷。
+	if got := listIDs("?available_for_instance_id=inst-cont"); len(got) != 1 || got[0] != created["avail-fs"] {
+		t.Fatalf("available_for_instance_id=inst-cont ids = %v, want [%s]", got, created["avail-fs"])
+	}
+	// 已占用 blk-busy 的 VM：能看到其他空闲 block 卷，但看不到占用中的 blk-busy。
+	gotBusy := listIDs("?available_for_instance_id=inst-vm-busy")
+	if len(gotBusy) != 1 || gotBusy[0] != created["avail-blk-free"] {
+		t.Fatalf("available_for_instance_id=inst-vm-busy ids = %v, want [%s] (occupied volumes excluded)", gotBusy, created["avail-blk-free"])
+	}
+	// 未知实例（含跨租户）返回 400 而不是静默空列表。
+	performJSONRequest(t, h, http.MethodGet, "/api/v1/volumes?available_for_instance_id=inst-nope", "", http.StatusBadRequest)
 }
 
 func TestStorageHTTPBucketListFiltersBySearchField(t *testing.T) {

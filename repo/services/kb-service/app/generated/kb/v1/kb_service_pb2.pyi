@@ -43,12 +43,14 @@ class GetKBRequest(_message.Message):
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ...) -> None: ...
 
 class ListKBsRequest(_message.Message):
-    __slots__ = ("tenant_id", "page")
+    __slots__ = ("tenant_id", "page", "status")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     PAGE_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     page: _common_pb2.CursorPageRequest
-    def __init__(self, tenant_id: _Optional[str] = ..., page: _Optional[_Union[_common_pb2.CursorPageRequest, _Mapping]] = ...) -> None: ...
+    status: str
+    def __init__(self, tenant_id: _Optional[str] = ..., page: _Optional[_Union[_common_pb2.CursorPageRequest, _Mapping]] = ..., status: _Optional[str] = ...) -> None: ...
 
 class ListKBsResponse(_message.Message):
     __slots__ = ("kbs", "meta")
@@ -122,6 +124,26 @@ class NotifyDocumentUploadedRequest(_message.Message):
     storage_path: str
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., doc_id: _Optional[str] = ..., storage_path: _Optional[str] = ...) -> None: ...
 
+class CompleteDocumentUploadRequest(_message.Message):
+    __slots__ = ("tenant_id", "kb_id", "doc_id", "file_name", "file_type", "checksum_sha256", "custom_metadata", "idempotency_key")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    DOC_ID_FIELD_NUMBER: _ClassVar[int]
+    FILE_NAME_FIELD_NUMBER: _ClassVar[int]
+    FILE_TYPE_FIELD_NUMBER: _ClassVar[int]
+    CHECKSUM_SHA256_FIELD_NUMBER: _ClassVar[int]
+    CUSTOM_METADATA_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    doc_id: str
+    file_name: str
+    file_type: str
+    checksum_sha256: str
+    custom_metadata: str
+    idempotency_key: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., doc_id: _Optional[str] = ..., file_name: _Optional[str] = ..., file_type: _Optional[str] = ..., checksum_sha256: _Optional[str] = ..., custom_metadata: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
+
 class GetDocumentRequest(_message.Message):
     __slots__ = ("tenant_id", "kb_id", "doc_id")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -161,6 +183,24 @@ class DeleteDocumentRequest(_message.Message):
     kb_id: str
     doc_id: str
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., doc_id: _Optional[str] = ...) -> None: ...
+
+class GetObjectURLRequest(_message.Message):
+    __slots__ = ("tenant_id", "kb_id", "object_id")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECT_ID_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    object_id: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., object_id: _Optional[str] = ...) -> None: ...
+
+class GetObjectURLResponse(_message.Message):
+    __slots__ = ("url", "expires_seconds")
+    URL_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    url: str
+    expires_seconds: int
+    def __init__(self, url: _Optional[str] = ..., expires_seconds: _Optional[int] = ...) -> None: ...
 
 class QueryRequest(_message.Message):
     __slots__ = ("tenant_id", "kb_id", "question", "session_id", "idempotency_key", "top_k", "score_threshold", "inference_service_name", "retrieval_mode")
@@ -669,3 +709,61 @@ class RebuildKBRequest(_message.Message):
     kb_id: str
     idempotency_key: str
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
+
+class ListOperationsRequest(_message.Message):
+    __slots__ = ("tenant_id", "operation_type", "resource_id", "status", "page")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_TYPE_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    PAGE_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    operation_type: str
+    resource_id: str
+    status: str
+    page: _common_pb2.CursorPageRequest
+    def __init__(self, tenant_id: _Optional[str] = ..., operation_type: _Optional[str] = ..., resource_id: _Optional[str] = ..., status: _Optional[str] = ..., page: _Optional[_Union[_common_pb2.CursorPageRequest, _Mapping]] = ...) -> None: ...
+
+class KBOperation(_message.Message):
+    __slots__ = ("tenant_id", "id", "idempotency_key", "operation_type", "resource_id", "status", "payload", "result", "started_at", "completed_at", "created_at", "updated_at")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_TYPE_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    RESULT_FIELD_NUMBER: _ClassVar[int]
+    STARTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    id: str
+    idempotency_key: str
+    operation_type: str
+    resource_id: str
+    status: str
+    payload: str
+    result: str
+    started_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    created_at: _timestamp_pb2.Timestamp
+    updated_at: _timestamp_pb2.Timestamp
+    def __init__(self, tenant_id: _Optional[str] = ..., id: _Optional[str] = ..., idempotency_key: _Optional[str] = ..., operation_type: _Optional[str] = ..., resource_id: _Optional[str] = ..., status: _Optional[str] = ..., payload: _Optional[str] = ..., result: _Optional[str] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class ListOperationsResponse(_message.Message):
+    __slots__ = ("items", "next_cursor")
+    ITEMS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    items: _containers.RepeatedCompositeFieldContainer[KBOperation]
+    next_cursor: str
+    def __init__(self, items: _Optional[_Iterable[_Union[KBOperation, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class GetOperationRequest(_message.Message):
+    __slots__ = ("tenant_id", "operation_id")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    operation_id: str
+    def __init__(self, tenant_id: _Optional[str] = ..., operation_id: _Optional[str] = ...) -> None: ...

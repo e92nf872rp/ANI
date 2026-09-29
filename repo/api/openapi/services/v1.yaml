@@ -87,6 +87,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    KaiwuBackendUnavailable:
+      description: 开物后端不可用（code=KAIWU_BACKEND_UNAVAILABLE）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     RuntimeTimeout:
       description: 推理 runtime 调用超时（code=RUNTIME_TIMEOUT）
     BadGateway:
@@ -1191,6 +1196,19 @@ components:
         name:            { type: string }
         app_id:          { type: string }
         app_secret:      { type: string }
+
+    KaiwuEntryResponse:
+      type: object
+      required: [client, entry_url, expires_in]
+      properties:
+        client:      { type: string, enum: [console, boss] }
+        entry_url:
+          type: string
+          description: >-
+            开物入口地址，为开物 origin 的绝对 URL，携带一次性 DSH 启动 token，
+            前端直接 window.location.assign 跳转；打开后 DSH 会自行换取会话
+            Cookie 并把 token 从地址栏移除。未配置 KAIWU_*_PUBLIC_URL 时返回 503。
+        expires_in:  { type: integer, minimum: 1, maximum: 600 }
 
     # ===== Tenant Plans (配额套餐管理) =====
 
@@ -3718,6 +3736,56 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "409": { $ref: '#/components/responses/Conflict' }
+
+  /integrations/kaiwu/console/entry:
+    get:
+      operationId: getKaiwuConsoleEntry
+      summary: 获取开物 Console 入口
+      description: |
+        只允许 Bearer 用户访问。虽然契约按 Services 标准声明 Bearer/API Key alternatives，
+        但产品语义要求 API Key 返回 403 KAIWU_USER_CREDENTIAL_REQUIRED。
+      tags: [Integrations]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: integration
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      responses:
+        "200":
+          description: 开物 Console 入口（开物独占 origin 的绝对地址）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KaiwuEntryResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/KaiwuBackendUnavailable' }
+
+  /integrations/kaiwu/boss/entry:
+    get:
+      operationId: getKaiwuBossEntry
+      summary: 获取开物 BOSS 入口
+      description: |
+        只允许 Bearer 平台用户访问。虽然契约按 Services 标准声明 Bearer/API Key alternatives，
+        但产品语义要求 API Key 返回 403 KAIWU_USER_CREDENTIAL_REQUIRED。
+      tags: [Integrations]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: integration
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      responses:
+        "200":
+          description: 开物 BOSS 入口（开物独占 origin 的绝对地址）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KaiwuEntryResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/KaiwuBackendUnavailable' }
 
   # ===== Tenant Plans (配额套餐管理) =====
 

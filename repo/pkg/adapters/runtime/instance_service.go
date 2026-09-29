@@ -49,6 +49,11 @@ type LocalInstanceService struct {
 	// storeTx writes instance status inside the same tenant transaction as
 	// the quota Cancel+Release on Delete.
 	storeTx ports.WorkloadInstanceStoreTx
+	// outboxWriter emits instance lifecycle events inside the same tenant
+	// transaction as lifecycle status writes (plan.md §6.3.2). nil skips
+	// outbox events. Independent of GPU_QUOTA_ENABLED: metering-service is
+	// event-driven and needs API lifecycle transitions even when quota is off.
+	outboxWriter OutboxWriter
 }
 
 type InstanceServiceOption func(*LocalInstanceService)
@@ -125,6 +130,15 @@ func WithInstanceStoreTx(storeTx ports.WorkloadInstanceStoreTx) InstanceServiceO
 	}
 }
 
+// WithInstanceOutboxWriter injects the outbox event writer used to emit
+// lifecycle events inside the same tenant transaction as lifecycle status
+// writes. Independent of GPU_QUOTA_ENABLED.
+func WithInstanceOutboxWriter(w OutboxWriter) InstanceServiceOption {
+	return func(s *LocalInstanceService) {
+		s.outboxWriter = w
+	}
+}
+
 func NewLocalInstanceService(orchestrator ports.WorkloadInstanceOrchestrator, store ports.WorkloadInstanceStore, ops ports.WorkloadInstanceOps) *LocalInstanceService {
 	return &LocalInstanceService{
 		orchestrator: orchestrator,
@@ -189,6 +203,9 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 	// Provision after validateCreateIntent: a provisioned disk carries both
 	// volume_id and name/size, which only the post-validation state allows.
 	if err := s.provisionVMDataDisks(ctx, &request); err != nil {
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
+	if err := s.validateCreateStorageModes(ctx, request); err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
 	requestFingerprint, err := createIntentFingerprint(request.Spec)
@@ -962,6 +979,9 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if err := validateLifecycleIntent(record, request); err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
+	if err := s.validateAttachVolumeMode(ctx, record, request); err != nil {
+		return ports.WorkloadInstanceRecord{}, err
+	}
 	resizeGPUSpec, err := s.resolveResizeGPUSpec(ctx, record, request)
 	if err != nil {
 		return ports.WorkloadInstanceRecord{}, err
@@ -1248,8 +1268,9 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	return record, nil
 }
 
-// persistLifecycleWithQuota writes the lifecycle status update and handles
-// quota for two cases (SPEC §5.1):
+// persistLifecycleWithQuota writes the lifecycle status update, emits the
+// lifecycle outbox event (plan.md §6.3.2) and handles quota for two cases
+// (SPEC §5.1):
 //
 //   - Delete: atomically releases both reserved and used quota (Cancel +
 //     Release double-call, state-independent) in the same tenant transaction.
@@ -1260,23 +1281,29 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 //     TryManyTx's SQL WHERE guard (reserved+used+request <= total) prevents
 //     oversell.
 //
-// For all other actions it falls back to the plain store.UpsertStatus path.
+// The outbox write is independent of GPU_QUOTA_ENABLED: metering-service is
+// event-driven and needs API lifecycle transitions (delete/stop/start) even
+// when quota is disabled. All other actions fall back to the plain
+// store.UpsertStatus path (no lifecycle event, no quota action).
 func (s *LocalInstanceService) persistLifecycleWithQuota(ctx context.Context, record ports.WorkloadInstanceRecord, action ports.WorkloadLifecycleAction, previous ports.WorkloadState) error {
+	eventType := lifecycleOutboxEvent(action)
+	hasTx := s.metadataStore != nil && s.storeTx != nil
+
 	// Delete: Cancel + Release double-call (existing logic).
 	if action == ports.WorkloadLifecycleDelete {
-		if s.quotaService == nil || s.metadataStore == nil || s.storeTx == nil {
-			return s.store.UpsertStatus(ctx, record)
-		}
-		if len(record.QuotaTxIDs) == 0 {
+		if !hasTx {
 			return s.store.UpsertStatus(ctx, record)
 		}
 		return s.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
-			if err := s.quotaService.Cancel(txCtx, tx, record.QuotaTxIDs); err != nil {
-				return err
+			if s.quotaService != nil && len(record.QuotaTxIDs) > 0 {
+				if err := s.quotaService.Cancel(txCtx, tx, record.QuotaTxIDs); err != nil {
+					return err
+				}
+				if err := s.quotaService.Release(txCtx, tx, record.QuotaTxIDs); err != nil {
+					return err
+				}
 			}
-			if err := s.quotaService.Release(txCtx, tx, record.QuotaTxIDs); err != nil {
-				return err
-			}
+			writeInstanceOutboxTx(txCtx, tx, s.outboxWriter, eventType, record)
 			return s.storeTx.UpsertStatusTx(txCtx, tx, record)
 		})
 	}
@@ -1285,29 +1312,56 @@ func (s *LocalInstanceService) persistLifecycleWithQuota(ctx context.Context, re
 	// Both actions transition failed→running; without re-acquiring quota the
 	// instance would run with stale (released) QuotaTxIDs.
 	if (action == ports.WorkloadLifecycleStart || action == ports.WorkloadLifecycleRollback) && previous == ports.WorkloadStateFailed {
-		if s.quotaService == nil || s.metadataStore == nil || s.storeTx == nil {
+		if !hasTx {
 			return s.store.UpsertStatus(ctx, record)
 		}
-		// GPU count from the instance record; default 1.
-		gpuCount := 1
-		if record.GPU != nil && record.GPU.Count > 0 {
-			gpuCount = record.GPU.Count
-		}
 		return s.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
-			reservations, err := s.quotaService.TryManyTx(txCtx, tx, []ports.QuotaTryRequest{{
-				TenantID:     record.TenantID,
-				ResourceType: ports.QuotaGPUCount,
-				Amount:       int64(gpuCount),
-			}})
-			if err != nil {
-				return err
+			if s.quotaService != nil {
+				// GPU count from the instance record; default 1.
+				gpuCount := 1
+				if record.GPU != nil && record.GPU.Count > 0 {
+					gpuCount = record.GPU.Count
+				}
+				reservations, err := s.quotaService.TryManyTx(txCtx, tx, []ports.QuotaTryRequest{{
+					TenantID:     record.TenantID,
+					ResourceType: ports.QuotaGPUCount,
+					Amount:       int64(gpuCount),
+				}})
+				if err != nil {
+					return err
+				}
+				record.QuotaTxIDs = reservationTxIDs(reservations)
 			}
-			record.QuotaTxIDs = reservationTxIDs(reservations)
+			writeInstanceOutboxTx(txCtx, tx, s.outboxWriter, eventType, record)
 			return s.storeTx.UpsertStatusTx(txCtx, tx, record)
 		})
 	}
 
-	return s.store.UpsertStatus(ctx, record)
+	// Other actions: only the metering-relevant ones (stop) carry a lifecycle
+	// event; those persist + emit inside a tenant transaction when available.
+	if eventType == "" || !hasTx {
+		return s.store.UpsertStatus(ctx, record)
+	}
+	return s.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
+		writeInstanceOutboxTx(txCtx, tx, s.outboxWriter, eventType, record)
+		return s.storeTx.UpsertStatusTx(txCtx, tx, record)
+	})
+}
+
+// lifecycleOutboxEvent maps an API lifecycle action to the outbox event_type.
+// Empty string means the action carries no lifecycle event. The metering
+// consumer routes on the payload new_status, not the event_type.
+func lifecycleOutboxEvent(action ports.WorkloadLifecycleAction) string {
+	switch action {
+	case ports.WorkloadLifecycleDelete:
+		return "instance.deleted"
+	case ports.WorkloadLifecycleStop:
+		return "instance.stopped"
+	case ports.WorkloadLifecycleStart, ports.WorkloadLifecycleRestart, ports.WorkloadLifecycleRollback:
+		return "instance.started"
+	default:
+		return ""
+	}
 }
 
 // SandboxExecutionContextFromRecord validates and projects the durable instance
@@ -1850,7 +1904,21 @@ func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request
 	}
 	for i := range request.Spec.VM.DataDiskSpecs {
 		disk := &request.Spec.VM.DataDiskSpecs[i]
-		if strings.TrimSpace(disk.VolumeID) != "" || disk.SizeGiB <= 0 {
+		if volumeID := strings.TrimSpace(disk.VolumeID); volumeID != "" {
+			// VM disks attach as raw block devices; a volume created with
+			// volume_mode=filesystem cannot be used here, and volumeMode is
+			// immutable, so reject up front instead of letting the provider
+			// retry the hotplug forever.
+			volume, err := s.storage.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: request.Spec.TenantID, ResourceID: volumeID})
+			if err != nil {
+				return fmt.Errorf("resolve vm data disk %q: %w", volumeID, err)
+			}
+			if err := requireVolumeMode(volumeID, volume, ports.StorageVolumeModeBlock, "vm data disk"); err != nil {
+				return err
+			}
+			continue
+		}
+		if disk.SizeGiB <= 0 {
 			continue
 		}
 		name := strings.TrimSpace(disk.Name)
@@ -1864,6 +1932,7 @@ func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request
 			SizeGiB:        disk.SizeGiB,
 			StorageClass:   disk.StorageClass,
 			VolumeType:     disk.VolumeType,
+			VolumeMode:     ports.StorageVolumeModeBlock,
 			Encrypted:      disk.Encrypted,
 		})
 		if err != nil {
@@ -1872,6 +1941,54 @@ func (s *LocalInstanceService) provisionVMDataDisks(ctx context.Context, request
 		disk.VolumeID = record.VolumeID
 	}
 	return nil
+}
+
+// validateCreateStorageModes rejects create-time container / gpu_container
+// volume mounts whose volume is not filesystem mode (a block volume cannot be
+// mounted as a directory). VM data disks are checked in provisionVMDataDisks.
+// Runs before provider apply so a mode mismatch fails fast instead of leaving an
+// orphan instance that was created in the provider but never mounted.
+func (s *LocalInstanceService) validateCreateStorageModes(ctx context.Context, request ports.WorkloadInstanceCreateRequest) error {
+	if s.storage == nil || (request.Spec.Kind != ports.WorkloadKindContainer && request.Spec.Kind != ports.WorkloadKindGPUContainer) {
+		return nil
+	}
+	for _, attachment := range renderStorageAttachments(request.Spec) {
+		if attachment.ResourceType != "volume" {
+			continue
+		}
+		volume, err := s.storage.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: request.Spec.TenantID, ResourceID: attachment.ResourceID})
+		if err != nil {
+			return fmt.Errorf("resolve volume %q: %w", attachment.ResourceID, err)
+		}
+		if err := requireVolumeMode(attachment.ResourceID, volume, ports.StorageVolumeModeFilesystem, "container directory mount"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAttachVolumeMode enforces volume_mode compatibility for the
+// attach_volume lifecycle action: VM disks hotplug as raw block devices, while
+// container / gpu_container attachments mount a directory (filesystem). Because
+// the provider volumeMode is immutable, a mismatch is rejected before the
+// operation is recorded instead of being retried in the provider forever.
+func (s *LocalInstanceService) validateAttachVolumeMode(ctx context.Context, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) error {
+	if request.Action != ports.WorkloadLifecycleAttachVolume || s.storage == nil {
+		return nil
+	}
+	volumeID := strings.TrimSpace(request.VolumeID)
+	if volumeID == "" {
+		return nil
+	}
+	want, consumer := ports.StorageVolumeModeFilesystem, "container directory mount"
+	if record.Kind == ports.WorkloadKindVM {
+		want, consumer = ports.StorageVolumeModeBlock, "vm disk hotplug"
+	}
+	volume, err := s.storage.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: record.TenantID, ResourceID: volumeID})
+	if err != nil {
+		return fmt.Errorf("resolve volume %q: %w", volumeID, err)
+	}
+	return requireVolumeMode(volumeID, volume, want, consumer)
 }
 
 func (s *LocalInstanceService) bindCreateStorage(ctx context.Context, request ports.WorkloadInstanceCreateRequest, result ports.WorkloadInstanceCreateResult) error {

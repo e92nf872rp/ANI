@@ -98,9 +98,13 @@ class _FakeRagEngine:
         return [dict(c) for c in self._chunks]
 
     async def embed(
-        self, *, texts: list[str], model: str = ""
+        self, *, texts: list[str], model: str = "", runtime_endpoint: str = ""
     ) -> tuple[list[list[float]], int]:
-        self.embed_calls.append({"texts": list(texts), "model": model})
+        self.embed_calls.append({
+            "texts": list(texts),
+            "model": model,
+            "runtime_endpoint": runtime_endpoint,
+        })
         # Return one vector per text (cycle if fewer pre-built vectors).
         out = []
         for i in range(len(texts)):
@@ -116,6 +120,7 @@ class _FakeRagEngine:
         history=None,
         inference_service_name: str = "",
         max_tokens: int = 2048,
+        runtime_endpoint: str = "",
     ) -> dict:
         self.generate_calls.append({
             "question": question,
@@ -124,6 +129,7 @@ class _FakeRagEngine:
             "history": history or [],
             "inference_service_name": inference_service_name,
             "max_tokens": max_tokens,
+            "runtime_endpoint": runtime_endpoint,
         })
         return {
             "answer": self._summary_answer,
@@ -849,6 +855,69 @@ async def test_missing_download_url_marks_failed():
 
     status_calls = [c.kwargs["parse_status"] for c in mock_status.call_args_list]
     assert "failed" in status_calls
+
+
+# AC: Image-only document (e.g. scanned PDF): no parents/children from Parse —
+#     a parent block + one child per image link must be synthesized so the
+#     document is viewable (not "ready with 0 chunks")
+@pytest.mark.asyncio
+async def test_image_only_synthesizes_parent_and_image_children():
+    chunks = [_image_chunk(), _image_chunk("i2")]
+    rag = _FakeRagEngine(chunks=chunks)
+    svc, rag, core, pool = _make_service(rag_engine=rag)
+    p_status, p_write, p_get, p_delete, mock_status, mock_write, _, _ = _patch_repos()
+
+    with p_status, p_write, p_get, p_delete:
+        await svc.process_document(
+            tenant_id=TENANT_ID, kb_id=KB_ID, doc_id=DOC_ID,
+            object_id=OBJECT_ID, file_name="scan.pdf", file_type="pdf",
+            chunk_size=1024, vector_store_id=VECTOR_STORE_ID,
+        )
+
+    # Both images uploaded to Core API
+    assert len(core.upload_calls) == 2
+
+    # One parent block carrying all image links + one child per link
+    wc = mock_write.call_args
+    parents = wc.kwargs["parents"]
+    children = wc.kwargs["children"]
+    assert len(parents) == 1
+    assert len(children) == 2
+
+    parent = parents[0]
+    assert parent["chunk_type"] == "parent"
+    assert parent["content_type"] == "image"
+    assert parent["parent_chunk_id"] is None
+    assert parent["content"].count("[图片: 图片](") == 2
+    assert "kb-docs/" in parent["content"]
+
+    for child, uploaded in zip(children, core.upload_calls):
+        assert child["chunk_type"] == "child"
+        assert child["content_type"] == "image"
+        assert child["parent_chunk_id"] == parent["chunk_id"]
+        assert child["parent_content"] == parent["content"]
+        # Each child carries exactly one image link
+        assert child["content"].count("[图片: 图片](") == 1
+        assert child["content"] in parent["content"]
+
+    # Children (not the parent) are embedded and vector-inserted; no summary
+    assert len(rag.embed_calls) == 1
+    assert rag.embed_calls[0]["texts"] == [c["content"] for c in children]
+    assert len(core.insert_calls) == 1
+    inserted = core.insert_calls[0]["documents"]
+    assert len(inserted) == 2
+    for doc, child in zip(inserted, children):
+        assert doc["metadata"]["content_type"] == "image"
+        assert doc["metadata"]["chunk_type"] == "child"
+        assert doc["metadata"]["parent_chunk_id"] == parent["chunk_id"]
+
+    # Summary skipped: parent content is just image links, nothing to summarize
+    assert len(rag.generate_calls) == 0
+    assert wc.kwargs["summaries"] in (None, [])
+
+    # Document becomes ready
+    status_calls = [c.kwargs["parse_status"] for c in mock_status.call_args_list]
+    assert status_calls == ["parsing", "indexing", "ready"]
 
 
 # AC: Image with no image_bytes is skipped (no upload)

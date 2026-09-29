@@ -67,8 +67,10 @@ func (f *pagedFakeController) ListPage(_ context.Context, tenantID uuid.UUID, qu
 }
 
 type fakeAccessPolicies struct {
-	input    service.AccessCheckInput
-	decision service.AccessDecision
+	input       service.AccessCheckInput
+	decision    service.AccessDecision
+	resolved    domain.Service
+	internalErr error
 }
 
 func (f *fakeAccessPolicies) CheckAccess(_ context.Context, input service.AccessCheckInput) (service.AccessDecision, error) {
@@ -76,6 +78,15 @@ func (f *fakeAccessPolicies) CheckAccess(_ context.Context, input service.Access
 	return f.decision, nil
 }
 func (*fakeAccessPolicies) ReleaseAccessLease(context.Context, string) error { return nil }
+func (f *fakeAccessPolicies) ResolveRuntimeEndpoint(_ context.Context, _ uuid.UUID, _ string) (domain.Service, error) {
+	return f.resolved, nil
+}
+func (f *fakeAccessPolicies) ResolveInternalEndpoint(_ context.Context, _ uuid.UUID, _, _ string) (domain.Service, error) {
+	if f.internalErr != nil {
+		return domain.Service{}, f.internalErr
+	}
+	return f.resolved, nil
+}
 
 func (f *fakeController) Get(_ context.Context, tenantID, serviceID uuid.UUID) (service.ServiceView, error) {
 	f.tenant, f.id = tenantID, serviceID

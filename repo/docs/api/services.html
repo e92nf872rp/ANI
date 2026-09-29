@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>143</dd></div>
-          <div><dt>Schemas</dt><dd>159</dd></div>
+          <div><dt>Operations</dt><dd>145</dd></div>
+          <div><dt>Schemas</dt><dd>160</dd></div>
         </dl>
       </section>
 
@@ -398,6 +398,22 @@
           <td>创建企微/钉钉 Bot 集成</td>
           <td><code></code></td>
           <td>201, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/integrations/kaiwu/boss/entry</code></td>
+          <td><code>getKaiwuBossEntry</code></td>
+          <td>获取开物 BOSS 入口</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/integrations/kaiwu/console/entry</code></td>
+          <td><code>getKaiwuConsoleEntry</code></td>
+          <td>获取开物 Console 入口</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1389,6 +1405,7 @@
         <li><code>KBSessionMessage</code></li>
         <li><code>KBSessionMessageListResponse</code></li>
         <li><code>KBSourceChunk</code></li>
+        <li><code>KaiwuEntryResponse</code></li>
         <li><code>KnowledgeBase</code></li>
         <li><code>Model</code></li>
         <li><code>ModelList</code></li>

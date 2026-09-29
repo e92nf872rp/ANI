@@ -106,6 +106,10 @@ class _ParseOrchestrator(Protocol):
         file_type: str,
         chunk_size: int,
         vector_store_id: str,
+        embedding_model: str = "",
+        generate_model: str = "",
+        embed_runtime_endpoint: str = "",
+        generate_runtime_endpoint: str = "",
     ) -> None: ...
 
 
@@ -138,16 +142,47 @@ class ParseConsumer:
         orchestrator: _ParseOrchestrator,
         subject: str,
         max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+        inference_service_client: Any | None = None,
     ) -> None:
         self._nats = nats_client
         self._pool = db_pool
         self._orchestrator = orchestrator
         self._subject = subject
         self._max_concurrency = max_concurrency
+        # Resolves (tenant_id, served_model_name) → runtime_endpoint so the
+        # parse pipeline can direct-connect to the tenant's inference service.
+        # Optional: when None, endpoints stay empty and rag-engine falls back
+        # to its configured default base URL.
+        self._inference_service_client = inference_service_client
         self._subscription = None
         self._semaphore: asyncio.Semaphore | None = None
         self._pending: set[asyncio.Task] = set()
         self._stopped = True
+
+    async def _resolve_runtime_endpoint(
+        self, *, tenant_id: str, model: str
+    ) -> tuple[str, str]:
+        """Resolve (runtime endpoint, canonical served_model_name) for ``model``.
+
+        Returns ("", "") when no client is configured or resolution fails; the
+        rag-engine then falls back to its default base URL and the caller keeps
+        the original model name.
+        """
+        model = (model or "").strip()
+        if not model or self._inference_service_client is None:
+            return "", ""
+        try:
+            resolved = await self._inference_service_client.resolve_endpoint(
+                tenant_id=tenant_id, served_model_name=model,
+            )
+            return resolved.base_url, resolved.served_model_name or model
+        except Exception as exc:  # noqa: BLE001 — degrade to rag-engine default
+            logger.warning(
+                "parse_consumer: failed to resolve runtime endpoint for model "
+                "%r (tenant %s), falling back to rag-engine default: %s",
+                model, tenant_id, exc,
+            )
+            return "", ""
 
     async def start(self) -> None:
         """Subscribe to the v2 subject and begin consuming."""
@@ -362,17 +397,35 @@ class ParseConsumer:
 
         vector_store_id = ""
         embedding_model = ""
+        generate_model = ""
         if kb_row:
             vector_store_id = str(kb_row.get("vector_store_id") or "")
             # Per-KB embedding model (M2): write side uses the KB row's
             # embedding_model so write and read always share one model.
             embedding_model = str(kb_row.get("embedding_model") or "")
+            # Chat model used for the best-effort document summary.
+            generate_model = str(kb_row.get("default_inference_service") or "")
         if not vector_store_id:
             logger.error(
                 "parse_consumer: kb %s has no vector_store_id, skipping "
                 "doc %s", kb_id, doc_id,
             )
             return
+
+        # Resolve the tenant's inference-service endpoints per model: embedding
+        # uses embedding_model, summary generation uses the KB's chat model.
+        # The canonical served_model_name replaces the config name for the
+        # OpenAI request body.
+        embed_runtime_endpoint, resolved_embed_model = (
+            await self._resolve_runtime_endpoint(
+                tenant_id=tenant_id, model=embedding_model,
+            )
+        )
+        generate_runtime_endpoint, resolved_generate_model = (
+            await self._resolve_runtime_endpoint(
+                tenant_id=tenant_id, model=generate_model,
+            )
+        )
 
         # Idempotency: ParseOrchestrator.process_document checks
         # parse_status == 'ready' and skips already-ingested documents.
@@ -390,7 +443,10 @@ class ParseConsumer:
                 file_type=file_type,
                 chunk_size=int(chunk_size),
                 vector_store_id=vector_store_id,
-                embedding_model=embedding_model,
+                embedding_model=resolved_embed_model or embedding_model,
+                generate_model=resolved_generate_model or generate_model,
+                embed_runtime_endpoint=embed_runtime_endpoint,
+                generate_runtime_endpoint=generate_runtime_endpoint,
             )
         except Exception as exc:  # noqa: BLE001 — orchestrator handles errors
             logger.exception(
@@ -545,6 +601,7 @@ def build_parse_consumer(
     orchestrator: _ParseOrchestrator,
     subject: str,
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+    inference_service_client: Any | None = None,
 ) -> ParseConsumer:
     """Factory for constructing a ParseConsumer (called from main.py).
 
@@ -557,4 +614,5 @@ def build_parse_consumer(
         orchestrator=orchestrator,
         subject=subject,
         max_concurrency=max_concurrency,
+        inference_service_client=inference_service_client,
     )

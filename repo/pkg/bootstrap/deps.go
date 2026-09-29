@@ -156,15 +156,20 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		return Capabilities{}, err
 	}
 
-	reconcileControllerOptions := []runtimeadapter.ReconcileControllerOption{}
+	// Lifecycle outbox events are independent of GPU_QUOTA_ENABLED:
+	// metering-service is event-driven and needs provisioning->running (and
+	// every other lifecycle) transition written to outbox_events even when
+	// quota is disabled. Only the TCC quota service stays gated by the flag;
+	// without it the transitions run through the same tenant tx but skip
+	// quota calls (QuotaTxIDs empty).
+	reconcileControllerOptions := []runtimeadapter.ReconcileControllerOption{
+		runtimeadapter.WithMetadataStore(metadata),
+		runtimeadapter.WithWorkloadInstanceStoreTx(instanceStore),
+		runtimeadapter.WithOutboxWriter(runtimeadapter.NewMetadataOutboxWriter()),
+	}
 	if cfg.GPUQuotaEnabled {
-		outboxWriter := runtimeadapter.NewMetadataOutboxWriter()
 		reconcileControllerOptions = append(reconcileControllerOptions,
-			runtimeadapter.WithQuotaService(quotaService),
-			runtimeadapter.WithMetadataStore(metadata),
-			runtimeadapter.WithWorkloadInstanceStoreTx(instanceStore),
-			runtimeadapter.WithOutboxWriter(outboxWriter),
-		)
+			runtimeadapter.WithQuotaService(quotaService))
 		if cfg.ProvisioningTimeoutMin > 0 {
 			reconcileControllerOptions = append(reconcileControllerOptions,
 				runtimeadapter.WithProvisioningTimeoutMin(cfg.ProvisioningTimeoutMin))
@@ -291,16 +296,21 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	// implements the cross-tenant ExpirableSandboxLister, and doubles as the
 	// persistence store for the controller.
 	sandboxExpirationController := runtimeadapter.NewSandboxExpirationController(instanceStore, instanceStore, sandboxRuntime)
+	// Lifecycle outbox events are independent of GPU_QUOTA_ENABLED (see the
+	// reconcile controller block above). The inner orchestrator and instance
+	// service get metadataStore/storeTx/outboxWriter unconditionally so their
+	// lifecycle persist paths run in a tenant tx and emit events; only the
+	// TCC quota service stays gated by the flag.
 	orchestratorOptions := []runtimeadapter.InstanceOrchestratorOption{
 		runtimeadapter.WithInstanceStore(instanceStore),
 		runtimeadapter.WithInstanceOrchestratorWorkloadIdentityService(workloadIdentity),
+		runtimeadapter.WithInstanceOrchestratorMetadataStore(metadata),
+		runtimeadapter.WithInstanceOrchestratorStoreTx(instanceStore),
+		runtimeadapter.WithInstanceOrchestratorOutboxWriter(runtimeadapter.NewMetadataOutboxWriter()),
 	}
 	if cfg.GPUQuotaEnabled {
 		orchestratorOptions = append(orchestratorOptions,
-			runtimeadapter.WithInstanceOrchestratorQuotaService(quotaService),
-			runtimeadapter.WithInstanceOrchestratorMetadataStore(metadata),
-			runtimeadapter.WithInstanceOrchestratorStoreTx(instanceStore),
-		)
+			runtimeadapter.WithInstanceOrchestratorQuotaService(quotaService))
 	}
 	// Volcano resource translation is a Core capability independent of
 	// GPU_QUOTA_ENABLED (plan.md §4.7). Inject into the inner orchestrator
@@ -404,20 +414,23 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	}, nil
 }
 
-// instanceServiceQuotaOptions returns the quota-related InstanceService
-// options gated by cfg.GPUQuotaEnabled, matching the inner orchestrator and
-// reconciler gating. When GPU_QUOTA_ENABLED=false the quota service,
-// metadata store and store-tx are NOT injected, so persistLifecycleWithQuota
-// falls back to plain store.UpsertStatus and never calls TryManyTx.
+// instanceServiceQuotaOptions returns the tx/outbox wiring for the
+// InstanceService. metadataStore/storeTx/outboxWriter are injected
+// unconditionally so persistLifecycleWithQuota runs lifecycle writes in a
+// tenant tx and emits events regardless of GPU_QUOTA_ENABLED (see the
+// orchestrator options comment). The quota service stays gated by the flag:
+// when GPU_QUOTA_ENABLED=false persistLifecycleWithQuota still opens the tx
+// and writes outbox events but skips Try/Cancel/Release.
 func instanceServiceQuotaOptions(cfg Config, quotaService ports.QuotaService, metadata ports.MetadataStore, instanceStore ports.WorkloadInstanceStoreTx) []runtimeadapter.InstanceServiceOption {
-	if !cfg.GPUQuotaEnabled {
-		return nil
-	}
-	return []runtimeadapter.InstanceServiceOption{
-		runtimeadapter.WithInstanceQuotaService(quotaService),
+	options := []runtimeadapter.InstanceServiceOption{
 		runtimeadapter.WithInstanceMetadataStore(metadata),
 		runtimeadapter.WithInstanceStoreTx(instanceStore),
+		runtimeadapter.WithInstanceOutboxWriter(runtimeadapter.NewMetadataOutboxWriter()),
 	}
+	if cfg.GPUQuotaEnabled {
+		options = append(options, runtimeadapter.WithInstanceQuotaService(quotaService))
+	}
+	return options
 }
 
 func gpuInventoryAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient) (ports.GPUInventory, error) {

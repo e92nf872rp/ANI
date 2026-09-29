@@ -44,7 +44,7 @@ type KBGRPCClient interface {
 	CreateKB(ctx context.Context, tenantID string, idempotencyKey string, req *kbv1.CreateKBRequest) (*kbv1.KnowledgeBase, error)
 	GetKB(ctx context.Context, tenantID string, kbID string) (*kbv1.KnowledgeBase, error)
 	UpdateKB(ctx context.Context, tenantID string, kbID string, idempotencyKey string, name string, description string) (*kbv1.KnowledgeBase, error)
-	ListKBs(ctx context.Context, tenantID string, limit int32, cursor string) (*kbv1.ListKBsResponse, error)
+	ListKBs(ctx context.Context, tenantID string, limit int32, cursor string, status string) (*kbv1.ListKBsResponse, error)
 	DeleteKB(ctx context.Context, tenantID string, kbID string) (*emptypb.Empty, error)
 	GetDocumentUploadURL(ctx context.Context, tenantID string, kbID string, idempotencyKey string, req *kbv1.GetDocumentUploadURLRequest) (*kbv1.GetDocumentUploadURLResponse, error)
 	NotifyDocumentUploaded(ctx context.Context, tenantID string, kbID string, docID string, storagePath string) (*commonv1.AsyncTaskRef, error)
@@ -171,12 +171,13 @@ func (c *kbGRPCClient) UpdateKB(ctx context.Context, tenantID, kbID, idempotency
 	})
 }
 
-func (c *kbGRPCClient) ListKBs(ctx context.Context, tenantID string, limit int32, cursor string) (*kbv1.ListKBsResponse, error) {
+func (c *kbGRPCClient) ListKBs(ctx context.Context, tenantID string, limit int32, cursor string, status string) (*kbv1.ListKBsResponse, error) {
 	callCtx, cancel := c.callCtx(ctx)
 	defer cancel()
 	return c.client.ListKBs(callCtx, &kbv1.ListKBsRequest{
 		TenantId: tenantID,
 		Page:     &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor},
+		Status:   status,
 	})
 }
 

@@ -65,16 +65,22 @@ func dimensionsFor(kind string) []ports.CollectionDimension {
 }
 
 // parseGPUCount 从 gpu_status JSONB 解析 GPU 卡数。
-// 预期格式：{"count": N}。缺失或解析失败返回 0。
+// 兼容两种落库格式：小写 {"count": N}（契约格式）和大写 {"Count": N}
+// （GPUInstanceStatus 结构体直序列化，无 json tag，字段名即 Go 字段名）。
+// 缺失或解析失败返回 0。
 func parseGPUCount(gpuStatusJSON []byte) int {
 	if len(gpuStatusJSON) == 0 {
 		return 0
 	}
 	var status struct {
-		Count int `json:"count"`
+		Count      int `json:"count"`
+		CountUpper int `json:"Count"`
 	}
 	if err := json.Unmarshal(gpuStatusJSON, &status); err != nil {
 		return 0
 	}
-	return status.Count
+	if status.Count != 0 {
+		return status.Count
+	}
+	return status.CountUpper
 }

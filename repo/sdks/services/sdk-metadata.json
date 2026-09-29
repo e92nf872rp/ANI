@@ -185,6 +185,18 @@
       "scope": ""
     },
     {
+      "operationId": "getKaiwuBossEntry",
+      "method": "GET",
+      "path": "/integrations/kaiwu/boss/entry",
+      "scope": ""
+    },
+    {
+      "operationId": "getKaiwuConsoleEntry",
+      "method": "GET",
+      "path": "/integrations/kaiwu/console/entry",
+      "scope": ""
+    },
+    {
       "operationId": "listKnowledgeBases",
       "method": "GET",
       "path": "/knowledge-bases",
@@ -943,6 +955,7 @@
     "KBSessionMessage",
     "KBSessionMessageListResponse",
     "KBSourceChunk",
+    "KaiwuEntryResponse",
     "KnowledgeBase",
     "Model",
     "ModelList",
@@ -1121,6 +1134,7 @@
     "INSUFFICIENT_CAPACITY",
     "INVALID_ARGUMENT",
     "INVALID_STATE_TRANSITION",
+    "KAIWU_BACKEND_UNAVAILABLE",
     "MODEL_INCOMPATIBLE",
     "MODEL_NOT_READY",
     "NAME_CONFLICT",

@@ -42,7 +42,8 @@ def test_embed_rpc_service_with_texts(monkeypatch):
         [0.4, 0.5, 0.6],
     ]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+        "app.services.embed_rpc_service.get_embed_model",
+        lambda model="", runtime_endpoint="": fake_model,
     )
     svc = EmbedRPCService()
     vectors, dim = svc.embed(["hello", "world"])
@@ -78,7 +79,8 @@ async def test_embed_rpc_returns_flat_vectors(monkeypatch):
         [4.0, 5.0, 6.0],
     ]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+        "app.services.embed_rpc_service.get_embed_model",
+        lambda model="", runtime_endpoint="": fake_model,
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()
@@ -97,7 +99,8 @@ async def test_embed_rpc_single_text(monkeypatch):
     fake_model = MagicMock()
     fake_model.get_text_embedding_batch.return_value = [[0.5, 0.6]]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+        "app.services.embed_rpc_service.get_embed_model",
+        lambda model="", runtime_endpoint="": fake_model,
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()
@@ -114,7 +117,8 @@ async def test_embed_rpc_error_handling(monkeypatch):
     fake_model = MagicMock()
     fake_model.get_text_embedding_batch.side_effect = RuntimeError("connection failed")
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+        "app.services.embed_rpc_service.get_embed_model",
+        lambda model="", runtime_endpoint="": fake_model,
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()
@@ -131,7 +135,7 @@ def test_embed_rpc_service_routes_model_param(monkeypatch):
     """EmbedRPCService.embed passes model through to get_embed_model."""
     captured = {}
 
-    def _fake_get(model_name=""):
+    def _fake_get(model_name="", runtime_endpoint=""):
         captured["model_name"] = model_name
         return fake_model
 
@@ -151,7 +155,8 @@ async def test_embed_rpc_model_field_routed(monkeypatch):
     fake_model = MagicMock()
     fake_model.get_text_embedding_batch.return_value = [[1.0, 2.0]]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+        "app.services.embed_rpc_service.get_embed_model",
+        lambda model="", runtime_endpoint="": fake_model,
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()
@@ -167,7 +172,7 @@ async def test_embed_rpc_empty_model_uses_default(monkeypatch):
     """gRPC Embed RPC: empty model → empty string passed (server default)."""
     captured = {}
 
-    def _fake_get(model_name=""):
+    def _fake_get(model_name="", runtime_endpoint=""):
         captured["model_name"] = model_name
         return fake_model
 
@@ -199,7 +204,8 @@ async def test_embed_rpc_truncates_oversized_text(monkeypatch):
         [3.0, 4.0],
     ]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+        "app.services.embed_rpc_service.get_embed_model",
+        lambda model="", runtime_endpoint="": fake_model,
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()
@@ -221,7 +227,8 @@ async def test_embed_rpc_short_text_untouched(monkeypatch):
     fake_model = MagicMock()
     fake_model.get_text_embedding_batch.return_value = [[1.0, 2.0]]
     monkeypatch.setattr(
-        "app.services.embed_rpc_service.get_embed_model", lambda model="": fake_model
+        "app.services.embed_rpc_service.get_embed_model",
+        lambda model="", runtime_endpoint="": fake_model,
     )
     servicer = RagEngineServicer()
     ctx = FakeContext()

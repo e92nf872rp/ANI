@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/common/v1;commonv1";
+
+// TenantContext carries the authenticated identity for a request.
+// It is injected by the Auth middleware from the JWT claims.
+message TenantContext {
+  string tenant_id = 1;   // UUID string
+  string user_id   = 2;   // UUID string; empty when request uses API Key
+  repeated string roles = 3;
+  string scope     = 4;   // "tenant" (default) or "platform"; routes by scope whitelist
+  string api_key_id = 5;  // UUID string; populated for API Key credentials only
+}
+
+// CursorPageRequest is the standard pagination request included in list RPCs.
+message CursorPageRequest {
+  int32  limit  = 1;   // default 20, max 100
+  string cursor = 2;   // opaque token from previous response; empty means first page
+}
+
+// CursorPageMeta is embedded in list responses to carry pagination state.
+message CursorPageMeta {
+  int64  total       = 1;   // total matching records (for display)
+  string next_cursor = 2;   // empty string means last page
+}
+
+// IdempotentResult is returned by all idempotent write RPCs.
+// 对齐 HTTP 层 IdempotentResult（{id, message}）。
+message IdempotentResult {
+  string id = 1;          // 资源 id（如 plan_id / tenant_id）
+  string message = 2;     // 操作结果消息（如 "tenant plan created"）
+}
+
+// AsyncTaskRef is returned by operations that create an asynchronous task.
+message AsyncTaskRef {
+  string task_id     = 1;   // UUID
+  string task_type   = 2;   // e.g. "model.import"
+  string status      = 3;   // pending | running | completed | failed | cancelled | dead_letter
+  string location_url = 4;  // GET /api/v1/tasks/{task_id}
+}
+
+// ResourceType enumerates the kinds of cloud resources ANI manages.
+enum ResourceType {
+  RESOURCE_TYPE_UNSPECIFIED  = 0;
+  RESOURCE_TYPE_GPU_HOURS    = 1;
+  RESOURCE_TYPE_CPU_HOURS    = 2;
+  RESOURCE_TYPE_MEMORY_GB_HOURS = 3;
+  RESOURCE_TYPE_STORAGE_GB_DAYS = 4;
+  RESOURCE_TYPE_INPUT_TOKENS  = 5;
+  RESOURCE_TYPE_OUTPUT_TOKENS = 6;
+  RESOURCE_TYPE_KB_QUERIES    = 7;
+}

@@ -142,7 +142,7 @@ class _RagEngineClient(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     async def embed(
-        self, *, texts: list[str], model: str = ""
+        self, *, texts: list[str], model: str = "", runtime_endpoint: str = ""
     ) -> tuple[list[list[float]], int]: ...
 
     async def generate(
@@ -154,6 +154,7 @@ class _RagEngineClient(Protocol):
         history: list[dict[str, str]] | None = None,
         inference_service_name: str = "",
         max_tokens: int = 2048,
+        runtime_endpoint: str = "",
     ) -> dict[str, Any]: ...
 
 
@@ -199,6 +200,9 @@ class ParseOrchestrator:
         chunk_size: int,
         vector_store_id: str,
         embedding_model: str = "",
+        generate_model: str = "",
+        embed_runtime_endpoint: str = "",
+        generate_runtime_endpoint: str = "",
     ) -> None:
         """Process a single document end-to-end through the parse pipeline.
 
@@ -211,6 +215,16 @@ class ParseOrchestrator:
                 ``embedding_model`` column); empty uses the rag-engine
                 server default. Passed through to the Embed RPC so write
                 and read sides of the same KB always use the same model.
+            embed_runtime_endpoint: Cluster runtime endpoint of the KB owner's
+                published **embedding** inference service (resolved from
+                ``embedding_model``); passed to the Embed RPC.
+            generate_model: Canonical served_model_name of the **chat**
+                inference service (resolved via the internal endpoint
+                resolver); used as the request-body model of the best-effort
+                summary Generate RPC. Empty uses the rag-engine default.
+            generate_runtime_endpoint: Cluster runtime endpoint of the KB
+                owner's published **chat** inference service; passed to the
+                best-effort summary Generate RPC.
         """
         if not tenant_id:
             raise ValueError("tenant_id must not be empty for RLS-scoped write")
@@ -314,11 +328,45 @@ class ParseOrchestrator:
             # returns images as separate chunks without position info, so
             # we append all links to the last parent's content (or first
             # child if no parents), matching the most common old behavior.
+            image_only = False
             if image_links:
                 if parents:
                     parents[-1]["content"] += "\n" + "\n".join(image_links)
                 elif child_chunks:
                     child_chunks[0]["content"] += "\n" + "\n".join(image_links)
+                else:
+                    # Image-only document (e.g. scanned PDF, no OCR yet): no
+                    # text nodes exist, so the links above would be silently
+                    # dropped and the doc would end up "ready" with 0 chunks
+                    # (searchable but nothing to view). Synthesize the same
+                    # parent/child shape as text documents: one parent block
+                    # carrying all image links, one child per link.
+                    image_only = True
+                    parent_content = "\n".join(image_links)
+                    parent_id = str(uuid.uuid4())
+                    parents.append({
+                        "chunk_id": parent_id,
+                        "content": parent_content,
+                        "content_type": "image",
+                        "chunk_type": "parent",
+                        "page_number": 1,
+                        "parent_chunk_id": None,
+                        "parent_content": None,
+                        "token_count": max(1, len(parent_content) // 2),
+                        "metadata": {},
+                    })
+                    for link in image_links:
+                        child_chunks.append({
+                            "chunk_id": str(uuid.uuid4()),
+                            "content": link,
+                            "content_type": "image",
+                            "chunk_type": "child",
+                            "page_number": 1,
+                            "parent_chunk_id": parent_id,
+                            "parent_content": parent_content,
+                            "token_count": max(1, len(link) // 2),
+                            "metadata": {},
+                        })
 
             # Reparse idempotency: delete prior chunks before re-writing.
             # If the document was previously failed/partially-ingested, old
@@ -356,7 +404,15 @@ class ParseOrchestrator:
                 )
 
             # 4. Best-effort summary (Generate RPC). Failure → None, no block.
-            summary_chunk = await self._generate_summary(parents)
+            # Image-only docs: the "parent" is just image links — no text to
+            # summarize — so skip the Generate call entirely.
+            if image_only:
+                summary_chunk = None
+            else:
+                summary_chunk = await self._generate_summary(
+                    parents, runtime_endpoint=generate_runtime_endpoint,
+                    inference_service_name=generate_model,
+                )
 
             # 5. Embed child chunks + summary SEPARATELY.
             #    Summary is NOT appended to child_chunks to avoid double-write
@@ -370,7 +426,8 @@ class ParseOrchestrator:
             vectors: list[list[float]] = []
             if texts:
                 vectors, _dim = await self._rag_engine.embed(
-                    texts=texts, model=embedding_model
+                    texts=texts, model=embedding_model,
+                    runtime_endpoint=embed_runtime_endpoint,
                 )
                 if len(vectors) != len(embed_chunks):
                     raise RuntimeError(
@@ -484,7 +541,13 @@ class ParseOrchestrator:
                 except Exception:
                     pass
 
-    async def _generate_summary(self, parents: list[dict[str, Any]]) -> dict[str, Any] | None:
+    async def _generate_summary(
+        self,
+        parents: list[dict[str, Any]],
+        *,
+        runtime_endpoint: str = "",
+        inference_service_name: str = "",
+    ) -> dict[str, Any] | None:
         """Best-effort document summary via rag-engine.Generate RPC.
 
         Mirrors rag-engine ``SummaryService.summarize`` (summary_service.py):
@@ -525,8 +588,9 @@ class ParseOrchestrator:
                 session_id="",
                 context=[],
                 history=[],
-                inference_service_name="",
+                inference_service_name=inference_service_name,
                 max_tokens=SUMMARY_SAFE_CHARS,
+                runtime_endpoint=runtime_endpoint,
             )
             summary = (result.get("answer") or "").strip()
             if not summary:

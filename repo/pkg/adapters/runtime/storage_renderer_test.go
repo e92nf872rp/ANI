@@ -37,6 +37,39 @@ func TestKubernetesStorageRendererRendersVolumePVC(t *testing.T) {
 	}
 }
 
+func TestKubernetesStorageRendererRendersVolumeMode(t *testing.T) {
+	renderer := NewKubernetesStorageRenderer()
+	cases := []struct {
+		name       string
+		volumeMode string
+		want       string
+	}{
+		{name: "block", volumeMode: ports.StorageVolumeModeBlock, want: `"volumeMode": "Block"`},
+		{name: "filesystem", volumeMode: ports.StorageVolumeModeFilesystem, want: `"volumeMode": "Filesystem"`},
+		// 存量卷 volume_mode 为空时回退 Filesystem，保护既有 PVC 的 re-observe。
+		{name: "empty falls back to filesystem", volumeMode: "", want: `"volumeMode": "Filesystem"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifests, err := renderer.RenderVolume(context.Background(), ports.StorageVolumeRecord{
+				TenantID:     "tenant-a",
+				VolumeID:     "vol_data",
+				Name:         "data",
+				SizeGiB:      100,
+				StorageClass: "ani-block",
+				VolumeMode:   tc.volumeMode,
+				State:        ports.StorageResourceAvailable,
+			})
+			if err != nil {
+				t.Fatalf("RenderVolume() error = %v", err)
+			}
+			if content := manifests[0].Content; !strings.Contains(content, tc.want) {
+				t.Fatalf("rendered volume PVC missing %q:\n%s", tc.want, content)
+			}
+		})
+	}
+}
+
 func TestKubernetesStorageRendererRendersFilesystemPVC(t *testing.T) {
 	renderer := NewKubernetesStorageRenderer()
 

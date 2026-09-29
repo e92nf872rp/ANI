@@ -113,7 +113,7 @@ func (f *fakeKBClient) UpdateKB(_ context.Context, tenantID, kbID, idem, name, d
 	f.lastUpdateDesc = description
 	return f.updateKbResp, f.updateKbErr
 }
-func (f *fakeKBClient) ListKBs(_ context.Context, tenantID string, _ int32, _ string) (*kbv1.ListKBsResponse, error) {
+func (f *fakeKBClient) ListKBs(_ context.Context, tenantID string, _ int32, _ string, _ string) (*kbv1.ListKBsResponse, error) {
 	f.lastTenantID = tenantID
 	return f.listKbsResp, f.listKbsErr
 }
