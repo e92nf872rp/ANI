@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/network"
 	"github.com/google/uuid"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 
@@ -34,13 +35,18 @@ import (
 // (SPEC §4.3 错误处理). Mid-stream errors emit an SSE error event and close
 // the stream.
 //
-// Client disconnect detection: the handler uses the request context; when the
-// client closes the connection the context is cancelled, which aborts the
-// in-flight vLLM HTTP stream (SPEC §5.4).
+// Client disconnect detection: the streaming loop runs inside a Hertz Hijack
+// callback with an independent context; when the client closes the connection
+// the SSE write fails, the callback returns, and the deferred cancel aborts
+// the in-flight upstream gRPC stream (SPEC §5.4).
 //
-// The handler writes SSE frames via c.Write which, combined with a chunked
-// transfer-encoding hijack writer and c.Flush, pushes each frame to the
-// client immediately for real-time token streaming.
+// Frames are written on the hijacked raw connection with an explicit Flush
+// after EVERY frame: c.Write alone only appends to Hertz's response buffer,
+// which is flushed once when the handler returns — tokens would all arrive in
+// a single burst at stream end and the frontend would show no typewriter
+// effect. Same pattern as instance_log_stream.go (see its ctx-lifecycle note:
+// the handler ctx must NOT be used inside the Hijack callback — it is already
+// cancelled/reused there).
 
 // KbSSEConfig holds the dependencies injected by the route registrar. When
 // vllmStreamer is nil the handler degrades gracefully: it emits an empty
@@ -82,9 +88,10 @@ func encodeSSEEvent(ev sseEvent) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// writeSSEEvent writes one SSE frame to the response and immediately flushes
-// it to the client so tokens arrive in real time (not buffered until handler
-// return). Uses Hertz's chunked transfer-encoding hijack writer.
+// writeSSEEvent writes one SSE frame to the hertz response (degrade path
+// only — two terminal frames, no incremental streaming). The streaming path
+// uses writeConnSSEEvent on the hijacked connection instead, so tokens are
+// flushed immediately.
 func writeSSEEvent(c *app.RequestContext, ev sseEvent) error {
 	frame, err := encodeSSEEvent(ev)
 	if err != nil {
@@ -94,6 +101,19 @@ func writeSSEEvent(c *app.RequestContext, ev sseEvent) error {
 		return fmt.Errorf("write sse %s: %w", ev.event, err)
 	}
 	return nil
+}
+
+// writeConnSSEEvent writes one SSE frame to the hijacked connection and
+// flushes it immediately so the client receives tokens in real time.
+func writeConnSSEEvent(conn network.Conn, ev sseEvent) error {
+	frame, err := encodeSSEEvent(ev)
+	if err != nil {
+		return err
+	}
+	if _, err := conn.WriteBinary(frame); err != nil {
+		return fmt.Errorf("write sse %s: %w", ev.event, err)
+	}
+	return conn.Flush()
 }
 
 // streamQueryKnowledgeBaseSSE is the SSE handler registered at
@@ -145,6 +165,8 @@ func streamQuerySSENewPath(cfg KbSSEConfig) app.HandlerFunc {
 		retrievalMode := string(c.QueryArgs().Peek("retrieval_mode"))
 
 		// ── SSE headers (SPEC §4.3) ────────────────────────────────────────
+		// Kept for the degrade path below (hertz writes them with the default
+		// response); the hijack path writes the same headers manually.
 		c.Response.Header.Set("Content-Type", "text/event-stream")
 		c.Response.Header.Set("Cache-Control", "no-cache")
 		c.Response.Header.Set("Connection", "keep-alive")
@@ -170,6 +192,14 @@ func streamQuerySSENewPath(cfg KbSSEConfig) app.HandlerFunc {
 		// billing on retry) without exposing the field to SSE clients.
 		// The key must be a bare UUID — kb-service validates it with
 		// uuid.UUID(...) and rejects any prefixed form ("sse-<uuid>" fails).
+		//
+		// The stream context is NOT the handler ctx: the streaming loop runs
+		// inside the Hijack callback below, which executes AFTER the handler
+		// returned (netpoll reuses/cancels the handler ctx there — see
+		// instance_log_stream.go). An independent ctx + the same 120s budget
+		// as Query applies; client disconnect is sensed via SSE write failure,
+		// which cancels this ctx and aborts the upstream stream.
+		streamCtx, cancel := context.WithTimeout(context.Background(), queryRPCTimeout)
 		req := &kbv1.RetrieveRequest{
 			Question:             question,
 			SessionId:            sessionID,
@@ -181,9 +211,10 @@ func streamQuerySSENewPath(cfg KbSSEConfig) app.HandlerFunc {
 		}
 		// kb.query rows are audit-worthy: attribute the streamed turn to the
 		// acting user via x-user-id (mirrors queryKnowledgeBase).
-		stream, err := cfg.KBClient.Retrieve(kbWriteCtx(ctx, c), tenantID, c.Param("kb_id"), req)
+		stream, err := cfg.KBClient.Retrieve(kbWriteCtx(streamCtx, c), tenantID, c.Param("kb_id"), req)
 		if err != nil {
 			// Pre-stream gRPC errors: map to JSON for 4xx, SSE error for others.
+			cancel()
 			ke := mapGRPCError(err)
 			if ke.httpStatus == http.StatusNotFound || ke.httpStatus == http.StatusBadRequest ||
 				ke.httpStatus == http.StatusUnauthorized {
@@ -198,61 +229,89 @@ func streamQuerySSENewPath(cfg KbSSEConfig) app.HandlerFunc {
 			return
 		}
 
-		// ── Forward gRPC stream events as SSE frames ───────────────────────
-		// Event sequence from kb-service: token* → sources → done (Plan §10.2).
-		// We map each RetrieveEvent oneof to the corresponding SSE event.
-		// CloseSend is deferred to release server-side transport resources.
-		defer func() { _ = stream.CloseSend() }()
-		for {
-			ev, recvErr := stream.Recv()
-			if recvErr != nil {
-				if errors.Is(recvErr, io.EOF) {
-					// Stream complete — done event was already forwarded
-					// as part of the RetrieveEvent sequence.
-					return
-				}
-				// Mid-stream error: emit SSE error event and close.
-				_ = writeSSEEvent(c, sseEvent{event: "error", data: map[string]string{
-					"code":    "STREAM_INTERRUPTED",
-					"message": recvErr.Error(),
-				}})
+		// ── Stream the events as real-time SSE frames (hijack) ─────────────
+		// c.Write alone only appends to Hertz's response buffer, which is
+		// flushed once when the handler returns — every token would arrive in
+		// a single burst at stream end (no typewriter effect on the frontend).
+		// HijackWriter suppresses Hertz's default response write so the Hijack
+		// callback owns the raw connection; every frame is written and flushed
+		// explicitly (same pattern as instance_log_stream.go).
+		c.Response.SetStatusCode(http.StatusOK)
+		c.Response.HijackWriter(&noopExtWriter{})
+		c.Hijack(func(conn network.Conn) {
+			defer func() {
+				cancel()
+				_ = stream.CloseSend()
+				_ = conn.Close()
+			}()
+
+			// SSE headers immediately: the client must get 200 +
+			// text/event-stream right away, before the first token exists.
+			// The ": connected" comment frame (SSE-spec comment, ignored by
+			// clients) forces node-style proxies to flush the headers.
+			if _, err := conn.WriteBinary([]byte(sseHeaders)); err != nil {
+				return // client already gone
+			}
+			if _, err := conn.WriteBinary([]byte(sseConnectedComment)); err != nil {
+				return
+			}
+			if err := conn.Flush(); err != nil {
 				return
 			}
 
-			switch event := ev.Event.(type) {
-			case *kbv1.RetrieveEvent_Token:
-				if werr := writeSSEEvent(c, sseEvent{event: "token", data: map[string]string{
-					"delta": event.Token.GetContent(),
-				}}); werr != nil {
+			// Forward gRPC stream events as SSE frames. Event sequence from
+			// kb-service: token* → sources → done (Plan §10.2).
+			for {
+				ev, recvErr := stream.Recv()
+				if recvErr != nil {
+					if errors.Is(recvErr, io.EOF) {
+						// Stream complete — done event was already forwarded
+						// as part of the RetrieveEvent sequence.
+						return
+					}
+					// Mid-stream error: emit SSE error event and close.
+					_ = writeConnSSEEvent(conn, sseEvent{event: "error", data: map[string]string{
+						"code":    "STREAM_INTERRUPTED",
+						"message": recvErr.Error(),
+					}})
 					return
 				}
-			case *kbv1.RetrieveEvent_Sources:
-				srcs := make([]map[string]any, 0, len(event.Sources.GetSources()))
-				for _, s := range event.Sources.GetSources() {
-					srcs = append(srcs, map[string]any{
-						"doc_id":    s.GetDocId(),
-						"file_name": s.GetFileName(),
-						"page":      s.GetPage(),
-						"content":   s.GetContent(),
-						"score":     s.GetScore(),
-					})
+
+				switch event := ev.Event.(type) {
+				case *kbv1.RetrieveEvent_Token:
+					if werr := writeConnSSEEvent(conn, sseEvent{event: "token", data: map[string]string{
+						"delta": event.Token.GetContent(),
+					}}); werr != nil {
+						return
+					}
+				case *kbv1.RetrieveEvent_Sources:
+					srcs := make([]map[string]any, 0, len(event.Sources.GetSources()))
+					for _, s := range event.Sources.GetSources() {
+						srcs = append(srcs, map[string]any{
+							"doc_id":    s.GetDocId(),
+							"file_name": s.GetFileName(),
+							"page":      s.GetPage(),
+							"content":   s.GetContent(),
+							"score":     s.GetScore(),
+						})
+					}
+					_ = writeConnSSEEvent(conn, sseEvent{event: "sources", data: srcs})
+				case *kbv1.RetrieveEvent_Done:
+					doneData := map[string]any{
+						"session_id":    event.Done.GetSessionId(),
+						"input_tokens":  event.Done.GetInputTokens(),
+						"output_tokens": event.Done.GetOutputTokens(),
+					}
+					_ = writeConnSSEEvent(conn, sseEvent{event: "done", data: doneData})
+				case *kbv1.RetrieveEvent_Error:
+					_ = writeConnSSEEvent(conn, sseEvent{event: "error", data: map[string]string{
+						"code":    event.Error.GetCode(),
+						"message": event.Error.GetMessage(),
+					}})
+					return
 				}
-				_ = writeSSEEvent(c, sseEvent{event: "sources", data: srcs})
-			case *kbv1.RetrieveEvent_Done:
-				doneData := map[string]any{
-					"session_id":    event.Done.GetSessionId(),
-					"input_tokens":  event.Done.GetInputTokens(),
-					"output_tokens": event.Done.GetOutputTokens(),
-				}
-				_ = writeSSEEvent(c, sseEvent{event: "done", data: doneData})
-			case *kbv1.RetrieveEvent_Error:
-				_ = writeSSEEvent(c, sseEvent{event: "error", data: map[string]string{
-					"code":    event.Error.GetCode(),
-					"message": event.Error.GetMessage(),
-				}})
-				return
 			}
-		}
+		})
 	}
 }
 
