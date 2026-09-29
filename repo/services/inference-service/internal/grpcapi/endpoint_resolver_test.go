@@ -13,6 +13,7 @@ import (
 	"github.com/kubercloud/ani/services/inference-service/internal/service"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
@@ -39,7 +40,7 @@ func dialEndpointResolver(t *testing.T, usecase EndpointResolverUseCase) inferen
 	t.Cleanup(func() { server.Stop(); _ = listener.Close() })
 	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
 		return listener.Dial()
-	}), grpc.WithInsecure())
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("dial bufconn: %v", err)
 	}

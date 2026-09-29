@@ -59,7 +59,7 @@ type pagedFakeController struct {
 }
 
 func (f *pagedFakeController) ListPage(_ context.Context, tenantID uuid.UUID, query repository.ListServicesQuery) (service.ServicePage, error) {
-	f.fakeController.tenant = tenantID
+	f.tenant = tenantID
 	if query.Status != "running" || query.Limit != 1 || query.Offset != 1 {
 		return service.ServicePage{}, errors.New("unexpected list query")
 	}
@@ -385,8 +385,8 @@ func TestListInferenceServicesForwardsPagedQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if controller.fakeController.tenant != testTenant || len(resp.GetItems()) != 1 || resp.GetNextCursor() != "2" {
-		t.Fatalf("tenant=%s items=%d cursor=%q", controller.fakeController.tenant, len(resp.GetItems()), resp.GetNextCursor())
+	if controller.tenant != testTenant || len(resp.GetItems()) != 1 || resp.GetNextCursor() != "2" {
+		t.Fatalf("tenant=%s items=%d cursor=%q", controller.tenant, len(resp.GetItems()), resp.GetNextCursor())
 	}
 }
 
