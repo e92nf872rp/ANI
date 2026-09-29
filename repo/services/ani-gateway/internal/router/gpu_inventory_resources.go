@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,9 @@ type gpuPodOccupancy struct {
 	InstanceName string
 	NodeName     string
 	Phase        string
+	// GPUCount 是该 Pod 请求的 GPU 设备数（多卡 Pod 占多台设备记录），
+	// 来自 ParseRunningGPUPodOccupancy 的数量解析。
+	GPUCount int
 }
 
 type gpuInventoryListResponse struct {
@@ -661,20 +665,30 @@ func (api *gpuInventoryAPI) gpuInventoryRecordFromDevice(ctx context.Context, no
 	if record.Shares <= 0 {
 		record.Shares = 1
 	}
-	// 当节点 ready 且存在同节点的 Running GPU Pod 时，按设备索引顺序
-	// 标记前 PodCount 个设备为 in_use（每个 Pod 占用 1 个设备记录）。
-	// 当前实现无法精确到"节点的哪张卡"（planning 阶段未持久化 GPU device
-	// index），因此按索引顺序分配；多实例共节点时 InstanceID 取字典序最小。
-	// 详见 PRD §3.1 / US-006。
+	// 当节点 ready 且存在同节点的 Running GPU Pod 时，把该节点的 GPU 占用
+	// 按占用 Pod 的设备数依次分配到设备索引上：Pods 已按实例名稳定排序，
+	// 逐个 Pod 消费其 GPUCount 数量的设备记录（多卡 Pod 占多台设备）。
+	// 当前实现无法精确到"节点的哪张卡"（Pod 对象上没有设备分配信息，实测
+	// volcano.sh/devices-to-allocate 为空；planning 阶段也未持久化 GPU device
+	// index），因此按索引顺序分配——相比旧实现（整节点回显字典序最小的一个
+	// 实例），多实例共节点时每台设备回显各自占用的实例，不再把全部 in_use
+	// 归到同一个实例名。详见 PRD §3.1 / US-006。
 	if status == "available" {
-		if owner, ok := occupancy.lookup(node.NodeName); ok && index < owner.PodCount {
-			tenantID := owner.TenantID
-			instanceID := owner.InstanceID
-			record.Status = "in_use"
-			if tenantID != "" {
-				record.TenantID = &tenantID
+		if owner, ok := occupancy.lookup(node.NodeName); ok {
+			offset := 0
+			for _, pod := range owner.Pods {
+				if index >= offset && index < offset+pod.GPUCount {
+					tenantID := pod.TenantID
+					instanceID := pod.InstanceID
+					record.Status = "in_use"
+					if tenantID != "" {
+						record.TenantID = &tenantID
+					}
+					record.InstanceID = &instanceID
+					break
+				}
+				offset += pod.GPUCount
 			}
-			record.InstanceID = &instanceID
 		}
 	}
 	// 台账合并：人工覆盖（maintenance/unavailable）> 自动观测态。
@@ -682,20 +696,33 @@ func (api *gpuInventoryAPI) gpuInventoryRecordFromDevice(ctx context.Context, no
 	return record
 }
 
+// gpuNodeOccupancyPod 是单个占用 Pod 的回显信息：TenantID/InstanceID 来自
+// Pod 真实归属 label（平台视角跨租户时即真实租户），GPUCount 是该 Pod 请求
+// 的 GPU 设备数（多卡 Pod 占多台设备）。
+type gpuNodeOccupancyPod struct {
+	TenantID   string
+	InstanceID string
+	GPUCount   int
+}
+
 // gpuNodeOccupancyEntry 表示某个节点上运行的 GPU 实例占用信息。
-// PodCount 是该节点上 Running 状态的 GPU Pod 数量（每个 Pod 占用 1 个
-// GPU 设备记录——整卡节点 1 Pod = 1 张物理卡，vGPU 节点 1 Pod = 1 个切片）。
-// InstanceID 取字典序最小的实例名（展示用），实际 in_use 计数由 PodCount 决定。
+// PodCount 是该节点上 Running 状态的 GPU Pod 数量；GPUCount 是占用的设备
+// 记录总数（各 Pod 请求 GPU 数量之和——整卡节点 1 卡 = 1 记录，vGPU 节点
+// 1 切片 = 1 记录）。Pods 按实例名字典序稳定排序，供设备级 in_use 回显把
+// 各 Pod 的占用依次分配到设备索引上。
+// TenantID/InstanceID 取字典序最小的实例名（保留兼容，供摘要展示）。
 type gpuNodeOccupancyEntry struct {
 	TenantID   string
 	InstanceID string
 	NodeName   string
 	PodCount   int
+	GPUCount   int
+	Pods       []gpuNodeOccupancyPod
 }
 
 // gpuNodeOccupancyMap 是 nodeName → 归属信息 的查询表。
-// PodCount 表示该节点上 Running GPU Pod 的数量，用于决定有多少设备
-// 记录应标记为 in_use。前 PodCount 个设备标记为 in_use，其余为 available。
+// GPUCount 表示该节点上 Running GPU Pod 请求的设备记录总数，前 GPUCount 个
+// 设备按 Pods 顺序分配回显，其余为 available。
 type gpuNodeOccupancyMap struct {
 	entries map[string]gpuNodeOccupancyEntry
 }
@@ -715,7 +742,8 @@ func (m gpuNodeOccupancyMap) lookup(nodeName string) (gpuNodeOccupancyEntry, boo
 //   - Pod label ani.kubercloud.io/instance 作为实例名（回显到 instance_id 字段）
 //   - Pod spec.nodeName 作为节点名
 //
-// 同节点多实例时取字典序最小的 instance_id，保证稳定。
+// 同节点多实例时按实例名字典序稳定排序，设备级回显逐 Pod 分段分配；
+// 节点级摘要（TenantID/InstanceID）取字典序最小的实例名。
 //
 // 没有 k8sClient 注入时返回空 map，行为等同于旧的硬编码 nil。
 func (api *gpuInventoryAPI) gpuNodeOccupancy(ctx context.Context, c *app.RequestContext) gpuNodeOccupancyMap {
@@ -773,10 +801,12 @@ func (api *gpuInventoryAPI) collectPodOccupancy(ctx context.Context, tenantID st
 }
 
 // gpuNodeOccupancyMapFromPods 聚合 Pod 占用记录：PodCount 是该节点上 Running
-// GPU Pod 数（每个 Pod 占 1 个设备记录）；InstanceID/TenantID 取字典序最小
-// 实例名那条（展示用，保证稳定）。fallbackTenant 用于 Pod 无租户 label 时回填。
+// GPU Pod 数；GPUCount 是占用的设备记录总数（各 Pod 请求 GPU 数量之和，多卡
+// Pod 占多台设备）；Pods 按实例名字典序排序供设备级回显逐段分配。
+// TenantID/InstanceID 取字典序最小实例名那条（保留兼容）。fallbackTenant 用于
+// Pod 无租户 label 时回填。
 func gpuNodeOccupancyMapFromPods(pods []gpuPodOccupancy, fallbackTenant string) gpuNodeOccupancyMap {
-	entries := make(map[string]gpuNodeOccupancyEntry, len(pods))
+	perNode := map[string][]gpuNodeOccupancyPod{}
 	for _, pod := range pods {
 		instanceName := strings.TrimSpace(pod.InstanceName)
 		if instanceName == "" {
@@ -790,25 +820,37 @@ func gpuNodeOccupancyMapFromPods(pods []gpuPodOccupancy, fallbackTenant string) 
 		if nodeName == "" {
 			continue
 		}
-		// 累计同节点的 Running Pod 数量；InstanceID 取字典序最小的（展示用）。
 		podTenant := strings.TrimSpace(pod.TenantID)
 		if podTenant == "" {
 			podTenant = fallbackTenant
 		}
-		if existing, ok := entries[nodeName]; ok {
-			existing.PodCount++
-			if instanceName < existing.InstanceID {
-				existing.InstanceID = instanceName
-			}
-			entries[nodeName] = existing
-		} else {
-			entries[nodeName] = gpuNodeOccupancyEntry{
-				TenantID:   podTenant,
-				InstanceID: instanceName,
-				NodeName:   nodeName,
-				PodCount:   1,
-			}
+		count := pod.GPUCount
+		if count <= 0 {
+			count = 1
 		}
+		perNode[nodeName] = append(perNode[nodeName], gpuNodeOccupancyPod{
+			TenantID:   podTenant,
+			InstanceID: instanceName,
+			GPUCount:   count,
+		})
+	}
+	entries := make(map[string]gpuNodeOccupancyEntry, len(perNode))
+	for nodeName, nodePods := range perNode {
+		sort.Slice(nodePods, func(i, j int) bool {
+			return nodePods[i].InstanceID < nodePods[j].InstanceID
+		})
+		entry := gpuNodeOccupancyEntry{
+			NodeName: nodeName,
+			PodCount: len(nodePods),
+			Pods:     nodePods,
+		}
+		for _, pod := range nodePods {
+			entry.GPUCount += pod.GPUCount
+		}
+		// 保留兼容：字典序最小实例名的租户/实例名作为节点级摘要回显。
+		entry.TenantID = nodePods[0].TenantID
+		entry.InstanceID = nodePods[0].InstanceID
+		entries[nodeName] = entry
 	}
 	return gpuNodeOccupancyMap{entries: entries}
 }
@@ -852,6 +894,7 @@ func (api *gpuInventoryAPI) fetchPodOccupancyFromK8s(ctx context.Context, tenant
 			InstanceName: record.InstanceName,
 			NodeName:     record.NodeName,
 			Phase:        "Running",
+			GPUCount:     record.GPUCount,
 		})
 	}
 	return pods

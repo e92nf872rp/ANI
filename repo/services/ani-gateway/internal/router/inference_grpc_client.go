@@ -28,6 +28,13 @@ type InferenceControlClient interface {
 	ListInferenceServiceLogs(ctx context.Context, tenantID, serviceID string, limit int32, cursor, level string) (*inferencecontrolv1.ListInferenceServiceLogsResponse, error)
 }
 
+// InferenceServicesPagedClient is implemented by the real gRPC client. It is
+// optional so overview and existing test doubles can keep using the tenant-only
+// list call while the public list route carries its query contract end to end.
+type InferenceServicesPagedClient interface {
+	ListInferenceServicesPage(ctx context.Context, tenantID string, req *inferencecontrolv1.ListInferenceServicesRequest) (*inferencecontrolv1.ListInferenceServicesResponse, error)
+}
+
 // InferencePolicyClient is optional so existing inference test doubles remain compatible.
 type InferencePolicyClient interface {
 	ListInferenceAccessPolicies(context.Context, string) (*inferencecontrolv1.ListInferenceAccessPoliciesResponse, error)
@@ -70,6 +77,16 @@ func (c *inferenceGRPCClient) ListInferenceServices(ctx context.Context, tenantI
 	callCtx, cancel := c.callCtx(ctx)
 	defer cancel()
 	return c.client.ListInferenceServices(callCtx, &inferencecontrolv1.ListInferenceServicesRequest{TenantId: tenantID})
+}
+
+func (c *inferenceGRPCClient) ListInferenceServicesPage(ctx context.Context, tenantID string, req *inferencecontrolv1.ListInferenceServicesRequest) (*inferencecontrolv1.ListInferenceServicesResponse, error) {
+	if req == nil {
+		req = &inferencecontrolv1.ListInferenceServicesRequest{}
+	}
+	req.TenantId = tenantID
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ListInferenceServices(callCtx, req)
 }
 
 func (c *inferenceGRPCClient) CreateInferenceService(ctx context.Context, tenantID string, req *inferencecontrolv1.CreateInferenceServiceRequest) (*inferencecontrolv1.InferenceService, error) {

@@ -35,6 +35,18 @@ type MutationRequest struct {
 	Now            time.Time
 }
 
+type ListServicesQuery struct {
+	Status     string
+	Capability string
+	Limit      int32
+	Offset     int32
+}
+
+type ListServicesPage struct {
+	Items   []domain.Service
+	HasNext bool
+}
+
 // MutationResult 带 TransitionDisposition：新建、重放或已是目标态。
 type MutationResult struct {
 	Service     domain.Service
@@ -163,6 +175,19 @@ type ControlStore interface {
 	AbortPendingMutation(context.Context, MutationAbort) error
 }
 
+// PagedControlStore is an optional extension of ControlStore. Keeping the
+// tenant-only ListServices method preserves overview callers and simple stores.
+type PagedControlStore interface {
+	ListServicesPage(context.Context, uuid.UUID, ListServicesQuery) (ListServicesPage, error)
+}
+
+// ServedModelResolver is an optional indexed lookup used by internal endpoint
+// discovery. It intentionally does not require AI Gateway publication because
+// cluster-internal callers connect to the workload Service directly.
+type ServedModelResolver interface {
+	ResolveRunningServiceByServedModelName(context.Context, uuid.UUID, string) (domain.Service, error)
+}
+
 // AccessPolicyStore 是推理访问策略控制面和数据面检查共用的持久化边界。
 // 实现必须在每次调用的事务内设置 app.current_tenant_id，禁止跨租户查询。
 type AccessPolicyStore interface {
@@ -176,7 +201,4 @@ type AccessPolicyStore interface {
 	ListAccessPolicyEvents(context.Context, uuid.UUID, domain.AccessPolicyEventQuery) ([]domain.AccessPolicyEvent, string, error)
 	RecordAccessPolicyEvent(context.Context, domain.AccessPolicyEvent) error
 	ResolvePublishedService(context.Context, uuid.UUID, string) (domain.Service, error)
-	// GetService supports the legacy service_id lookup path of the internal
-	// endpoint resolver (inference.internal.v1). Tenant-scoped.
-	GetService(context.Context, uuid.UUID, uuid.UUID) (domain.Service, error)
 }

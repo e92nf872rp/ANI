@@ -195,6 +195,8 @@ func TestParseGPUCount(t *testing.T) {
 		want int
 	}{
 		{"normal", []byte(`{"count": 4}`), 4},
+		{"upper_count", []byte(`{"Count": 1}`), 1},                       // GPUInstanceStatus 直序列化（Go 字段名大写）
+		{"upper_count_multi", []byte(`{"SpecID":"sp-1","Count": 8}`), 8}, // 完整 GPUInstanceStatus 序列化
 		{"missing", []byte(`{}`), 0},
 		{"null", []byte(`null`), 0},
 		{"empty", []byte(``), 0},

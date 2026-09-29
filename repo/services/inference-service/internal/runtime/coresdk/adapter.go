@@ -472,7 +472,7 @@ func isModelDirectoryObjectRef(raw string) bool {
 }
 
 // acceleratorBody 把推理加速器映射到 Core platform-workloads。
-// spec_id 是型号；count 是卡数；memory>0 才带上，表示 vGPU 显存（MiB）。
+// spec_id 是 GPUSpec ID；count 是卡数；memory>0 才带上，表示 vGPU 显存（MiB）。
 func acceleratorBody(acc *domain.Accelerator, count int) map[string]any {
 	if acc == nil {
 		return nil
@@ -683,9 +683,23 @@ func capabilityViewFromPayload(payload map[string]any) runtime.CapabilityView {
 			SpecID:             fmt.Sprint(item["spec_id"]),
 			Available:          boolFromAny(item["available"]),
 			MaxSingleNodeCount: intFromAny(item["max_single_node_count"]),
+			GPUMode:            fmt.Sprint(item["gpu_mode"]),
+			MemoryPerShareMB:   intFromAny(item["memory_per_share_mib"]),
+			Aliases:            stringSliceFromAny(item["aliases"]),
 		})
 	}
 	return view
+}
+
+func stringSliceFromAny(value any) []string {
+	items, _ := value.([]any)
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
 }
 
 func anySlice(value any) []any {

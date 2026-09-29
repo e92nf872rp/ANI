@@ -231,65 +231,6 @@ func TestCheckAccessReturnsDenyForAllowlistMiss(t *testing.T) {
 	}
 }
 
-func TestResolveInternalEndpointPrefersServedModelName(t *testing.T) {
-	tenantID := uuid.New()
-	store := &policyStoreFake{}
-	store.addPublished(tenantID, uuid.New(), "qwen3-embedding-0.6b", domain.InferenceTaskEmbed)
-	svc := NewAccessPolicyService(store, nil, nil)
-
-	resource, err := svc.ResolveInternalEndpoint(context.Background(), tenantID, "qwen3-embedding-0.6b", "not-a-uuid")
-	if err != nil {
-		t.Fatalf("ResolveInternalEndpoint() error = %v", err)
-	}
-	if resource.ServedModelName != "qwen3-embedding-0.6b" || resource.DesiredSpec.ExecutionProfile.Task != domain.InferenceTaskEmbed {
-		t.Fatalf("resource=%+v", resource)
-	}
-}
-
-func TestResolveInternalEndpointFallsBackToServiceID(t *testing.T) {
-	tenantID := uuid.New()
-	id := uuid.New()
-	store := &policyStoreFake{services: map[uuid.UUID]domain.Service{
-		id: {ID: id, TenantID: tenantID, ServedModelName: "qwen3.5-0.8b", Status: domain.StatusRunning,
-			DesiredSpec: domain.Spec{ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskGenerate}}},
-	}}
-	svc := NewAccessPolicyService(store, nil, nil)
-
-	resource, err := svc.ResolveInternalEndpoint(context.Background(), tenantID, "", id.String())
-	if err != nil {
-		t.Fatalf("ResolveInternalEndpoint() error = %v", err)
-	}
-	if resource.ID != id || resource.ServedModelName != "qwen3.5-0.8b" {
-		t.Fatalf("resource=%+v", resource)
-	}
-}
-
-func TestResolveInternalEndpointRejectsEmptyKeys(t *testing.T) {
-	svc := NewAccessPolicyService(&policyStoreFake{}, nil, nil)
-	if _, err := svc.ResolveInternalEndpoint(context.Background(), uuid.New(), "  ", ""); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("err = %v, want ErrInvalidInput", err)
-	}
-	if _, err := svc.ResolveInternalEndpoint(context.Background(), uuid.Nil, "m", ""); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("err = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestValidateInternalEndpoint(t *testing.T) {
-	running := domain.Service{Status: domain.StatusRunning, RuntimeEndpoint: "http://pw-x.svc:8000"}
-	if err := ValidateInternalEndpoint(running); err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if err := ValidateInternalEndpoint(domain.Service{Status: domain.StatusDeploying, RuntimeEndpoint: "http://pw-x.svc:8000"}); !errors.Is(err, ErrInferenceServiceNotReady) {
-		t.Fatalf("err = %v, want ErrInferenceServiceNotReady", err)
-	}
-	if err := ValidateInternalEndpoint(domain.Service{Status: domain.StatusRunning}); !errors.Is(err, ErrRuntimeEndpointMissing) {
-		t.Fatalf("err = %v, want ErrRuntimeEndpointMissing", err)
-	}
-	if err := ValidateInternalEndpoint(domain.Service{Status: domain.StatusRunning, RuntimeEndpoint: "pw-x.svc:8000"}); !errors.Is(err, ErrRuntimeEndpointInvalid) {
-		t.Fatalf("err = %v, want ErrRuntimeEndpointInvalid", err)
-	}
-}
-
 func TestCheckAccessReturnsRateLimited(t *testing.T) {
 	in := accessInput()
 	store := &policyStoreFake{policies: []domain.AccessPolicy{{ID: uuid.New(), TenantID: in.TenantID, Status: domain.AccessPolicyEnabled, Priority: 1, Scope: domain.AccessPolicyScope{Type: domain.ScopeInferenceService, InferenceServiceIDs: []uuid.UUID{in.InferenceServiceID}}, Access: domain.AccessPolicyAccess{AllowAllTenantKeys: true}, RateLimits: domain.AccessPolicyRateLimits{RPM: 1}}}}

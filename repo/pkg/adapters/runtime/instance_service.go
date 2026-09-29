@@ -49,6 +49,11 @@ type LocalInstanceService struct {
 	// storeTx writes instance status inside the same tenant transaction as
 	// the quota Cancel+Release on Delete.
 	storeTx ports.WorkloadInstanceStoreTx
+	// outboxWriter emits instance lifecycle events inside the same tenant
+	// transaction as lifecycle status writes (plan.md §6.3.2). nil skips
+	// outbox events. Independent of GPU_QUOTA_ENABLED: metering-service is
+	// event-driven and needs API lifecycle transitions even when quota is off.
+	outboxWriter OutboxWriter
 }
 
 type InstanceServiceOption func(*LocalInstanceService)
@@ -122,6 +127,15 @@ func WithInstanceMetadataStore(store ports.MetadataStore) InstanceServiceOption 
 func WithInstanceStoreTx(storeTx ports.WorkloadInstanceStoreTx) InstanceServiceOption {
 	return func(s *LocalInstanceService) {
 		s.storeTx = storeTx
+	}
+}
+
+// WithInstanceOutboxWriter injects the outbox event writer used to emit
+// lifecycle events inside the same tenant transaction as lifecycle status
+// writes. Independent of GPU_QUOTA_ENABLED.
+func WithInstanceOutboxWriter(w OutboxWriter) InstanceServiceOption {
+	return func(s *LocalInstanceService) {
+		s.outboxWriter = w
 	}
 }
 
@@ -1248,8 +1262,9 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	return record, nil
 }
 
-// persistLifecycleWithQuota writes the lifecycle status update and handles
-// quota for two cases (SPEC §5.1):
+// persistLifecycleWithQuota writes the lifecycle status update, emits the
+// lifecycle outbox event (plan.md §6.3.2) and handles quota for two cases
+// (SPEC §5.1):
 //
 //   - Delete: atomically releases both reserved and used quota (Cancel +
 //     Release double-call, state-independent) in the same tenant transaction.
@@ -1260,23 +1275,29 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 //     TryManyTx's SQL WHERE guard (reserved+used+request <= total) prevents
 //     oversell.
 //
-// For all other actions it falls back to the plain store.UpsertStatus path.
+// The outbox write is independent of GPU_QUOTA_ENABLED: metering-service is
+// event-driven and needs API lifecycle transitions (delete/stop/start) even
+// when quota is disabled. All other actions fall back to the plain
+// store.UpsertStatus path (no lifecycle event, no quota action).
 func (s *LocalInstanceService) persistLifecycleWithQuota(ctx context.Context, record ports.WorkloadInstanceRecord, action ports.WorkloadLifecycleAction, previous ports.WorkloadState) error {
+	eventType := lifecycleOutboxEvent(action)
+	hasTx := s.metadataStore != nil && s.storeTx != nil
+
 	// Delete: Cancel + Release double-call (existing logic).
 	if action == ports.WorkloadLifecycleDelete {
-		if s.quotaService == nil || s.metadataStore == nil || s.storeTx == nil {
-			return s.store.UpsertStatus(ctx, record)
-		}
-		if len(record.QuotaTxIDs) == 0 {
+		if !hasTx {
 			return s.store.UpsertStatus(ctx, record)
 		}
 		return s.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
-			if err := s.quotaService.Cancel(txCtx, tx, record.QuotaTxIDs); err != nil {
-				return err
+			if s.quotaService != nil && len(record.QuotaTxIDs) > 0 {
+				if err := s.quotaService.Cancel(txCtx, tx, record.QuotaTxIDs); err != nil {
+					return err
+				}
+				if err := s.quotaService.Release(txCtx, tx, record.QuotaTxIDs); err != nil {
+					return err
+				}
 			}
-			if err := s.quotaService.Release(txCtx, tx, record.QuotaTxIDs); err != nil {
-				return err
-			}
+			writeInstanceOutboxTx(txCtx, tx, s.outboxWriter, eventType, record)
 			return s.storeTx.UpsertStatusTx(txCtx, tx, record)
 		})
 	}
@@ -1285,29 +1306,56 @@ func (s *LocalInstanceService) persistLifecycleWithQuota(ctx context.Context, re
 	// Both actions transition failed→running; without re-acquiring quota the
 	// instance would run with stale (released) QuotaTxIDs.
 	if (action == ports.WorkloadLifecycleStart || action == ports.WorkloadLifecycleRollback) && previous == ports.WorkloadStateFailed {
-		if s.quotaService == nil || s.metadataStore == nil || s.storeTx == nil {
+		if !hasTx {
 			return s.store.UpsertStatus(ctx, record)
 		}
-		// GPU count from the instance record; default 1.
-		gpuCount := 1
-		if record.GPU != nil && record.GPU.Count > 0 {
-			gpuCount = record.GPU.Count
-		}
 		return s.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
-			reservations, err := s.quotaService.TryManyTx(txCtx, tx, []ports.QuotaTryRequest{{
-				TenantID:     record.TenantID,
-				ResourceType: ports.QuotaGPUCount,
-				Amount:       int64(gpuCount),
-			}})
-			if err != nil {
-				return err
+			if s.quotaService != nil {
+				// GPU count from the instance record; default 1.
+				gpuCount := 1
+				if record.GPU != nil && record.GPU.Count > 0 {
+					gpuCount = record.GPU.Count
+				}
+				reservations, err := s.quotaService.TryManyTx(txCtx, tx, []ports.QuotaTryRequest{{
+					TenantID:     record.TenantID,
+					ResourceType: ports.QuotaGPUCount,
+					Amount:       int64(gpuCount),
+				}})
+				if err != nil {
+					return err
+				}
+				record.QuotaTxIDs = reservationTxIDs(reservations)
 			}
-			record.QuotaTxIDs = reservationTxIDs(reservations)
+			writeInstanceOutboxTx(txCtx, tx, s.outboxWriter, eventType, record)
 			return s.storeTx.UpsertStatusTx(txCtx, tx, record)
 		})
 	}
 
-	return s.store.UpsertStatus(ctx, record)
+	// Other actions: only the metering-relevant ones (stop) carry a lifecycle
+	// event; those persist + emit inside a tenant transaction when available.
+	if eventType == "" || !hasTx {
+		return s.store.UpsertStatus(ctx, record)
+	}
+	return s.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
+		writeInstanceOutboxTx(txCtx, tx, s.outboxWriter, eventType, record)
+		return s.storeTx.UpsertStatusTx(txCtx, tx, record)
+	})
+}
+
+// lifecycleOutboxEvent maps an API lifecycle action to the outbox event_type.
+// Empty string means the action carries no lifecycle event. The metering
+// consumer routes on the payload new_status, not the event_type.
+func lifecycleOutboxEvent(action ports.WorkloadLifecycleAction) string {
+	switch action {
+	case ports.WorkloadLifecycleDelete:
+		return "instance.deleted"
+	case ports.WorkloadLifecycleStop:
+		return "instance.stopped"
+	case ports.WorkloadLifecycleStart, ports.WorkloadLifecycleRestart, ports.WorkloadLifecycleRollback:
+		return "instance.started"
+	default:
+		return ""
+	}
 }
 
 // SandboxExecutionContextFromRecord validates and projects the durable instance

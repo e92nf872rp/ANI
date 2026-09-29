@@ -110,6 +110,7 @@ func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (c
 		ID:             parsedVersionID,
 		ModelID:        modelID,
 		DisplayName:    displayName(model, version),
+		Capabilities:   normalizeCapabilities(model.GetCapabilities()),
 		Ready:          strings.EqualFold(strings.TrimSpace(model.GetStatus()), "ready"),
 		Format:         strings.TrimSpace(version.GetFormat()),
 		SizeBytes:      version.GetSizeBytes(),
@@ -148,6 +149,23 @@ func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (c
 		return catalog.ModelVersion{}, catalog.ErrNoCompatibleProfile
 	}
 	return out, nil
+}
+
+func normalizeCapabilities(capabilities []string) []string {
+	seen := make(map[string]struct{}, len(capabilities))
+	result := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		capability = strings.ToLower(strings.TrimSpace(capability))
+		if capability == "" {
+			continue
+		}
+		if _, ok := seen[capability]; ok {
+			continue
+		}
+		seen[capability] = struct{}{}
+		result = append(result, capability)
+	}
+	return result
 }
 
 func (p Profiles) validate() error {

@@ -10,8 +10,7 @@
 |---|---|---|
 | 对上（前端/Gateway） | `kb.v1`（`kb_service.proto`）+ `common.v1`（`common.proto`） | **归 kb 仓库**；拆分后由 kb-service 持有源与生成 |
 | 对 rag-engine | `rag.v1`（`rag.proto`：Parse/Embed/Generate/GenerateStream） | 与 rag-engine **共同 pin 同一版本**（两侧源 byte-identical） |
-| 对 inference-service | `inference.control.v1`（`inference_control.proto`：`ResolveInferenceServiceEndpoint`） | 与 Go 侧 `api/proto/` **共同 pin 同一版本**（两侧源 byte-identical）；旧兼容路径，见 §6 |
-| 对 inference-service（内部直连） | `inference.internal.v1`（`inference_internal.proto`：`ResolveInternalEndpoint`） | 与 Go 侧 `api/proto/` **共同 pin 同一版本**；模型直连解析首选路径，见 §6 |
+| 对 inference-service（内部直连） | `inference.internal.v1`（`inference_endpoint_resolver.proto`：`ResolveInternalEndpoint`） | 与 Go 侧 `api/proto/` **共同 pin 同一版本**；模型直连解析唯一路径，见 §6 |
 | 对 Core | 无 | **无调用即无契约**（D3），见 §5 |
 
 **阶段边界**：`app/generated/` 散复制件的**删除**属阶段 5（ADR §五-阶段5 不带入清单）；阶段 2 只做
@@ -26,18 +25,16 @@ kb-service 侧 proto 源是拆分事务的**单一真源**：
 services/kb-service/proto/kb/v1/kb_service.proto     # kb.v1（对上）
 services/kb-service/proto/common/v1/common.proto     # common.v1（对上）
 services/kb-service/proto/rag/v1/rag.proto           # rag.v1（对 rag-engine）
-services/kb-service/proto/inference/control/v1/inference_control.proto  # inference.control.v1（对 inference-service，旧兼容）
-services/kb-service/proto/inference/internalendpoint/v1/inference_internal.proto  # inference.internal.v1（对 inference-service 内部直连）
+services/kb-service/proto/inference/resolver/v1/inference_endpoint_resolver.proto  # inference.internal.v1（对 inference-service 内部直连）
 ```
 
 对应镜像（必须与上表逐字节一致，由 `tests/test_proto_contract.py` 断言）：
 
 - `api/proto/kb/v1/kb_service.proto`、`api/proto/common/v1/common.proto`（Go 侧契约源）
 - `ai/rag-engine/app/grpc/rag.proto`（rag-engine 侧源）
-- `api/proto/inference/control/v1/inference_control.proto`（Go 侧契约源）
-- `api/proto/inference/internalendpoint/v1/inference_internal.proto`（Go 侧契约源；
-  文件目录 `internalendpoint` 仅为避开 Go `internal` 包可见性限制，proto 包名保持
-  `inference.internal.v1`，wire 契约与包名一致）
+- `api/proto/inference/resolver/v1/inference_endpoint_resolver.proto`（Go 侧契约源；
+  文件目录跟随上游 Go 生成物路径 `resolver/v1`，proto 包名保持
+  `inference.internal.v1`，服务 `InferenceEndpointResolver`，wire 契约与包名一致）
 
 **pin = 两侧源 byte-identical（sha256 一致）**。任一侧修改必须同步另一侧，否则契约测试失败。
 同意变更流程：改 kb-service 侧源 → 同步镜像 → 重新生成生成物（§3）→ 双侧契约测试通过。
@@ -83,25 +80,19 @@ python -m grpc_tools.protoc \
   --python_out=app/rag_engine --pyi_out=app/rag_engine --grpc_python_out=app/rag_engine \
   proto/rag/v1/rag.proto
 
-# inference.control.v1 → app/generated/
-python -m grpc_tools.protoc \
-  -I proto \
-  --python_out=app/generated --pyi_out=app/generated --grpc_python_out=app/generated \
-  proto/inference/control/v1/inference_control.proto
-
 # inference.internal.v1 → app/generated/
 python -m grpc_tools.protoc \
   -I proto \
   --python_out=app/generated --pyi_out=app/generated --grpc_python_out=app/generated \
-  proto/inference/internalendpoint/v1/inference_internal.proto
+  proto/inference/resolver/v1/inference_endpoint_resolver.proto
 ```
 
 `-I proto` 使 `common/v1/common.proto` 以 `from common.v1 import common_pb2` 形式生成
-（kb/common 生成物为**包内绝对导入**）；`inference.control.v1` 与 `inference.internal.v1`
-同样以 `-I proto` 生成（`from inference.control.v1 / inference.internal.v1 import ...`，
-生成物落点 `app/generated/inference/{control,internalendpoint}/v1/`——目录跟随文件路径，
-Python 包路径不受 Go 侧 `internalendpoint` 目录命名影响）；`rag.proto` 单独以
-`-I proto/rag/v1` 生成，产出裸 `rag_pb2.py`（**不含包路径**），供 `app/rag_engine/` 包内使用。
+（kb/common 生成物为**包内绝对导入**）；`inference.internal.v1`（resolver）同样以
+`-I proto` 生成（`from inference.resolver.v1 import ...`，生成物落点
+`app/generated/inference/resolver/v1/`——目录跟随文件路径，Python 包路径与上游 Go
+生成物路径一致）；`rag.proto` 单独以 `-I proto/rag/v1` 生成，产出裸 `rag_pb2.py`
+（**不含包路径**），供 `app/rag_engine/` 包内使用。
 
 ### 3.3 生成后修正（rag_pb2_grpc.py 相对导入）
 
@@ -118,12 +109,11 @@ from . import rag_pb2 as rag__pb2
 
 ### 3.4 可复现性
 
-以锁定版本按 §3.2/§3.3 重生成，与仓库现有 tracked 生成物**逐字节一致**（15 份全等：
+以锁定版本按 §3.2/§3.3 重生成，与仓库现有 tracked 生成物**逐字节一致**（12 份全等：
 `kb_service_pb2.py` / `kb_service_pb2.pyi` / `kb_service_pb2_grpc.py`、
 `common_pb2.py` / `common_pb2.pyi` / `common_pb2_grpc.py`、
 `rag_pb2.py` / `rag_pb2.pyi` / `rag_pb2_grpc.py`、
-`inference_control_pb2.py` / `inference_control_pb2.pyi` / `inference_control_pb2_grpc.py`、
-`inference_internal_pb2.py` / `inference_internal_pb2.pyi` / `inference_internal_pb2_grpc.py`）。该一致性由
+`inference_endpoint_resolver_pb2.py` / `inference_endpoint_resolver_pb2.pyi` / `inference_endpoint_resolver_pb2_grpc.py`）。该一致性由
 `tests/test_proto_contract.py::test_generated_artifacts_match_proto_source` 强制
 （改了 proto 源必须重新生成并提交，否则运行时加载的是旧契约）。
 
@@ -176,15 +166,12 @@ kb-service 以 `(tenant_id, served_model_name)` 调用 inference-service 的内�
 - **模型即租户边界**：`inference_services(tenant_id, served_model_name)` 部分唯一索引保证
   同租户内 active 模型名唯一对应一个服务；kb 侧按模型分别解析（Embed 用 `kb.embedding_model`，
   Generate 用问答模型 / 解析摘要用 `kb.default_inference_service`），每次调用都重新解析（不缓存）。
-- **旧兼容**：`inference.control.v1` 的 `ResolveInferenceServiceEndpoint` 仍保留
-  （server 侧按 `service_id` 查询兼容），但 kb-service 新代码一律走 internal.v1 按
-  `served_model_name` 解析。
 - **网络前置**：NetworkPolicy 须放行 kb-service → `inference-service:9104` 与
   kb-service → 返回的推理 SVC `:8000`。
 - **不外发**：`base_url` 属集群内部地址，inference-service 对租户面
   （`InferenceService.invocation_url`）刻意不暴露；本 RPC 仅供服务间调用。
 - **契约来源**：kb-service 侧源
-  `services/kb-service/proto/inference/internalendpoint/v1/inference_internal.proto` 与 Go 侧镜像
-  `api/proto/inference/internalendpoint/v1/inference_internal.proto` 逐字节一致，由 §1/§2 的 pin 断言强制
-  （文件目录 `internalendpoint` 仅为避开 Go `internal` 包可见性限制，proto 包名保持
-  `inference.internal.v1`）。
+  `services/kb-service/proto/inference/resolver/v1/inference_endpoint_resolver.proto` 与 Go 侧镜像
+  `api/proto/inference/resolver/v1/inference_endpoint_resolver.proto` 逐字节一致，由 §1/§2 的 pin 断言强制
+  （proto 包名 `inference.internal.v1`，服务 `InferenceEndpointResolver`；上游 #196 起，
+  旧 `inference.control.v1 ResolveInferenceServiceEndpoint` 临时兼容路径已从双侧移除）。

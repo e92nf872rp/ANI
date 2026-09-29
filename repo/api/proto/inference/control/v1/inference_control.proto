@@ -29,19 +29,20 @@ service InferenceControl {
   rpc ListInferencePolicyEvents(ListInferencePolicyEventsRequest) returns (InferencePolicyEventListResponse);
   rpc CheckInferenceAccess(CheckInferenceAccessRequest) returns (CheckInferenceAccessResponse);
   rpc ReleaseInferenceAccessLease(ReleaseInferenceAccessLeaseRequest) returns (ReleaseInferenceAccessLeaseResponse);
-  // ResolveInferenceServiceEndpoint is a service-to-service internal API used by
-  // core data-plane services (for example kb-service) to resolve a published
-  // served_model_name to its cluster runtime endpoint. The endpoint is never
-  // returned to tenants; it must not be exposed through the Gateway surface.
-  rpc ResolveInferenceServiceEndpoint(ResolveInferenceServiceEndpointRequest) returns (ResolveInferenceServiceEndpointResponse);
 }
 
 message ListInferenceServicesRequest {
   string tenant_id = 1;
+  string status = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+  string cursor = 5;
+  string capability = 6;
 }
 
 message ListInferenceServicesResponse {
   repeated InferenceService items = 1;
+  string next_cursor = 2;
 }
 
 message CreateInferenceServiceRequest {
@@ -136,6 +137,8 @@ message InferenceService {
   string image_ref = 22;
   InferenceServiceEngine engine = 23;
   string invocation_url = 24;
+  string task = 25;
+  repeated string capabilities = 26;
 }
 
 message InferenceServiceEngine {
@@ -248,12 +251,3 @@ message CheckInferenceAccessResponse {
 }
 message ReleaseInferenceAccessLeaseRequest { string tenant_id = 1; string lease_id = 2; }
 message ReleaseInferenceAccessLeaseResponse {}
-
-message ResolveInferenceServiceEndpointRequest {
-  string tenant_id = 1;
-  string served_model_name = 2;
-}
-message ResolveInferenceServiceEndpointResponse {
-  string inference_service_id = 1;
-  string runtime_endpoint = 2;
-}

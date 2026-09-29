@@ -78,64 +78,6 @@ func NewAccessPolicyService(store repository.AccessPolicyStore, limiter RateLimi
 	return &AccessPolicyService{store: store, limiter: limiter, now: now}
 }
 
-// ResolveRuntimeEndpoint resolves a published served_model_name to the cluster
-// runtime endpoint of the owning service. It is used by internal data-plane
-// callers (kb-service) and must never be surfaced to tenants.
-func (s *AccessPolicyService) ResolveRuntimeEndpoint(ctx context.Context, tenantID uuid.UUID, servedModelName string) (domain.Service, error) {
-	if tenantID == uuid.Nil {
-		return domain.Service{}, repository.ErrNotFound
-	}
-	if s.store == nil {
-		return domain.Service{}, ErrPolicyUnavailable
-	}
-	return s.store.ResolvePublishedService(ctx, tenantID, strings.TrimSpace(servedModelName))
-}
-
-// 内部 endpoint 解析器（inference.internal.v1）的语义化错误：由 grpcapi
-// mapError 映射为 gRPC code + 文本错误码。
-var (
-	ErrInferenceServiceNotReady = errors.New("INFERENCE_SERVICE_NOT_READY")
-	ErrRuntimeEndpointMissing   = errors.New("RUNTIME_ENDPOINT_MISSING")
-	ErrRuntimeEndpointInvalid   = errors.New("RUNTIME_ENDPOINT_INVALID")
-)
-
-// ResolveInternalEndpoint resolves an inference service for internal
-// data-plane callers (kb-service). Lookup key: served_model_name (preferred);
-// service_id is the legacy fallback used only when the name is empty.
-func (s *AccessPolicyService) ResolveInternalEndpoint(ctx context.Context, tenantID uuid.UUID, servedModelName, serviceID string) (domain.Service, error) {
-	if tenantID == uuid.Nil {
-		return domain.Service{}, ErrInvalidInput
-	}
-	if s.store == nil {
-		return domain.Service{}, ErrPolicyUnavailable
-	}
-	name := strings.TrimSpace(servedModelName)
-	if name != "" {
-		return s.store.ResolvePublishedService(ctx, tenantID, name)
-	}
-	id, err := uuid.Parse(strings.TrimSpace(serviceID))
-	if err != nil {
-		return domain.Service{}, ErrInvalidInput
-	}
-	return s.store.GetService(ctx, tenantID, id)
-}
-
-// ValidateInternalEndpoint enforces the internal resolver contract: the
-// service must be running and carry a usable runtime base URL.
-func ValidateInternalEndpoint(resource domain.Service) error {
-	if resource.Status != domain.StatusRunning {
-		return ErrInferenceServiceNotReady
-	}
-	endpoint := strings.TrimSpace(resource.RuntimeEndpoint)
-	if endpoint == "" {
-		return ErrRuntimeEndpointMissing
-	}
-	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		return ErrRuntimeEndpointInvalid
-	}
-	return nil
-}
-
 func (s *AccessPolicyService) CheckAccess(ctx context.Context, in AccessCheckInput) (AccessDecision, error) {
 	if in.TenantID == uuid.Nil || in.APIKeyID == uuid.Nil {
 		return AccessDecision{Decision: "deny", HTTPStatus: 403, ReasonCode: "INVALID_IDENTITY"}, nil

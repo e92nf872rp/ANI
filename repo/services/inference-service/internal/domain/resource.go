@@ -91,8 +91,8 @@ const (
 
 // Accelerator 引用 Core 加速器。nil 表示 CPU 推理。
 type Accelerator struct {
-	// SpecID 是 GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。
-	// 只表示型号，不表示整卡或 vGPU。历史 -full / -Nx 剥后缀后仍按型号处理。
+	// SpecID 是 Core GPUSpec ID，例如 rtx4090-12g-4。旧节点型号 ID
+	// 仅在迁移期作为兼容输入，不应由新客户端生成。
 	SpecID string `json:"spec_id"`
 	// CountPerReplica 是每个副本申请的卡数。整卡和 vGPU 都必填，最小 1。
 	CountPerReplica int `json:"count_per_replica"`
@@ -108,6 +108,7 @@ type ExecutionProfile struct {
 	Version         string                `json:"version"`
 	Runtime         string                `json:"runtime"` // vllm | sglang
 	Task            InferenceTask         `json:"task,omitempty"`
+	Capabilities    []string              `json:"capabilities,omitempty"`
 	ImageID         string                `json:"image_id,omitempty"`
 	ImageRef        string                `json:"image_ref"`
 	ArtifactRef     string                `json:"artifact_ref"` // pvc://...#/models/...

@@ -36,11 +36,11 @@ from dataclasses import dataclass
 
 import grpc
 
-from app.generated.inference.internalendpoint.v1 import (
-    inference_internal_pb2 as _pb,
+from app.generated.inference.resolver.v1 import (
+    inference_endpoint_resolver_pb2 as _pb,
 )
-from app.generated.inference.internalendpoint.v1 import (
-    inference_internal_pb2_grpc as _pb_grpc,
+from app.generated.inference.resolver.v1 import (
+    inference_endpoint_resolver_pb2_grpc as _pb_grpc,
 )
 
 _NOT_READY_RETRY_DELAY_SECONDS = 0.5

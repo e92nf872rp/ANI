@@ -85,3 +85,59 @@ func TestPodRequestsGPUReadsLimitsOnly(t *testing.T) {
 		})
 	}
 }
+
+// TestPodGPUCountSumsContainersAndFallsBackToOne 锁定 GPU 数量口径：
+// 多卡 Pod（nvidia.com/gpu=2）占 2 台设备；多容器 limits 之和；vGPU Pod 按
+// volcano.sh/vgpu-number；解析失败/缺失保守按 1（与旧「每 Pod 1 设备」一致）。
+func TestPodGPUCountSumsContainersAndFallsBackToOne(t *testing.T) {
+	spec := func(limits map[string]string) kubernetesPodContainerSpec {
+		s := kubernetesPodContainerSpec{}
+		s.Resources.Limits = limits
+		return s
+	}
+	cases := []struct {
+		name       string
+		containers []kubernetesPodContainerSpec
+		want       int
+	}{
+		{"multi-gpu whole card", []kubernetesPodContainerSpec{spec(map[string]string{"nvidia.com/gpu": "2"})}, 2},
+		{"vgpu slice", []kubernetesPodContainerSpec{spec(map[string]string{"volcano.sh/vgpu-number": "1", "volcano.sh/vgpu-memory": "1228"})}, 1},
+		{"multi-container sums", []kubernetesPodContainerSpec{
+			spec(map[string]string{"nvidia.com/gpu": "1"}),
+			spec(map[string]string{"nvidia.com/gpu": "2"}),
+		}, 3},
+		{"invalid value falls back to one", []kubernetesPodContainerSpec{spec(map[string]string{"nvidia.com/gpu": "abc"})}, 1},
+		{"zero falls back to one", []kubernetesPodContainerSpec{spec(map[string]string{"nvidia.com/gpu": "0"})}, 1},
+		{"no gpu limits falls back to one", []kubernetesPodContainerSpec{spec(map[string]string{"cpu": "1"})}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := podGPUCount(tc.containers); got != tc.want {
+				t.Fatalf("podGPUCount = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseRunningGPUPodOccupancyCarriesGPUCount 端到端断言解析记录携带
+// GPUCount：整卡 2 卡 Pod → 2，vGPU 切片 → 1。
+func TestParseRunningGPUPodOccupancyCarriesGPUCount(t *testing.T) {
+	body := []byte(`{"items":[
+		{"metadata":{"namespace":"ani-tenant-t1","labels":{"ani.kubercloud.io/tenant-id":"t1","ani.kubercloud.io/instance":"multi-gpu"}},"spec":{"nodeName":"node-1","containers":[{"resources":{"limits":{"nvidia.com/gpu":"2"}}}]},"status":{"phase":"Running"}},
+		{"metadata":{"namespace":"ani-tenant-t2","labels":{"ani.kubercloud.io/tenant-id":"t2","ani.kubercloud.io/instance":"vgpu-slice"}},"spec":{"nodeName":"node-2","containers":[{"resources":{"limits":{"volcano.sh/vgpu-number":"1","volcano.sh/vgpu-memory":"1228"}}}]},"status":{"phase":"Running"}}
+	]}`)
+
+	records, err := ParseRunningGPUPodOccupancy(body)
+	if err != nil {
+		t.Fatalf("ParseRunningGPUPodOccupancy() error = %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2", len(records))
+	}
+	if records[0].GPUCount != 2 {
+		t.Fatalf("records[0].GPUCount = %d, want 2", records[0].GPUCount)
+	}
+	if records[1].GPUCount != 1 {
+		t.Fatalf("records[1].GPUCount = %d, want 1", records[1].GPUCount)
+	}
+}

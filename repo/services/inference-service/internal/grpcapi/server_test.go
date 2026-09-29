@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	inferencecontrolv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1"
-	inferenceinternalv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/internalendpoint/v1"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog"
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/repository"
@@ -51,6 +50,20 @@ type fakeController struct {
 	opView service.OperationView
 	op     domain.Operation
 	err    error
+}
+
+type pagedFakeController struct {
+	*fakeController
+	page service.ServicePage
+	err  error
+}
+
+func (f *pagedFakeController) ListPage(_ context.Context, tenantID uuid.UUID, query repository.ListServicesQuery) (service.ServicePage, error) {
+	f.tenant = tenantID
+	if query.Status != "running" || query.Limit != 1 || query.Offset != 1 {
+		return service.ServicePage{}, errors.New("unexpected list query")
+	}
+	return f.page, f.err
 }
 
 type fakeAccessPolicies struct {
@@ -140,104 +153,6 @@ func TestCheckInferenceAccessDelegatesTenantAndKeyIdentity(t *testing.T) {
 	}
 	if policies.input.TenantID != testTenant || policies.input.APIKeyID != keyID || policies.input.ServedModelName != "ani-c40-chat" || policies.input.KeyPrefix != "ani_live" {
 		t.Fatalf("input=%+v", policies.input)
-	}
-}
-
-func TestResolveInferenceServiceEndpointReturnsRuntimeEndpoint(t *testing.T) {
-	policies := &fakeAccessPolicies{resolved: domain.Service{ID: testService, RuntimeEndpoint: "http://pw-x.svc.cluster.local:8000"}}
-	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(policies)
-	response, err := server.ResolveInferenceServiceEndpoint(context.Background(), &inferencecontrolv1.ResolveInferenceServiceEndpointRequest{
-		TenantId: testTenant.String(), ServedModelName: "qwen3-embedding-0.6b",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.GetInferenceServiceId() != testService.String() || response.GetRuntimeEndpoint() != "http://pw-x.svc.cluster.local:8000" {
-		t.Fatalf("response=%+v", response)
-	}
-}
-
-func TestResolveInternalEndpointReturnsBaseURLAndTask(t *testing.T) {
-	policies := &fakeAccessPolicies{resolved: domain.Service{
-		ID: testService, Status: domain.StatusRunning, ServedModelName: "qwen3.5-0.8b",
-		RuntimeEndpoint: "http://pw-x.ani-tenant-t.svc.cluster.local:8000",
-		DesiredSpec:     domain.Spec{ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskGenerate}},
-	}}
-	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(policies)
-	response, err := server.ResolveInternalEndpoint(context.Background(), &inferenceinternalv1.ResolveInternalEndpointRequest{
-		TenantId: testTenant.String(), ServedModelName: "qwen3.5-0.8b",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.GetBaseUrl() != "http://pw-x.ani-tenant-t.svc.cluster.local:8000/v1" ||
-		response.GetServedModelName() != "qwen3.5-0.8b" ||
-		response.GetTask() != "generate" || response.GetStatus() != "running" {
-		t.Fatalf("response=%+v", response)
-	}
-}
-
-func TestResolveInternalEndpointAppendsV1OnlyForPathlessEndpoint(t *testing.T) {
-	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(&fakeAccessPolicies{})
-	cases := map[string]string{
-		"http://pw-x.svc.cluster.local:8000":     "http://pw-x.svc.cluster.local:8000/v1",
-		"http://pw-x.svc.cluster.local:8000/":    "http://pw-x.svc.cluster.local:8000/v1",
-		"http://pw-x.svc.cluster.local:8000/v1":  "http://pw-x.svc.cluster.local:8000/v1",
-		"http://pw-x.svc.cluster.local:8000/v1/": "http://pw-x.svc.cluster.local:8000/v1/",
-		"https://gw.example.com/api/openai/v1":   "https://gw.example.com/api/openai/v1",
-	}
-	for in, want := range cases {
-		policies := &fakeAccessPolicies{resolved: domain.Service{
-			ID: testService, Status: domain.StatusRunning, ServedModelName: "m",
-			RuntimeEndpoint: in,
-			DesiredSpec:     domain.Spec{ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskGenerate}},
-		}}
-		server := server.WithAccessPolicies(policies)
-		response, err := server.ResolveInternalEndpoint(context.Background(), &inferenceinternalv1.ResolveInternalEndpointRequest{
-			TenantId: testTenant.String(), ServedModelName: "m",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if response.GetBaseUrl() != want {
-			t.Fatalf("openAIBaseURL(%q) = %q, want %q", in, response.GetBaseUrl(), want)
-		}
-	}
-}
-
-func TestResolveInternalEndpointRequiresLookupKey(t *testing.T) {
-	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(&fakeAccessPolicies{})
-	_, err := server.ResolveInternalEndpoint(context.Background(), &inferenceinternalv1.ResolveInternalEndpointRequest{
-		TenantId: testTenant.String(),
-	})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("err = %v, want INVALID_ARGUMENT", err)
-	}
-}
-
-func TestResolveInternalEndpointMapsSemanticErrors(t *testing.T) {
-	cases := []struct {
-		name    string
-		err     error
-		want    codes.Code
-		message string
-	}{
-		{"not_found", repository.ErrNotFound, codes.NotFound, "NOT_FOUND"},
-		{"not_ready", service.ErrInferenceServiceNotReady, codes.FailedPrecondition, "INFERENCE_SERVICE_NOT_READY"},
-		{"endpoint_missing", service.ErrRuntimeEndpointMissing, codes.FailedPrecondition, "RUNTIME_ENDPOINT_MISSING"},
-		{"endpoint_invalid", service.ErrRuntimeEndpointInvalid, codes.FailedPrecondition, "RUNTIME_ENDPOINT_INVALID"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			server := NewServer(&fakeCreator{}, &fakeController{}).
-				WithAccessPolicies(&fakeAccessPolicies{internalErr: tc.err})
-			_, err := server.ResolveInternalEndpoint(context.Background(), &inferenceinternalv1.ResolveInternalEndpointRequest{
-				TenantId: testTenant.String(), ServedModelName: "qwen3.5-0.8b",
-			})
-			if status.Code(err) != tc.want || !strings.Contains(status.Convert(err).Message(), tc.message) {
-				t.Fatalf("err = %v, want %s %s", err, tc.want, tc.message)
-			}
-		})
 	}
 }
 
@@ -466,6 +381,67 @@ func TestListUsesTenantFromRequest(t *testing.T) {
 	}
 	if controller.tenant != testTenant || len(resp.GetItems()) != 1 {
 		t.Fatalf("tenant=%s items=%d", controller.tenant, len(resp.GetItems()))
+	}
+}
+
+func TestListInferenceServicesForwardsPagedQuery(t *testing.T) {
+	controller := &pagedFakeController{
+		fakeController: &fakeController{},
+		page:           service.ServicePage{Items: []service.ServiceView{{ID: testService, Name: "running", Status: domain.StatusRunning}}, HasNext: true},
+	}
+	server := NewServer(&fakeCreator{}, controller)
+	resp, err := server.ListInferenceServices(context.Background(), &inferencecontrolv1.ListInferenceServicesRequest{
+		TenantId: testTenant.String(), Status: "running", Capability: "embedding", Limit: 1, Offset: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controller.tenant != testTenant || len(resp.GetItems()) != 1 || resp.GetNextCursor() != "2" {
+		t.Fatalf("tenant=%s items=%d cursor=%q", controller.tenant, len(resp.GetItems()), resp.GetNextCursor())
+	}
+}
+
+func TestListInferenceServicesRejectsInvalidInternalQuery(t *testing.T) {
+	server := NewServer(&fakeCreator{}, &fakeController{})
+	for _, req := range []*inferencecontrolv1.ListInferenceServicesRequest{
+		{TenantId: testTenant.String(), Status: "unknown", Limit: 1},
+		{TenantId: testTenant.String(), Limit: 201},
+		{TenantId: testTenant.String(), Limit: 1, Offset: -1},
+		{TenantId: testTenant.String(), Limit: 1, Cursor: "abc"},
+		{TenantId: testTenant.String(), Limit: 1, Cursor: "4294967296"},
+	} {
+		_, err := server.ListInferenceServices(context.Background(), req)
+		assertStatus(t, err, codes.InvalidArgument, "INVALID_ARGUMENT")
+	}
+}
+
+func TestListInferenceServicesKeepsTenantOnlyListUnpaged(t *testing.T) {
+	first := service.ServiceView{ID: testService, Name: "first", Status: domain.StatusRunning}
+	second := service.ServiceView{ID: testOp, Name: "second", Status: domain.StatusStopped}
+	controller := &pagedFakeController{fakeController: &fakeController{list: []service.ServiceView{first, second}}}
+	server := NewServer(&fakeCreator{}, controller)
+	resp, err := server.ListInferenceServices(context.Background(), &inferencecontrolv1.ListInferenceServicesRequest{TenantId: testTenant.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetItems()) != 2 || resp.GetNextCursor() != "" {
+		t.Fatalf("items=%d cursor=%q", len(resp.GetItems()), resp.GetNextCursor())
+	}
+}
+
+func TestListInferenceServicesFallbackFiltersQuery(t *testing.T) {
+	first := service.ServiceView{ID: testService, Name: "first", Status: domain.StatusRunning}
+	second := service.ServiceView{ID: testOp, Name: "second", Status: domain.StatusRunning}
+	pending := service.ServiceView{ID: testModel, Name: "pending", Status: domain.StatusPending}
+	server := NewServer(&fakeCreator{}, &fakeController{list: []service.ServiceView{first, pending, second}})
+	resp, err := server.ListInferenceServices(context.Background(), &inferencecontrolv1.ListInferenceServicesRequest{
+		TenantId: testTenant.String(), Status: "running", Limit: 1, Offset: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetItems()) != 1 || resp.GetItems()[0].GetId() != second.ID.String() || resp.GetNextCursor() != "" {
+		t.Fatalf("items=%+v cursor=%q", resp.GetItems(), resp.GetNextCursor())
 	}
 }
 

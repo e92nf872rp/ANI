@@ -2,7 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             (unknown)
-// source: inference/internalendpoint/v1/inference_internal.proto
+// source: inference/resolver/v1/inference_endpoint_resolver.proto
+
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
 
 package inferenceinternalv1
 
@@ -106,5 +108,5 @@ var InferenceEndpointResolver_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "inference/internalendpoint/v1/inference_internal.proto",
+	Metadata: "inference/resolver/v1/inference_endpoint_resolver.proto",
 }

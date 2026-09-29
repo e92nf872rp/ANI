@@ -34,6 +34,7 @@ type fakePlatformLoginStore struct {
 		tokenHash string
 		roles     []string
 		expiresAt time.Time
+		loginAt   time.Time
 	}
 }
 
@@ -62,7 +63,7 @@ func (s *fakePlatformLoginStore) LoadRoles(context.Context, uuid.UUID) ([]string
 
 // FinalizeLogin 模拟事务化的"插入平台 refresh token + 更新 last_login_at"。
 // 用 insertErr/touchErr 分别控制两步失败，保持与原测试语义一致。
-func (s *fakePlatformLoginStore) FinalizeLogin(_ context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
+func (s *fakePlatformLoginStore) FinalizeLogin(_ context.Context, userID uuid.UUID, tokenHash string, roles []string, loginAt, expiresAt time.Time) error {
 	if s.insertErr != nil {
 		return s.insertErr
 	}
@@ -70,6 +71,7 @@ func (s *fakePlatformLoginStore) FinalizeLogin(_ context.Context, userID uuid.UU
 	s.insertArgs.tokenHash = tokenHash
 	s.insertArgs.roles = roles
 	s.insertArgs.expiresAt = expiresAt
+	s.insertArgs.loginAt = loginAt
 	if s.touchErr != nil {
 		return s.touchErr
 	}
@@ -111,6 +113,12 @@ func TestPlatformPasswordLogin_Success(t *testing.T) {
 	}
 	if len(store.insertArgs.roles) != 1 || store.insertArgs.roles[0] != "platform-admin" {
 		t.Fatalf("insert roles = %v", store.insertArgs.roles)
+	}
+	if !store.insertArgs.loginAt.Equal(now) {
+		t.Fatalf("loginAt = %v, want %v", store.insertArgs.loginAt, now)
+	}
+	if !store.insertArgs.expiresAt.Equal(now.Add(defaultRefreshTokenTTL)) {
+		t.Fatalf("expiresAt = %v, want %v", store.insertArgs.expiresAt, now.Add(defaultRefreshTokenTTL))
 	}
 
 	// Validate JWT carries scope=platform and empty tenant_id via JWTValidator.

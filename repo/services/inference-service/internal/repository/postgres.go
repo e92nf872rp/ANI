@@ -134,6 +134,26 @@ WHERE service.tenant_id = $1 AND service.deleted_at IS NULL
 ORDER BY service.created_at DESC, service.id DESC
 `
 
+const listServicesPageSQL = `
+SELECT service.id, service.tenant_id, service.name, service.model_version_id,
+       service.served_model_name, service.model_display_snapshot,
+       service.status, COALESCE(service.status_reason, ''), COALESCE(service.status_message, ''),
+       service.desired_state, service.generation, service.observed_generation,
+       service.desired_spec, service.applied_spec, service.ready_replicas,
+       COALESCE(service.current_operation_id, '00000000-0000-0000-0000-000000000000'::uuid),
+       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined,
+       service.publication_desired, service.publication_generation,
+       service.publication_observed_generation, service.publication_phase,
+       COALESCE(service.publication_last_error, ''), service.publication_updated_at,
+       COALESCE(service.invocation_url, '')
+FROM inference_services AS service
+WHERE service.tenant_id = $1 AND service.deleted_at IS NULL
+  AND ($2 = '' OR service.status = $2)
+  AND ($3 = '' OR COALESCE(service.desired_spec #> '{execution_profile,capabilities}', '[]'::jsonb) @> jsonb_build_array($3::text))
+ORDER BY service.created_at DESC, service.id DESC
+LIMIT $4 OFFSET $5
+`
+
 const cancelOperationSQL = `
 UPDATE inference_operations
 SET state = 'cancelled', lease_owner = NULL, lease_until = NULL, lease_token = NULL,
@@ -325,6 +345,32 @@ WHERE service.tenant_id = $1
   AND service.publication_phase = 'published'
   AND service.publication_generation = service.publication_observed_generation
   AND service.invocation_url IS NOT NULL
+LIMIT 1
+`
+
+// Internal endpoint discovery is independent of AI Gateway publication. The
+// service layer performs the running/generation/endpoint checks after lookup
+// so stopped or stale services get the same readiness errors as service_id
+// resolution.
+const resolveRunningServiceByServedModelNameSQL = `
+SELECT service.id, service.tenant_id, service.name, service.model_version_id,
+       service.served_model_name, service.model_display_snapshot,
+       service.status, COALESCE(service.status_reason, ''), COALESCE(service.status_message, ''),
+       service.desired_state, service.generation, service.observed_generation,
+       service.desired_spec, service.applied_spec,
+       COALESCE(service.runtime_ref, '00000000-0000-0000-0000-000000000000'::uuid),
+       COALESCE(service.runtime_endpoint, ''), COALESCE(service.invocation_url, ''),
+       service.ready_replicas,
+       COALESCE(service.current_operation_id, '00000000-0000-0000-0000-000000000000'::uuid),
+       '' AS active_type, '' AS active_state,
+       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined,
+       service.publication_desired, service.publication_generation,
+       service.publication_observed_generation, service.publication_phase,
+       COALESCE(service.publication_last_error, ''), service.publication_updated_at
+FROM inference_services AS service
+WHERE service.tenant_id = $1
+  AND service.served_model_name = $2
+  AND service.deleted_at IS NULL
 LIMIT 1
 `
 
@@ -792,6 +838,41 @@ func (p *Postgres) ListServices(ctx context.Context, tenantID uuid.UUID) ([]doma
 	return services, nil
 }
 
+func (p *Postgres) ListServicesPage(ctx context.Context, tenantID uuid.UUID, query ListServicesQuery) (ListServicesPage, error) {
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return ListServicesPage{}, fmt.Errorf("begin list inference service page: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return ListServicesPage{}, err
+	}
+	rows, err := tx.Query(ctx, listServicesPageSQL, tenantID, query.Status, query.Capability, query.Limit+1, query.Offset)
+	if err != nil {
+		return ListServicesPage{}, fmt.Errorf("list inference service page: %w", err)
+	}
+	defer rows.Close()
+	items := make([]domain.Service, 0, query.Limit+1)
+	for rows.Next() {
+		service, scanErr := scanPublicService(rows)
+		if scanErr != nil {
+			return ListServicesPage{}, scanErr
+		}
+		items = append(items, service)
+	}
+	if err := rows.Err(); err != nil {
+		return ListServicesPage{}, fmt.Errorf("iterate inference service page: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ListServicesPage{}, fmt.Errorf("commit list inference service page: %w", err)
+	}
+	hasNext := len(items) > int(query.Limit)
+	if hasNext {
+		items = items[:query.Limit]
+	}
+	return ListServicesPage{Items: items, HasNext: hasNext}, nil
+}
+
 func requiresPublicationWithdrawal(action domain.Action) bool {
 	switch action {
 	case domain.ActionStop, domain.ActionRestart, domain.ActionDelete:
@@ -1192,6 +1273,28 @@ func (p *Postgres) ResolvePublishedService(ctx context.Context, tenantID uuid.UU
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Service{}, fmt.Errorf("commit resolve published inference service: %w", err)
+	}
+	return service, nil
+}
+
+func (p *Postgres) ResolveRunningServiceByServedModelName(ctx context.Context, tenantID uuid.UUID, servedModelName string) (domain.Service, error) {
+	if tenantID == uuid.Nil || strings.TrimSpace(servedModelName) == "" {
+		return domain.Service{}, errors.New("running service resolution requires tenant and served model name")
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return domain.Service{}, fmt.Errorf("begin resolve running inference service: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return domain.Service{}, err
+	}
+	service, err := scanService(tx.QueryRow(ctx, resolveRunningServiceByServedModelNameSQL, tenantID, servedModelName))
+	if err != nil {
+		return domain.Service{}, mapNotFound(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Service{}, fmt.Errorf("commit resolve running inference service: %w", err)
 	}
 	return service, nil
 }

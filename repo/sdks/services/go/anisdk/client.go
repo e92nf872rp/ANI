@@ -326,6 +326,7 @@ var Schemas = []string{
 	"CreateGpuContainerRequest",
 	"CreateInferenceAccessPolicyRequest",
 	"CreateInferenceEndpointRequest",
+	"CreateInferenceServiceEngine",
 	"CreateInferenceServiceRequest",
 	"CreateIntegrationBotRequest",
 	"CreateIntegrationRequest",

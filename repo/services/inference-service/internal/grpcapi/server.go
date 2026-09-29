@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	inferencecontrolv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1"
-	inferenceinternalv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/internalendpoint/v1"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog"
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/repository"
@@ -40,6 +39,10 @@ type ControlUseCase interface {
 	Delete(context.Context, uuid.UUID, uuid.UUID) (domain.Operation, error)
 }
 
+type PagedControlUseCase interface {
+	ListPage(context.Context, uuid.UUID, repository.ListServicesQuery) (service.ServicePage, error)
+}
+
 type LogsUseCase interface {
 	List(context.Context, uuid.UUID, uuid.UUID, service.LogQuery) (service.LogPage, error)
 }
@@ -47,8 +50,6 @@ type LogsUseCase interface {
 type AccessPolicyUseCase interface {
 	CheckAccess(context.Context, service.AccessCheckInput) (service.AccessDecision, error)
 	ReleaseAccessLease(context.Context, string) error
-	ResolveRuntimeEndpoint(context.Context, uuid.UUID, string) (domain.Service, error)
-	ResolveInternalEndpoint(context.Context, uuid.UUID, string, string) (domain.Service, error)
 }
 
 type AccessPolicyControlUseCase interface {
@@ -65,7 +66,6 @@ type AccessPolicyControlUseCase interface {
 // Server 实现 InferenceControl gRPC。Gateway HTTP 只调这里，不直连 Core。
 type Server struct {
 	inferencecontrolv1.UnimplementedInferenceControlServer
-	inferenceinternalv1.UnimplementedInferenceEndpointResolverServer
 	creator       CreateUseCase
 	controller    ControlUseCase
 	logs          LogsUseCase
@@ -95,7 +95,6 @@ func (s *Server) WithAccessPolicyControl(control AccessPolicyControlUseCase) *Se
 // Register 挂到 bootstrap gRPC server。
 func (s *Server) Register(grpcServer *grpc.Server) {
 	inferencecontrolv1.RegisterInferenceControlServer(grpcServer, s)
-	inferenceinternalv1.RegisterInferenceEndpointResolverServer(grpcServer, s)
 }
 
 func (s *Server) ListInferenceServices(ctx context.Context, req *inferencecontrolv1.ListInferenceServicesRequest) (*inferencecontrolv1.ListInferenceServicesResponse, error) {
@@ -103,15 +102,100 @@ func (s *Server) ListInferenceServices(ctx context.Context, req *inferencecontro
 	if err != nil {
 		return nil, mapError(err)
 	}
+	// The tenant-only request is the legacy full-list call used by overview.
+	// Keep it unpaged; public HTTP list requests always supply the default limit.
+	if req.GetStatus() == "" && req.GetCapability() == "" && req.GetLimit() == 0 && req.GetOffset() == 0 && req.GetCursor() == "" {
+		views, listErr := s.controller.List(ctx, tenantID)
+		if listErr != nil {
+			return nil, mapError(listErr)
+		}
+		items := make([]*inferencecontrolv1.InferenceService, 0, len(views))
+		for _, view := range views {
+			items = append(items, protoService(view))
+		}
+		return &inferencecontrolv1.ListInferenceServicesResponse{Items: items}, nil
+	}
+	limit := req.GetLimit()
+	if limit == 0 {
+		limit = 50
+	}
+	offset := req.GetOffset()
+	if req.GetCursor() != "" {
+		parsed, parseErr := strconv.ParseInt(req.GetCursor(), 10, 32)
+		if parseErr != nil || parsed < 0 || (offset != 0 && int64(offset) != parsed) {
+			return nil, mapError(service.ErrInvalidInput)
+		}
+		offset = int32(parsed)
+	}
+	if limit < 1 || limit > 200 || offset < 0 {
+		return nil, mapError(service.ErrInvalidInput)
+	}
+	switch req.GetStatus() {
+	case "", "pending", "deploying", "running", "stopping", "stopped", "failed":
+	default:
+		return nil, mapError(service.ErrInvalidInput)
+	}
+	if strings.TrimSpace(req.GetCapability()) == "" && req.GetCapability() != "" {
+		return nil, mapError(service.ErrInvalidInput)
+	}
+	query := repository.ListServicesQuery{Status: req.GetStatus(), Capability: strings.ToLower(strings.TrimSpace(req.GetCapability())), Limit: limit, Offset: offset}
+	if paged, ok := s.controller.(PagedControlUseCase); ok {
+		page, err := paged.ListPage(ctx, tenantID, query)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		items := make([]*inferencecontrolv1.InferenceService, 0, len(page.Items))
+		for _, view := range page.Items {
+			items = append(items, protoService(view))
+		}
+		response := &inferencecontrolv1.ListInferenceServicesResponse{Items: items}
+		if page.HasNext {
+			response.NextCursor = strconv.Itoa(int(offset) + len(items))
+		}
+		return response, nil
+	}
 	views, err := s.controller.List(ctx, tenantID)
 	if err != nil {
 		return nil, mapError(err)
 	}
-	items := make([]*inferencecontrolv1.InferenceService, 0, len(views))
+	filtered := make([]service.ServiceView, 0, len(views))
 	for _, view := range views {
+		if (query.Status == "" || string(view.Status) == query.Status) &&
+			(query.Capability == "" || containsServiceCapability(view.Capabilities, query.Capability)) {
+			filtered = append(filtered, view)
+		}
+	}
+	start := int(query.Offset)
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + int(query.Limit) + 1
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	hasNext := end-start > int(query.Limit)
+	if hasNext {
+		end = start + int(query.Limit)
+	}
+	items := make([]*inferencecontrolv1.InferenceService, 0, end-start)
+	for _, view := range filtered[start:end] {
 		items = append(items, protoService(view))
 	}
-	return &inferencecontrolv1.ListInferenceServicesResponse{Items: items}, nil
+	response := &inferencecontrolv1.ListInferenceServicesResponse{Items: items}
+	if hasNext {
+		response.NextCursor = strconv.Itoa(int(query.Offset) + len(items))
+	}
+	return response, nil
+}
+
+func containsServiceCapability(capabilities []string, wanted string) bool {
+	wanted = strings.ToLower(strings.TrimSpace(wanted))
+	for _, capability := range capabilities {
+		if strings.ToLower(strings.TrimSpace(capability)) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) CreateInferenceService(ctx context.Context, req *inferencecontrolv1.CreateInferenceServiceRequest) (*inferencecontrolv1.InferenceService, error) {
@@ -281,71 +365,6 @@ func (s *Server) ReleaseInferenceAccessLease(ctx context.Context, req *inference
 		return nil, status.Error(codes.Unavailable, "policy lease release unavailable")
 	}
 	return &inferencecontrolv1.ReleaseInferenceAccessLeaseResponse{}, nil
-}
-
-func (s *Server) ResolveInferenceServiceEndpoint(ctx context.Context, req *inferencecontrolv1.ResolveInferenceServiceEndpointRequest) (*inferencecontrolv1.ResolveInferenceServiceEndpointResponse, error) {
-	if s.policies == nil {
-		return nil, status.Error(codes.Unavailable, "policy service unavailable")
-	}
-	tenantID, err := parseTenantID(req.GetTenantId())
-	if err != nil {
-		return nil, mapError(err)
-	}
-	resource, err := s.policies.ResolveRuntimeEndpoint(ctx, tenantID, req.GetServedModelName())
-	if err != nil {
-		return nil, mapError(err)
-	}
-	return &inferencecontrolv1.ResolveInferenceServiceEndpointResponse{
-		InferenceServiceId: uuidString(resource.ID),
-		RuntimeEndpoint:    strings.TrimSpace(resource.RuntimeEndpoint),
-	}, nil
-}
-
-// ResolveInternalEndpoint 服务于 inference.internal.v1（kb-service 数据面）：
-// 按 served_model_name（首选）或 service_id（旧兼容）解析集群内 base_url。
-// 不校验用户身份；语义化错误经 mapError 映射（NOT_FOUND /
-// INFERENCE_SERVICE_NOT_READY / RUNTIME_ENDPOINT_MISSING|INVALID）。
-func (s *Server) ResolveInternalEndpoint(ctx context.Context, req *inferenceinternalv1.ResolveInternalEndpointRequest) (*inferenceinternalv1.ResolveInternalEndpointResponse, error) {
-	if s.policies == nil {
-		return nil, status.Error(codes.Unavailable, "policy service unavailable")
-	}
-	tenantID, err := parseTenantID(req.GetTenantId())
-	if err != nil {
-		return nil, mapError(err)
-	}
-	if strings.TrimSpace(req.GetServedModelName()) == "" && strings.TrimSpace(req.GetServiceId()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "INVALID_ARGUMENT")
-	}
-	resource, err := s.policies.ResolveInternalEndpoint(ctx, tenantID, req.GetServedModelName(), req.GetServiceId())
-	if err != nil {
-		return nil, mapError(err)
-	}
-	if err := service.ValidateInternalEndpoint(resource); err != nil {
-		return nil, mapError(err)
-	}
-	endpoint := openAIBaseURL(resource.RuntimeEndpoint)
-	return &inferenceinternalv1.ResolveInternalEndpointResponse{
-		BaseUrl:         endpoint,
-		ServedModelName: resource.ServedModelName,
-		Task:            string(resource.DesiredSpec.ExecutionProfile.Task),
-		Status:          string(resource.Status),
-	}, nil
-}
-
-// openAIBaseURL normalizes a runtime endpoint (scheme://host[:port]) into an
-// OpenAI-client base URL: the SDK appends "/chat/completions" or
-// "/embeddings" to it, so a pathless endpoint gets "/v1" appended. An
-// endpoint that already carries a path (e.g. "/v1") is kept as-is.
-func openAIBaseURL(endpoint string) string {
-	ep := strings.TrimSpace(endpoint)
-	if ep == "" {
-		return ""
-	}
-	u, err := url.Parse(ep)
-	if err != nil || (u.Path != "" && u.Path != "/") {
-		return ep
-	}
-	return strings.TrimRight(ep, "/") + "/v1"
 }
 
 func (s *Server) ListInferenceAccessPolicies(ctx context.Context, req *inferencecontrolv1.ListInferenceAccessPoliciesRequest) (*inferencecontrolv1.ListInferenceAccessPoliciesResponse, error) {

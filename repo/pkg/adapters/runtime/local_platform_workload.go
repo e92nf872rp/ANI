@@ -485,13 +485,27 @@ func admitPlatformWorkloadAccelerator(caps ports.PlatformWorkloadCapabilities, s
 	if strings.TrimSpace(spec.AcceleratorSpecID) == "" && spec.AcceleratorCount == 0 {
 		return nil
 	}
-	want := canonicalAcceleratorSpecID(spec.AcceleratorSpecID)
-	for _, item := range caps.AcceleratorSpecs {
-		if canonicalAcceleratorSpecID(item.SpecID) != want || !item.Available {
+	want := strings.ToLower(strings.TrimSpace(spec.AcceleratorSpecID))
+	items := matchingAcceleratorCapabilities(caps.AcceleratorSpecs, want)
+	if len(items) == 0 {
+		// Keep the pre-catalog migration behavior for old model IDs such as
+		// gpu-a100-full, but never canonicalize a public catalog ID.
+		legacyWant := canonicalAcceleratorSpecID(want)
+		if legacyWant != want {
+			items = matchingAcceleratorCapabilities(caps.AcceleratorSpecs, legacyWant)
+		}
+	}
+	if len(items) == 0 {
+		return fmt.Errorf("%w: accelerator spec is not available", ports.ErrFailedPrecondition)
+	}
+	for _, item := range items {
+		if !item.Available || !acceleratorModeMemoryMatches(item, spec.AcceleratorMemoryMB) {
 			continue
 		}
 		capacity := item.MaxWholeCardCount
-		if spec.AcceleratorMemoryMB > 0 {
+		if item.GPUMode == "wholecard" {
+			capacity = item.MaxWholeCardCount
+		} else if item.GPUMode == "vgpu" || spec.AcceleratorMemoryMB > 0 {
 			capacity = item.MaxVGPUCount
 		}
 		if capacity < 1 {
@@ -503,6 +517,46 @@ func admitPlatformWorkloadAccelerator(caps ports.PlatformWorkloadCapabilities, s
 		return nil
 	}
 	return fmt.Errorf("%w: accelerator spec is not available", ports.ErrFailedPrecondition)
+}
+
+func matchingAcceleratorCapabilities(items []ports.PlatformWorkloadAcceleratorCapability, want string) []ports.PlatformWorkloadAcceleratorCapability {
+	matched := make([]ports.PlatformWorkloadAcceleratorCapability, 0, 1)
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.SpecID), want) {
+			matched = append(matched, item)
+			continue
+		}
+		for _, alias := range item.Aliases {
+			if strings.EqualFold(strings.TrimSpace(alias), want) {
+				matched = append(matched, item)
+				break
+			}
+		}
+	}
+	return matched
+}
+
+func acceleratorModeMemoryMatches(item ports.PlatformWorkloadAcceleratorCapability, memoryMB int) bool {
+	switch item.GPUMode {
+	case "vgpu":
+		return memoryMB > 0 && (item.MemoryPerShareMB < 1 || memoryMB == item.MemoryPerShareMB)
+	case "wholecard":
+		return memoryMB == 0
+	default:
+		return true
+	}
+}
+
+func acceleratorCapabilityMatches(item ports.PlatformWorkloadAcceleratorCapability, want string) bool {
+	if strings.EqualFold(strings.TrimSpace(item.SpecID), want) {
+		return true
+	}
+	for _, alias := range item.Aliases {
+		if strings.EqualFold(strings.TrimSpace(alias), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultPlatformWorkloadCapabilities() ports.PlatformWorkloadCapabilities {

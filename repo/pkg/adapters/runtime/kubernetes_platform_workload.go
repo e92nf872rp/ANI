@@ -29,6 +29,10 @@ type platformWorkloadMaterializationConfigurer interface {
 	ConfigureModelMaterialization(*ports.PlatformWorkloadCreateSpec)
 }
 
+type platformWorkloadAcceleratorResolver interface {
+	ResolveAccelerator(context.Context, *ports.PlatformWorkloadCreateSpec) error
+}
+
 func NewKubernetesPlatformWorkloadService(runtime platformWorkloadRuntime) *KubernetesPlatformWorkloadService {
 	return NewKubernetesPlatformWorkloadServiceWithStore(runtime, newMemoryPlatformWorkloadStore())
 }
@@ -61,6 +65,11 @@ func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID
 	caps, err := s.Capabilities(ctx)
 	if err != nil {
 		return ports.PlatformWorkloadRecord{}, err
+	}
+	if resolver, ok := s.runtime.(platformWorkloadAcceleratorResolver); ok {
+		if err := resolver.ResolveAccelerator(ctx, &spec); err != nil {
+			return ports.PlatformWorkloadRecord{}, err
+		}
 	}
 	if err := admitPlatformWorkloadAccelerator(caps, spec.Resources, spec.Topology.Mode); err != nil {
 		return ports.PlatformWorkloadRecord{}, err
