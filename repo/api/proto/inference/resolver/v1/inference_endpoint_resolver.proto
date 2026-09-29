@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+package inference.internal.v1;
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/inference/resolver/v1;inferenceinternalv1";
+
+// InferenceEndpointResolver is a cluster-internal data-plane discovery API.
+// buf:lint:ignore SERVICE_SUFFIX
+service InferenceEndpointResolver {
+  rpc ResolveInternalEndpoint(ResolveInternalEndpointRequest) returns (ResolveInternalEndpointResponse);
+}
+
+message ResolveInternalEndpointRequest {
+  string tenant_id = 1;
+  string service_id = 2; // legacy direct lookup; prefer served_model_name
+  string served_model_name = 3;
+}
+
+message ResolveInternalEndpointResponse {
+  string tenant_id = 1;
+  string service_id = 2;
+  string base_url = 3;
+  string served_model_name = 4;
+  string status = 5;
+  string task = 6;
+}

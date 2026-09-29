@@ -35,6 +35,18 @@ type MutationRequest struct {
 	Now            time.Time
 }
 
+type ListServicesQuery struct {
+	Status     string
+	Capability string
+	Limit      int32
+	Offset     int32
+}
+
+type ListServicesPage struct {
+	Items   []domain.Service
+	HasNext bool
+}
+
 // MutationResult 带 TransitionDisposition：新建、重放或已是目标态。
 type MutationResult struct {
 	Service     domain.Service
@@ -161,6 +173,19 @@ type ControlStore interface {
 	MutateService(context.Context, MutationRequest) (MutationResult, error)
 	BindRuntimeRef(context.Context, RuntimeBinding) error
 	AbortPendingMutation(context.Context, MutationAbort) error
+}
+
+// PagedControlStore is an optional extension of ControlStore. Keeping the
+// tenant-only ListServices method preserves overview callers and simple stores.
+type PagedControlStore interface {
+	ListServicesPage(context.Context, uuid.UUID, ListServicesQuery) (ListServicesPage, error)
+}
+
+// ServedModelResolver is an optional indexed lookup used by internal endpoint
+// discovery. It intentionally does not require AI Gateway publication because
+// cluster-internal callers connect to the workload Service directly.
+type ServedModelResolver interface {
+	ResolveRunningServiceByServedModelName(context.Context, uuid.UUID, string) (domain.Service, error)
 }
 
 // AccessPolicyStore 是推理访问策略控制面和数据面检查共用的持久化边界。

@@ -102,6 +102,13 @@ func Idempotency(store GatewayStore) app.HandlerFunc {
 		}
 
 		c.Next(ctx)
+		// Transient server failures must not poison the idempotency key. A
+		// caller should be able to retry the same request after a dependency
+		// recovers; deterministic client errors remain replayable below.
+		if c.Response.StatusCode() >= http.StatusInternalServerError {
+			_ = store.Delete(ctx, cacheKey)
+			return
+		}
 
 		completed := idempotencyRecord{
 			State:       "completed",

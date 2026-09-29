@@ -212,6 +212,7 @@ func TestCreateKeepsPVCArtifactWithoutMaterialization(t *testing.T) {
 func TestCreateFreezesEmbeddingTask(t *testing.T) {
 	tenantID := uuid.MustParse("40000000-0000-0000-0000-000000000004")
 	version := readyVersion()
+	version.Capabilities = []string{"embedding"}
 	version.CPUProfile.ID = "vllm-embed-cpu"
 	version.CPUProfile.Task = domain.InferenceTaskEmbed
 	store := &storeStub{create: func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
@@ -228,6 +229,9 @@ func TestCreateFreezesEmbeddingTask(t *testing.T) {
 	}
 	if resource.DesiredSpec.ExecutionProfile.Task != domain.InferenceTaskEmbed {
 		t.Fatalf("persisted execution task = %q, want %q", resource.DesiredSpec.ExecutionProfile.Task, domain.InferenceTaskEmbed)
+	}
+	if len(resource.DesiredSpec.ExecutionProfile.Capabilities) != 1 || resource.DesiredSpec.ExecutionProfile.Capabilities[0] != "embedding" {
+		t.Fatalf("persisted capabilities = %#v", resource.DesiredSpec.ExecutionProfile.Capabilities)
 	}
 }
 

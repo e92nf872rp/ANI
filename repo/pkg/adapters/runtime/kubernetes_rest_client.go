@@ -689,6 +689,10 @@ func resourceMapping(provider string, apiVersion string, kind string) (kubernete
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "services", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/ServiceAccount":
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "serviceaccounts", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/Role":
+		return kubernetesResource{Provider: provider, APIGroup: "rbac.authorization.k8s.io", APIVersion: "v1", Resource: "roles", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/RoleBinding":
+		return kubernetesResource{Provider: provider, APIGroup: "rbac.authorization.k8s.io", APIVersion: "v1", Resource: "rolebindings", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/Certificate":
 		return kubernetesResource{Provider: provider, APIGroup: "cert-manager.io", APIVersion: "v1", Resource: "certificates", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/Namespace":

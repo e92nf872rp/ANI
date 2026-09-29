@@ -59,6 +59,39 @@ func TestIdempotentReplayReturnsSameResponseForPublicPlatformEndpoint(t *testing
 	}
 }
 
+func TestIdempotencyDoesNotCacheServerFailures(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	h := server.New()
+	h.Use(Idempotency(store))
+	var calls int32
+	h.POST("/api/v1/resources", func(ctx context.Context, c *app.RequestContext) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			c.Status(http.StatusServiceUnavailable)
+			return
+		}
+		c.Status(http.StatusAccepted)
+	})
+	perform := func() *protocol.Response {
+		return ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/resources",
+			&ut.Body{Body: bytes.NewBufferString(`{"idempotency_key":"retryable"}`), Len: len(`{"idempotency_key":"retryable"}`)},
+			ut.Header{Key: "Content-Type", Value: "application/json"},
+		).Result()
+	}
+	first, second := perform(), perform()
+	if first.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("first status = %d, want 503", first.StatusCode())
+	}
+	if second.StatusCode() != http.StatusAccepted {
+		t.Fatalf("second status = %d, want 202", second.StatusCode())
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2", calls)
+	}
+	if got := string(second.Header.Get(idempotencyReplayHeader)); got != "" {
+		t.Fatalf("second response replay header = %q, want empty", got)
+	}
+}
+
 func TestIdempotencyReplaysDeleteAndRejectsDifferentIntent(t *testing.T) {
 	store := newMemoryGatewayStoreForTest()
 	h := server.New()

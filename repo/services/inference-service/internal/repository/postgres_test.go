@@ -440,6 +440,21 @@ func TestListSQLExcludesTombstonesAndInternalEndpointProjection(t *testing.T) {
 	}
 }
 
+func TestListServicesPageSQLFiltersStatusBeforePagination(t *testing.T) {
+	sql := compactSQL(listServicesPageSQL)
+	for _, required := range []string{
+		"where service.tenant_id = $1 and service.deleted_at is null",
+		"and ($2 = '' or service.status = $2)",
+		"and ($3 = '' or coalesce(service.desired_spec #> '{execution_profile,capabilities}', '[]'::jsonb) @> jsonb_build_array($3::text))",
+		"order by service.created_at desc, service.id desc",
+		"limit $4 offset $5",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("paged list SQL missing %q: %s", required, sql)
+		}
+	}
+}
+
 func TestScanPublicServicePreservesInvocationURL(t *testing.T) {
 	for _, invocationURL := range []string{"https://ai.example.test/v1/chat/completions", ""} {
 		t.Run(invocationURL, func(t *testing.T) {
@@ -585,6 +600,25 @@ func TestResolvePublishedServiceSQLIsTenantScopedAndNonLeaking(t *testing.T) {
 	} {
 		if !strings.Contains(sql, required) {
 			t.Fatalf("missing %q: %s", required, sql)
+		}
+	}
+}
+
+func TestResolveRunningServiceByServedModelNameSQLDoesNotRequireGatewayPublication(t *testing.T) {
+	sql := compactSQL(resolveRunningServiceByServedModelNameSQL)
+	for _, required := range []string{
+		"service.tenant_id = $1", "service.served_model_name = $2",
+		"service.deleted_at is null", "limit 1",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("missing %q: %s", required, sql)
+		}
+	}
+	for _, forbidden := range []string{
+		"publication_desired = 'published'", "publication_phase = 'published'", "invocation_url is not null",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("must not require gateway publication %q: %s", forbidden, sql)
 		}
 	}
 }

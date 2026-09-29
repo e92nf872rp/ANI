@@ -63,6 +63,60 @@ func runningControlService() domain.Service {
 	}
 }
 
+func TestListPageFiltersStatusAndPaginates(t *testing.T) {
+	runningA := runningControlService()
+	runningA.ID = uuid.New()
+	runningB := runningControlService()
+	runningB.ID = uuid.New()
+	pending := runningControlService()
+	pending.ID = uuid.New()
+	pending.Status = domain.StatusPending
+	store := &controlStoreStub{list: []domain.Service{pending, runningA, runningB}}
+	controller := NewController(store, nil)
+	page, err := controller.ListPage(context.Background(), runningA.TenantID, repository.ListServicesQuery{Status: string(domain.StatusRunning), Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != runningB.ID || page.HasNext {
+		t.Fatalf("page=%+v", page)
+	}
+	page, err = controller.ListPage(context.Background(), runningA.TenantID, repository.ListServicesQuery{Status: "stopped", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 0 || page.HasNext {
+		t.Fatalf("empty page=%+v", page)
+	}
+}
+
+func TestListPageFiltersCapabilityBeforePagination(t *testing.T) {
+	chat := runningControlService()
+	chat.ID = uuid.New()
+	chat.DesiredSpec.ExecutionProfile.Capabilities = []string{"text-generation"}
+	embed := runningControlService()
+	embed.ID = uuid.New()
+	embed.DesiredSpec.ExecutionProfile.Capabilities = []string{"embedding"}
+	store := &controlStoreStub{list: []domain.Service{chat, embed}}
+	page, err := NewController(store, nil).ListPage(context.Background(), chat.TenantID, repository.ListServicesQuery{
+		Capability: "embedding", Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != embed.ID {
+		t.Fatalf("page=%+v", page)
+	}
+}
+
+func TestListPageRejectsInvalidQuery(t *testing.T) {
+	controller := NewController(&controlStoreStub{}, nil)
+	for _, query := range []repository.ListServicesQuery{{Limit: 0}, {Limit: 201}, {Limit: 1, Offset: -1}, {Limit: 1, Status: "unknown"}} {
+		if _, err := controller.ListPage(context.Background(), uuid.New(), query); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("query=%+v err=%v", query, err)
+		}
+	}
+}
+
 func TestScaleHashesNormalizedServiceAndReplicaIntent(t *testing.T) {
 	resource := runningControlService()
 	var hashes []string
@@ -254,8 +308,12 @@ func TestQueriesNeverProjectRuntimeEndpoint(t *testing.T) {
 
 func TestProjectServicePublishesOnlyPublicInvocationURL(t *testing.T) {
 	resource := runningControlService()
+	resource.DesiredSpec.ExecutionProfile.Task = domain.InferenceTaskEmbed
 	resource.InvocationURL = " https://ai.example.com/v1/chat/completions "
 	view := ProjectService(resource)
+	if view.Task != domain.InferenceTaskEmbed {
+		t.Fatalf("task = %q, want %q", view.Task, domain.InferenceTaskEmbed)
+	}
 	if view.InvocationURL == nil || *view.InvocationURL != "https://ai.example.com/v1/chat/completions" {
 		t.Fatalf("invocation_url = %v", view.InvocationURL)
 	}

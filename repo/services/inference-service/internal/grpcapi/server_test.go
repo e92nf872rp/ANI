@@ -52,6 +52,20 @@ type fakeController struct {
 	err    error
 }
 
+type pagedFakeController struct {
+	*fakeController
+	page service.ServicePage
+	err  error
+}
+
+func (f *pagedFakeController) ListPage(_ context.Context, tenantID uuid.UUID, query repository.ListServicesQuery) (service.ServicePage, error) {
+	f.fakeController.tenant = tenantID
+	if query.Status != "running" || query.Limit != 1 || query.Offset != 1 {
+		return service.ServicePage{}, errors.New("unexpected list query")
+	}
+	return f.page, f.err
+}
+
 type fakeAccessPolicies struct {
 	input    service.AccessCheckInput
 	decision service.AccessDecision
@@ -356,6 +370,67 @@ func TestListUsesTenantFromRequest(t *testing.T) {
 	}
 	if controller.tenant != testTenant || len(resp.GetItems()) != 1 {
 		t.Fatalf("tenant=%s items=%d", controller.tenant, len(resp.GetItems()))
+	}
+}
+
+func TestListInferenceServicesForwardsPagedQuery(t *testing.T) {
+	controller := &pagedFakeController{
+		fakeController: &fakeController{},
+		page:           service.ServicePage{Items: []service.ServiceView{{ID: testService, Name: "running", Status: domain.StatusRunning}}, HasNext: true},
+	}
+	server := NewServer(&fakeCreator{}, controller)
+	resp, err := server.ListInferenceServices(context.Background(), &inferencecontrolv1.ListInferenceServicesRequest{
+		TenantId: testTenant.String(), Status: "running", Capability: "embedding", Limit: 1, Offset: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controller.fakeController.tenant != testTenant || len(resp.GetItems()) != 1 || resp.GetNextCursor() != "2" {
+		t.Fatalf("tenant=%s items=%d cursor=%q", controller.fakeController.tenant, len(resp.GetItems()), resp.GetNextCursor())
+	}
+}
+
+func TestListInferenceServicesRejectsInvalidInternalQuery(t *testing.T) {
+	server := NewServer(&fakeCreator{}, &fakeController{})
+	for _, req := range []*inferencecontrolv1.ListInferenceServicesRequest{
+		{TenantId: testTenant.String(), Status: "unknown", Limit: 1},
+		{TenantId: testTenant.String(), Limit: 201},
+		{TenantId: testTenant.String(), Limit: 1, Offset: -1},
+		{TenantId: testTenant.String(), Limit: 1, Cursor: "abc"},
+		{TenantId: testTenant.String(), Limit: 1, Cursor: "4294967296"},
+	} {
+		_, err := server.ListInferenceServices(context.Background(), req)
+		assertStatus(t, err, codes.InvalidArgument, "INVALID_ARGUMENT")
+	}
+}
+
+func TestListInferenceServicesKeepsTenantOnlyListUnpaged(t *testing.T) {
+	first := service.ServiceView{ID: testService, Name: "first", Status: domain.StatusRunning}
+	second := service.ServiceView{ID: testOp, Name: "second", Status: domain.StatusStopped}
+	controller := &pagedFakeController{fakeController: &fakeController{list: []service.ServiceView{first, second}}}
+	server := NewServer(&fakeCreator{}, controller)
+	resp, err := server.ListInferenceServices(context.Background(), &inferencecontrolv1.ListInferenceServicesRequest{TenantId: testTenant.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetItems()) != 2 || resp.GetNextCursor() != "" {
+		t.Fatalf("items=%d cursor=%q", len(resp.GetItems()), resp.GetNextCursor())
+	}
+}
+
+func TestListInferenceServicesFallbackFiltersQuery(t *testing.T) {
+	first := service.ServiceView{ID: testService, Name: "first", Status: domain.StatusRunning}
+	second := service.ServiceView{ID: testOp, Name: "second", Status: domain.StatusRunning}
+	pending := service.ServiceView{ID: testModel, Name: "pending", Status: domain.StatusPending}
+	server := NewServer(&fakeCreator{}, &fakeController{list: []service.ServiceView{first, pending, second}})
+	resp, err := server.ListInferenceServices(context.Background(), &inferencecontrolv1.ListInferenceServicesRequest{
+		TenantId: testTenant.String(), Status: "running", Limit: 1, Offset: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetItems()) != 1 || resp.GetItems()[0].GetId() != second.ID.String() || resp.GetNextCursor() != "" {
+		t.Fatalf("items=%+v cursor=%q", resp.GetItems(), resp.GetNextCursor())
 	}
 }
 

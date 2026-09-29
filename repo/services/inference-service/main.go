@@ -20,9 +20,10 @@ import (
 	"github.com/kubercloud/ani/services/inference-service/internal/runtime"
 	"github.com/kubercloud/ani/services/inference-service/internal/runtime/coresdk"
 	"github.com/kubercloud/ani/services/inference-service/internal/service"
+	"google.golang.org/grpc"
 )
 
-// main 组装 catalog + Core runtime + 对账 worker + InferenceControl gRPC。
+// main 组装 catalog + Core runtime + 对账 worker + 内部 inference gRPC 服务。
 func main() {
 	cfg := config.Load()
 	deps := bootstrap.MustConnect(cfg.Config)
@@ -49,17 +50,22 @@ func main() {
 	if admission, ok := rt.(service.RuntimeAdmission); ok {
 		creator = creator.WithAdmission(admission)
 	}
+	controller := service.NewController(store, time.Now).WithRuntime(rt)
 	server := grpcapi.NewServer(
 		creator.WithRuntime(rt),
-		service.NewController(store, time.Now).WithRuntime(rt),
+		controller,
 	).WithLogs(service.NewLogReader(store, rt))
+	endpointResolver := grpcapi.NewEndpointResolverServer(controller)
 	// Policy CRUD is part of the inference control plane. The enforcement
 	// path is attached separately once the shared Redis limiter is configured;
 	// keeping the control use case wired here makes the contract available
 	// without silently bypassing limits in the data plane.
 	policyService := service.NewAccessPolicyService(store, redisadapter.NewRateLimiter(deps.Redis), time.Now)
 	server.WithAccessPolicyControl(policyService).WithAccessPolicies(policyService)
-	bootstrap.RunGRPC(cfg.GRPCPort, server.Register, deps)
+	bootstrap.RunGRPC(cfg.GRPCPort, func(grpcServer *grpc.Server) {
+		server.Register(grpcServer)
+		endpointResolver.Register(grpcServer)
+	}, deps)
 }
 
 // newModelCatalog 只连真实 model-service。假 catalog 只允许出现在 *_test.go。

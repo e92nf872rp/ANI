@@ -32,6 +32,7 @@ type gatewayPlatformWorkloadRuntimeConfig struct {
 	ModelFetcherGRPCAddr          string
 	ModelFetcherImageRef          string
 	ModelFetcherAllowInsecureHTTP bool
+	GPUSpecStore                  ports.GPUSpecStore
 }
 
 func gatewayPlatformWorkloadRuntimeConfigFromEnv() gatewayPlatformWorkloadRuntimeConfig {
@@ -77,7 +78,7 @@ func newGatewayPlatformWorkloadService(ctx context.Context, cfg gatewayPlatformW
 		if err != nil {
 			return nil, closeStore, fmt.Errorf("platform workload kubernetes provider: %w", err)
 		}
-		runtime := runtimeadapter.NewKubernetesPlatformWorkloadRuntimeWithFetcherHTTPConfig(client, cfg.ModelServiceGRPCAddr, cfg.ModelFetcherGRPCAddr, cfg.ModelFetcherImageRef, cfg.ModelFetcherAllowInsecureHTTP)
+		runtime := runtimeadapter.NewKubernetesPlatformWorkloadRuntimeWithFetcherHTTPConfig(client, cfg.ModelServiceGRPCAddr, cfg.ModelFetcherGRPCAddr, cfg.ModelFetcherImageRef, cfg.ModelFetcherAllowInsecureHTTP).WithGPUSpecStore(cfg.GPUSpecStore)
 		if cfg.MetadataStore != nil {
 			return runtimeadapter.NewKubernetesPlatformWorkloadServiceWithStore(
 				runtime,

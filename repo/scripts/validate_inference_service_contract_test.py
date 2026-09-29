@@ -137,12 +137,37 @@ class InferenceServiceContractTest(unittest.TestCase):
         schemas = self.spec["components"]["schemas"]
         self.assertEqual(
             schemas["CreateInferenceServiceRequest"]["properties"]["engine"]["$ref"],
-            "#/components/schemas/InferenceServiceEngine",
+            "#/components/schemas/CreateInferenceServiceEngine",
         )
         self.assertEqual(
             schemas["InferenceService"]["properties"]["engine"]["$ref"],
             "#/components/schemas/InferenceServiceEngine",
         )
+        create_engine = schemas["CreateInferenceServiceEngine"]
+        self.assertFalse(create_engine["additionalProperties"])
+        self.assertEqual(
+            create_engine["x-ani-reserved-engine-env-names"],
+            [
+                "CUDA_VISIBLE_DEVICES",
+                "NVIDIA_VISIBLE_DEVICES",
+                "NVIDIA_DRIVER_CAPABILITIES",
+                "PYTHONPATH",
+                "PATH",
+                "LD_PRELOAD",
+                "LD_LIBRARY_PATH",
+                "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
+            ],
+        )
+        create_command = create_engine["properties"]["command"]["oneOf"]
+        self.assertEqual(create_command[0]["type"], "string")
+        self.assertEqual(create_command[0]["minLength"], 1)
+        self.assertEqual(create_command[0]["maxLength"], 262144)
+        self.assertEqual(create_command[1]["type"], "array")
+        self.assertEqual(create_command[1]["minItems"], 1)
+        self.assertEqual(create_command[1]["maxItems"], 64)
+        self.assertEqual(create_command[1]["items"]["type"], "string")
+        self.assertEqual(create_command[1]["items"]["minLength"], 1)
+        self.assertEqual(create_command[1]["items"]["maxLength"], 4096)
         engine = schemas["InferenceServiceEngine"]
         self.assertFalse(engine["additionalProperties"])
         self.assertNotIn("extra_args", engine["properties"])

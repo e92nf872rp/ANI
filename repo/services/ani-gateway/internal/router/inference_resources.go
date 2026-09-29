@@ -69,7 +69,7 @@ type createInferenceServiceJSON struct {
 
 type inferenceServiceEngineJSON struct {
 	Env     []inferenceServiceEngineEnvJSON `json:"env"`
-	Command []string                        `json:"command"`
+	Command json.RawMessage                 `json:"command"`
 }
 
 type inferenceServiceEngineEnvJSON struct {
@@ -84,7 +84,7 @@ type inferenceServiceResourcesJSON struct {
 }
 
 type inferenceServiceAcceleratorJSON struct {
-	// SpecID 是 GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号，不表示整卡或 vGPU。
+	// SpecID 是 Core GPUSpec ID，例如 rtx4090-12g-4。
 	SpecID          string `json:"spec_id"`
 	CountPerReplica int32  `json:"count_per_replica"`
 	// Memory 是申请 GPU 显存，单位 MiB。省略=整卡；填写=vGPU。不是 resources.memory。
@@ -200,28 +200,50 @@ func listInferenceServices(ctx context.Context, c *app.RequestContext) {
 	if !ok {
 		return
 	}
+	query, err := parseInferenceServicesListQuery(c)
+	if err != nil {
+		writeInferenceInvalid(c, err.Error())
+		return
+	}
+	if paged, ok := inferenceControlClient.(InferenceServicesPagedClient); ok {
+		resp, err := paged.ListInferenceServicesPage(ctx, tenantID, query)
+		if err != nil {
+			writeInferenceGRPCError(c, err)
+			return
+		}
+		items := make([]map[string]any, 0, len(resp.GetItems()))
+		for _, item := range resp.GetItems() {
+			items = append(items, inferenceServiceJSON(item))
+		}
+		out := map[string]any{"items": items, "next_cursor": nil}
+		if next := resp.GetNextCursor(); next != "" {
+			out["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, out)
+		return
+	}
 	resp, err := inferenceControlClient.ListInferenceServices(ctx, tenantID)
 	if err != nil {
 		writeInferenceGRPCError(c, err)
 		return
 	}
 	all := resp.GetItems()
-	limit := 50
-	if raw := string(c.QueryArgs().Peek("limit")); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 200 {
-			limit = n
+	filtered := all[:0]
+	for _, item := range all {
+		if (query.GetStatus() == "" || item.GetStatus() == query.GetStatus()) &&
+			(query.GetCapability() == "" || containsInferenceCapability(item.GetCapabilities(), query.GetCapability())) {
+			filtered = append(filtered, item)
 		}
 	}
-	start := 0
-	if raw := string(c.QueryArgs().Peek("cursor")); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
-			start = n
-		}
+	all = filtered
+	start := int(query.GetOffset())
+	if query.GetCursor() != "" {
+		start, _ = strconv.Atoi(query.GetCursor())
 	}
 	if start > len(all) {
 		start = len(all)
 	}
-	end := start + limit
+	end := start + int(query.GetLimit())
 	if end > len(all) {
 		end = len(all)
 	}
@@ -236,6 +258,64 @@ func listInferenceServices(ctx context.Context, c *app.RequestContext) {
 	c.JSON(http.StatusOK, out)
 }
 
+func parseInferenceServicesListQuery(c *app.RequestContext) (*inferencecontrolv1.ListInferenceServicesRequest, error) {
+	query := &inferencecontrolv1.ListInferenceServicesRequest{Limit: 50}
+	args := c.QueryArgs()
+	statusValue := strings.TrimSpace(string(args.Peek("status")))
+	if statusValue != "" {
+		switch statusValue {
+		case "pending", "deploying", "running", "stopping", "stopped", "failed":
+		default:
+			return nil, fmt.Errorf("invalid inference service status %q", statusValue)
+		}
+		query.Status = statusValue
+	}
+	capabilityValue := strings.TrimSpace(string(args.Peek("capability")))
+	if capabilityValue != "" {
+		if len(capabilityValue) > 64 || strings.ContainsAny(capabilityValue, " ,") {
+			return nil, errors.New("capability must be a single non-empty label")
+		}
+		query.Capability = strings.ToLower(capabilityValue)
+	}
+	if raw := string(args.Peek("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 200 {
+			return nil, errors.New("limit must be between 1 and 200")
+		}
+		query.Limit = int32(n)
+	}
+	hasOffset := args.Has("offset")
+	if hasOffset {
+		n, err := strconv.ParseInt(string(args.Peek("offset")), 10, 32)
+		if err != nil || n < 0 {
+			return nil, errors.New("offset must be a non-negative integer")
+		}
+		query.Offset = int32(n)
+	}
+	if raw := string(args.Peek("cursor")); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || n < 0 {
+			return nil, errors.New("cursor must be a non-negative integer")
+		}
+		if hasOffset {
+			return nil, errors.New("cursor and offset cannot be used together")
+		}
+		query.Cursor = raw
+		query.Offset = int32(n)
+	}
+	return query, nil
+}
+
+func containsInferenceCapability(capabilities []string, wanted string) bool {
+	wanted = strings.ToLower(strings.TrimSpace(wanted))
+	for _, capability := range capabilities {
+		if strings.ToLower(strings.TrimSpace(capability)) == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func createInferenceService(ctx context.Context, c *app.RequestContext) {
 	if inferenceControlClient == nil {
 		writeInferenceUnavailable(c)
@@ -246,6 +326,13 @@ func createInferenceService(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	var req createInferenceServiceJSON
+	body, bodyErr := c.Body()
+	if bodyErr == nil {
+		if err := rejectLegacyInferenceAcceleratorFields(body); err != nil {
+			writeInferenceInvalid(c, err.Error())
+			return
+		}
+	}
 	if err := c.BindJSON(&req); err != nil {
 		writeInferenceInvalid(c, "invalid inference service request")
 		return
@@ -255,6 +342,10 @@ func createInferenceService(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	if err := validateInferenceAcceleratorMemory(req.Resources); err != nil {
+		writeInferenceInvalid(c, err.Error())
+		return
+	}
+	if err := validateInferenceAccelerator(req.Resources); err != nil {
 		writeInferenceInvalid(c, err.Error())
 		return
 	}
@@ -923,6 +1014,41 @@ func validateInferenceAcceleratorMemory(resources *inferenceServiceResourcesJSON
 	return nil
 }
 
+func validateInferenceAccelerator(resources *inferenceServiceResourcesJSON) error {
+	if resources == nil || resources.Accelerator == nil {
+		return nil
+	}
+	if strings.TrimSpace(resources.Accelerator.SpecID) == "" {
+		return errors.New("accelerator.spec_id is required")
+	}
+	if resources.Accelerator.CountPerReplica < 1 {
+		return errors.New("accelerator.count_per_replica must be positive")
+	}
+	return nil
+}
+
+func rejectLegacyInferenceAcceleratorFields(body []byte) error {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil
+	}
+	var resources map[string]json.RawMessage
+	if raw := envelope["resources"]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &resources)
+	}
+	if _, ok := resources["acc"]; ok {
+		return errors.New("resources.acc is not supported; use resources.accelerator.spec_id")
+	}
+	var accelerator map[string]json.RawMessage
+	if raw := resources["accelerator"]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &accelerator)
+	}
+	if _, ok := accelerator["count"]; ok {
+		return errors.New("accelerator.count is not supported; use accelerator.count_per_replica")
+	}
+	return nil
+}
+
 func inferenceServiceJSON(msg *inferencecontrolv1.InferenceService) map[string]any {
 	if msg == nil {
 		return map[string]any{}
@@ -933,6 +1059,8 @@ func inferenceServiceJSON(msg *inferencecontrolv1.InferenceService) map[string]a
 		"model":                msg.GetModel(),
 		"model_version_id":     emptyToNil(msg.GetModelVersionId()),
 		"served_model_name":    msg.GetServedModelName(),
+		"task":                 msg.GetTask(),
+		"capabilities":         msg.GetCapabilities(),
 		"image_id":             emptyToNil(msg.GetImageId()),
 		"image_ref":            emptyToNil(msg.GetImageRef()),
 		"replicas":             msg.GetReplicas(),

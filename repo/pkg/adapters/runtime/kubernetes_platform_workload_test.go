@@ -785,6 +785,65 @@ func TestAcceleratorSpecsFromGPUNodesAdvertiseVolcanoVGPU(t *testing.T) {
 	}
 }
 
+func TestMergeGPUSpecCapabilitiesAdvertisesPublicIDAndChecksMemory(t *testing.T) {
+	base := []ports.PlatformWorkloadAcceleratorCapability{{
+		SpecID: "gpu-nvidia-geforce-rtx-4090", Available: true,
+		MaxWholeCardCount: 1, MaxVGPUCount: 8,
+	}}
+	specs := []ports.GPUSpecCRD{{
+		ID: "rtx4090-12g-4", GPUType: "NVIDIA-RTX-4090-12285MiB", GPUMode: "vgpu",
+		MBPerShare: 12285, Available: true,
+	}}
+	got := mergeGPUSpecCapabilities(base, specs)
+	if len(got) != 1 {
+		t.Fatalf("capability count = %d, want canonical public spec only", len(got))
+	}
+	public := got[0]
+	if public.SpecID != "rtx4090-12g-4" || !public.Available || public.MaxVGPUCount != 8 || public.MemoryPerShareMB != 12285 {
+		t.Fatalf("public capability = %+v", public)
+	}
+	if !acceleratorCapabilityMatches(public, "rtx4090-12g-4") || !acceleratorCapabilityMatches(public, "gpu-nvidia-geforce-rtx-4090") {
+		t.Fatalf("public capability did not retain canonical ID and legacy alias: %+v", public)
+	}
+	if err := admitPlatformWorkloadAccelerator(ports.PlatformWorkloadCapabilities{AcceleratorSpecs: got}, ports.PlatformWorkloadResources{AcceleratorSpecID: "rtx4090-12g-4", AcceleratorCount: 1, AcceleratorMemoryMB: 12285}, "single_node"); err != nil {
+		t.Fatalf("public vGPU admission error = %v", err)
+	}
+	if err := admitPlatformWorkloadAccelerator(ports.PlatformWorkloadCapabilities{AcceleratorSpecs: got}, ports.PlatformWorkloadResources{AcceleratorSpecID: "rtx4090-12g-4", AcceleratorCount: 1, AcceleratorMemoryMB: 24570}, "single_node"); err == nil {
+		t.Fatal("mismatched public vGPU memory was accepted")
+	}
+}
+
+func TestResolveGPUSpecFreezesNodeSelectorAndVolcanoResources(t *testing.T) {
+	store := byIDSpecStore{specs: map[string]ports.GPUSpecCRD{
+		"rtx4090-12g-4": {
+			ID: "rtx4090-12g-4", GPUType: "NVIDIA-RTX-4090-12285MiB", GPUMode: "vgpu",
+			MBPerShare: 12285, Available: true,
+			NodeAffinity: ports.GPUSpecNodeAffinity{
+				GPUMode: "vgpu", GPUSharingSpec: "NVIDIA-RTX-4090-12285MiB", GPUSharingPolicy: "quarter",
+			},
+			VolcanoResources: ports.GPUSpecVolcanoResources{VGPU: map[string]string{
+				"volcano.sh/vgpu-number": "{count}", "volcano.sh/vgpu-memory": "{mb_per_share}",
+			}},
+		},
+	}}
+	runtime := NewKubernetesPlatformWorkloadRuntime(nil).WithGPUSpecStore(store)
+	spec := ports.PlatformWorkloadCreateSpec{Resources: ports.PlatformWorkloadResources{
+		AcceleratorSpecID: "rtx4090-12g-4", AcceleratorCount: 1, AcceleratorMemoryMB: 12285,
+	}}
+	if err := runtime.ResolveAccelerator(context.Background(), &spec); err != nil {
+		t.Fatalf("ResolveAccelerator() error = %v", err)
+	}
+	if got := spec.Resources.AcceleratorNodeSelector["ani.kubercloud.io/gpu-sharing-spec"]; got != "NVIDIA-RTX-4090-12285MiB" {
+		t.Fatalf("node selector = %#v", spec.Resources.AcceleratorNodeSelector)
+	}
+	if got := spec.Resources.AcceleratorResourceRequests["volcano.sh/vgpu-memory"]; got != "1228" {
+		t.Fatalf("vGPU memory request = %q, want floor(12285/10)", got)
+	}
+	if got := platformWorkloadAcceleratorResourceMap(spec.Resources)["volcano.sh/vgpu-number"]; got != "1" {
+		t.Fatalf("vGPU number request = %#v", got)
+	}
+}
+
 func TestRenderPlatformWorkloadManifestsMountsPVCArtifact(t *testing.T) {
 	spec := sampleCPUPlatformWorkloadSpec("8df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-cpu-model")
 	spec.Artifacts = []ports.PlatformWorkloadArtifact{{ObjectRef: "pvc://vllm-model", MountPath: "/models"}}
@@ -1290,6 +1349,8 @@ func TestKubernetesPlatformWorkloadRuntimeObjectMaterializationAppliesTenantFetc
 	joined := strings.Join(paths, "\n")
 	ns := "/namespaces/ani-tenant-" + tenant + "/"
 	for _, want := range []string{
+		"/apis/rbac.authorization.k8s.io/v1" + ns + "roles/ani-model-fetcher-provisioner",
+		"/apis/rbac.authorization.k8s.io/v1" + ns + "rolebindings/ani-model-fetcher-provisioner",
 		"/api/v1" + ns + "serviceaccounts/ani-inference-fetcher",
 		"/apis/cert-manager.io/v1" + ns + "certificates/ani-model-fetcher-11111111-1111-1111-1",
 	} {
@@ -1307,10 +1368,12 @@ func TestKubernetesPlatformWorkloadRuntimeObjectMaterializationAppliesTenantFetc
 	}
 	serviceAccountIndex := indexOf("/serviceaccounts/ani-inference-fetcher")
 	certificateIndex := indexOf("/certificates/ani-model-fetcher-")
+	roleIndex := indexOf("/roles/ani-model-fetcher-provisioner")
+	roleBindingIndex := indexOf("/rolebindings/ani-model-fetcher-provisioner")
 	deploymentIndex := indexOf("/deployments/inference-object-apply")
 	policyIndex := indexOf("/networkpolicies/inference-object-apply")
-	if serviceAccountIndex < 0 || certificateIndex < 0 || deploymentIndex < 0 || policyIndex < 0 || serviceAccountIndex > deploymentIndex || certificateIndex > deploymentIndex || policyIndex > deploymentIndex {
-		t.Fatalf("Apply() dependency order = %v, want SA/certificate/NetworkPolicy before deployment", paths)
+	if roleIndex < 0 || roleBindingIndex < 0 || serviceAccountIndex < 0 || certificateIndex < 0 || deploymentIndex < 0 || policyIndex < 0 || roleIndex > deploymentIndex || roleBindingIndex > deploymentIndex || serviceAccountIndex > deploymentIndex || certificateIndex > deploymentIndex || policyIndex > deploymentIndex {
+		t.Fatalf("Apply() dependency order = %v, want fetcher RBAC/SA/certificate/NetworkPolicy before deployment", paths)
 	}
 }
 

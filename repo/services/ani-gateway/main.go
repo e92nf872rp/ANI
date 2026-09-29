@@ -257,6 +257,7 @@ func main() {
 		defer closeMeteringRuntime()
 	}
 	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
+	platformWorkloadRuntimeConfig.GPUSpecStore = gpuSpecStore
 	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
 	if err != nil {
 		logger.Error("failed to configure platform workload provider runtime", "err", err)

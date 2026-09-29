@@ -21,33 +21,40 @@ type ResourcesView struct {
 	Accelerator *domain.Accelerator `json:"accelerator,omitempty"`
 }
 
+type ServicePage struct {
+	Items   []ServiceView
+	HasNext bool
+}
+
 // ServiceView 是对外产品投影：无 runtime_ref、无 ClusterIP；invocation_url 只在当前网关发布已确认时存在。
 type ServiceView struct {
-	ID                 uuid.UUID      `json:"id"`
-	Name               string         `json:"name"`
-	Model              string         `json:"model"`
-	ModelVersionID     uuid.UUID      `json:"model_version_id"`
-	ServedModelName    string         `json:"served_model_name"`
-	ImageID            string         `json:"image_id,omitempty"`
-	ImageRef           string         `json:"image_ref,omitempty"`
-	Replicas           int            `json:"replicas"`
-	ReadyReplicas      int            `json:"ready_replicas"`
-	Resources          ResourcesView  `json:"resources"`
-	PlacementMode      string         `json:"placement_mode"`
-	Engine             *domain.Engine `json:"engine,omitempty"`
-	LegacyGPUType      *string        `json:"gpu_type"`
-	LegacyGPUCount     int            `json:"gpu_count_per_pod"`
-	MaxConcurrency     int            `json:"max_concurrency"`
-	Status             domain.Status  `json:"status"`
-	StatusReason       *string        `json:"status_reason"`
-	StatusMessage      *string        `json:"status_message"`
-	Generation         int64          `json:"generation"`
-	ObservedGeneration int64          `json:"observed_generation"`
-	CurrentOperationID *uuid.UUID     `json:"current_operation_id"`
-	InvocationURL      *string        `json:"invocation_url"`
-	EndpointURL        *string        `json:"endpoint_url"`
-	CreatedAt          time.Time      `json:"created_at"`
-	UpdatedAt          *time.Time     `json:"updated_at"`
+	ID                 uuid.UUID            `json:"id"`
+	Name               string               `json:"name"`
+	Model              string               `json:"model"`
+	ModelVersionID     uuid.UUID            `json:"model_version_id"`
+	ServedModelName    string               `json:"served_model_name"`
+	Task               domain.InferenceTask `json:"task"`
+	Capabilities       []string             `json:"capabilities"`
+	ImageID            string               `json:"image_id,omitempty"`
+	ImageRef           string               `json:"image_ref,omitempty"`
+	Replicas           int                  `json:"replicas"`
+	ReadyReplicas      int                  `json:"ready_replicas"`
+	Resources          ResourcesView        `json:"resources"`
+	PlacementMode      string               `json:"placement_mode"`
+	Engine             *domain.Engine       `json:"engine,omitempty"`
+	LegacyGPUType      *string              `json:"gpu_type"`
+	LegacyGPUCount     int                  `json:"gpu_count_per_pod"`
+	MaxConcurrency     int                  `json:"max_concurrency"`
+	Status             domain.Status        `json:"status"`
+	StatusReason       *string              `json:"status_reason"`
+	StatusMessage      *string              `json:"status_message"`
+	Generation         int64                `json:"generation"`
+	ObservedGeneration int64                `json:"observed_generation"`
+	CurrentOperationID *uuid.UUID           `json:"current_operation_id"`
+	InvocationURL      *string              `json:"invocation_url"`
+	EndpointURL        *string              `json:"endpoint_url"`
+	CreatedAt          time.Time            `json:"created_at"`
+	UpdatedAt          *time.Time           `json:"updated_at"`
 }
 
 // OperationView 对齐 OpenAPI AsyncTask 形状。
@@ -105,6 +112,61 @@ func (c *Controller) List(ctx context.Context, tenantID uuid.UUID) ([]ServiceVie
 		views = append(views, projectService(resource))
 	}
 	return views, nil
+}
+
+func (c *Controller) ListPage(ctx context.Context, tenantID uuid.UUID, query repository.ListServicesQuery) (ServicePage, error) {
+	if query.Limit < 1 || query.Limit > 200 || query.Offset < 0 {
+		return ServicePage{}, fmt.Errorf("%w: invalid inference service list query", ErrInvalidInput)
+	}
+	if query.Status != "" {
+		switch domain.Status(query.Status) {
+		case domain.StatusPending, domain.StatusDeploying, domain.StatusRunning, domain.StatusStopping, domain.StatusStopped, domain.StatusFailed:
+		default:
+			return ServicePage{}, fmt.Errorf("%w: invalid inference service status", ErrInvalidInput)
+		}
+	}
+	if query.Capability != "" && strings.TrimSpace(query.Capability) == "" {
+		return ServicePage{}, fmt.Errorf("%w: invalid inference service capability", ErrInvalidInput)
+	}
+	query.Capability = strings.ToLower(strings.TrimSpace(query.Capability))
+	if paged, ok := c.store.(repository.PagedControlStore); ok {
+		page, err := paged.ListServicesPage(ctx, tenantID, query)
+		if err != nil {
+			return ServicePage{}, err
+		}
+		views := make([]ServiceView, 0, len(page.Items))
+		for _, resource := range page.Items {
+			views = append(views, projectService(resource))
+		}
+		return ServicePage{Items: views, HasNext: page.HasNext}, nil
+	}
+	resources, err := c.store.ListServices(ctx, tenantID)
+	if err != nil {
+		return ServicePage{}, err
+	}
+	filtered := resources[:0]
+	for _, resource := range resources {
+		if (query.Status == "" || string(resource.Status) == query.Status) &&
+			(query.Capability == "" || containsCapability(resource.DesiredSpec.ExecutionProfile.Capabilities, query.Capability)) {
+			filtered = append(filtered, resource)
+		}
+	}
+	start := int(query.Offset)
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + int(query.Limit) + 1
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	page := ServicePage{HasNext: end-start > int(query.Limit)}
+	if page.HasNext {
+		end = start + int(query.Limit)
+	}
+	for _, resource := range filtered[start:end] {
+		page.Items = append(page.Items, projectService(resource))
+	}
+	return page, nil
 }
 
 // GetOperation 查询异步任务，形状对齐 OpenAPI AsyncTask。
@@ -283,7 +345,7 @@ func projectService(resource domain.Service) ServiceView {
 	updatedAt := resource.UpdatedAt
 	return ServiceView{
 		ID: resource.ID, Name: resource.Name, Model: model, ModelVersionID: resource.ModelVersionID,
-		ServedModelName: resource.ServedModelName, Replicas: resource.DesiredSpec.Replicas,
+		ServedModelName: resource.ServedModelName, Task: domain.NormalizeInferenceTask(resource.DesiredSpec.ExecutionProfile.Task), Capabilities: append([]string{}, resource.DesiredSpec.ExecutionProfile.Capabilities...), Replicas: resource.DesiredSpec.Replicas,
 		ImageID: resource.DesiredSpec.ExecutionProfile.ImageID, ImageRef: resource.DesiredSpec.ExecutionProfile.ImageRef,
 		ReadyReplicas: resource.ReadyReplicas,
 		Resources:     ResourcesView{CPU: resource.DesiredSpec.CPU, Memory: resource.DesiredSpec.Memory, Accelerator: resource.DesiredSpec.Accelerator},
@@ -294,6 +356,16 @@ func projectService(resource domain.Service) ServiceView {
 		CurrentOperationID: currentOperationID, InvocationURL: invocationURL, EndpointURL: nil,
 		CreatedAt: resource.CreatedAt, UpdatedAt: &updatedAt,
 	}
+}
+
+func containsCapability(capabilities []string, wanted string) bool {
+	wanted = strings.ToLower(strings.TrimSpace(wanted))
+	for _, capability := range capabilities {
+		if strings.ToLower(strings.TrimSpace(capability)) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func projectOperation(operation domain.Operation) OperationView {

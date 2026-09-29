@@ -206,7 +206,7 @@ func parseModelVersionID(model, explicit string) (uuid.UUID, error) {
 func protoService(view service.ServiceView) *inferencecontrolv1.InferenceService {
 	msg := &inferencecontrolv1.InferenceService{
 		Id: view.ID.String(), Name: view.Name, Model: view.Model,
-		ModelVersionId: view.ModelVersionID.String(), ServedModelName: view.ServedModelName,
+		ModelVersionId: view.ModelVersionID.String(), ServedModelName: view.ServedModelName, Task: string(domain.NormalizeInferenceTask(view.Task)), Capabilities: append([]string{}, view.Capabilities...),
 		ImageId: view.ImageID, ImageRef: view.ImageRef,
 		Replicas: int32(view.Replicas), ReadyReplicas: int32(view.ReadyReplicas),
 		Resources: &inferencecontrolv1.InferenceServiceResources{

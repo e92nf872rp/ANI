@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -36,6 +37,10 @@ type ControlUseCase interface {
 	Scale(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int) (domain.Operation, error)
 	Lifecycle(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, domain.Action) (domain.Operation, error)
 	Delete(context.Context, uuid.UUID, uuid.UUID) (domain.Operation, error)
+}
+
+type PagedControlUseCase interface {
+	ListPage(context.Context, uuid.UUID, repository.ListServicesQuery) (service.ServicePage, error)
 }
 
 type LogsUseCase interface {
@@ -97,15 +102,100 @@ func (s *Server) ListInferenceServices(ctx context.Context, req *inferencecontro
 	if err != nil {
 		return nil, mapError(err)
 	}
+	// The tenant-only request is the legacy full-list call used by overview.
+	// Keep it unpaged; public HTTP list requests always supply the default limit.
+	if req.GetStatus() == "" && req.GetCapability() == "" && req.GetLimit() == 0 && req.GetOffset() == 0 && req.GetCursor() == "" {
+		views, listErr := s.controller.List(ctx, tenantID)
+		if listErr != nil {
+			return nil, mapError(listErr)
+		}
+		items := make([]*inferencecontrolv1.InferenceService, 0, len(views))
+		for _, view := range views {
+			items = append(items, protoService(view))
+		}
+		return &inferencecontrolv1.ListInferenceServicesResponse{Items: items}, nil
+	}
+	limit := req.GetLimit()
+	if limit == 0 {
+		limit = 50
+	}
+	offset := req.GetOffset()
+	if req.GetCursor() != "" {
+		parsed, parseErr := strconv.ParseInt(req.GetCursor(), 10, 32)
+		if parseErr != nil || parsed < 0 || (offset != 0 && int64(offset) != parsed) {
+			return nil, mapError(service.ErrInvalidInput)
+		}
+		offset = int32(parsed)
+	}
+	if limit < 1 || limit > 200 || offset < 0 {
+		return nil, mapError(service.ErrInvalidInput)
+	}
+	switch req.GetStatus() {
+	case "", "pending", "deploying", "running", "stopping", "stopped", "failed":
+	default:
+		return nil, mapError(service.ErrInvalidInput)
+	}
+	if strings.TrimSpace(req.GetCapability()) == "" && req.GetCapability() != "" {
+		return nil, mapError(service.ErrInvalidInput)
+	}
+	query := repository.ListServicesQuery{Status: req.GetStatus(), Capability: strings.ToLower(strings.TrimSpace(req.GetCapability())), Limit: limit, Offset: offset}
+	if paged, ok := s.controller.(PagedControlUseCase); ok {
+		page, err := paged.ListPage(ctx, tenantID, query)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		items := make([]*inferencecontrolv1.InferenceService, 0, len(page.Items))
+		for _, view := range page.Items {
+			items = append(items, protoService(view))
+		}
+		response := &inferencecontrolv1.ListInferenceServicesResponse{Items: items}
+		if page.HasNext {
+			response.NextCursor = strconv.Itoa(int(offset) + len(items))
+		}
+		return response, nil
+	}
 	views, err := s.controller.List(ctx, tenantID)
 	if err != nil {
 		return nil, mapError(err)
 	}
-	items := make([]*inferencecontrolv1.InferenceService, 0, len(views))
+	filtered := make([]service.ServiceView, 0, len(views))
 	for _, view := range views {
+		if (query.Status == "" || string(view.Status) == query.Status) &&
+			(query.Capability == "" || containsServiceCapability(view.Capabilities, query.Capability)) {
+			filtered = append(filtered, view)
+		}
+	}
+	start := int(query.Offset)
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + int(query.Limit) + 1
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	hasNext := end-start > int(query.Limit)
+	if hasNext {
+		end = start + int(query.Limit)
+	}
+	items := make([]*inferencecontrolv1.InferenceService, 0, end-start)
+	for _, view := range filtered[start:end] {
 		items = append(items, protoService(view))
 	}
-	return &inferencecontrolv1.ListInferenceServicesResponse{Items: items}, nil
+	response := &inferencecontrolv1.ListInferenceServicesResponse{Items: items}
+	if hasNext {
+		response.NextCursor = strconv.Itoa(int(query.Offset) + len(items))
+	}
+	return response, nil
+}
+
+func containsServiceCapability(capabilities []string, wanted string) bool {
+	wanted = strings.ToLower(strings.TrimSpace(wanted))
+	for _, capability := range capabilities {
+		if strings.ToLower(strings.TrimSpace(capability)) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) CreateInferenceService(ctx context.Context, req *inferencecontrolv1.CreateInferenceServiceRequest) (*inferencecontrolv1.InferenceService, error) {

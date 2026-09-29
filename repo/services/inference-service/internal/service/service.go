@@ -116,6 +116,7 @@ func (c *Creator) Create(ctx context.Context, tenantID uuid.UUID, input CreateIn
 		Version:        profile.Version,
 		Runtime:        profile.Runtime,
 		Task:           domain.NormalizeInferenceTask(profile.Task),
+		Capabilities:   append([]string(nil), version.Capabilities...),
 		ImageID:        strings.TrimSpace(input.ImageID),
 		ImageRef:       strings.TrimSpace(input.ImageRef),
 		ArtifactRef:    version.ArtifactRef,

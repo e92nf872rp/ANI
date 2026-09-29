@@ -30,6 +30,29 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | GPU-OCCUPANCY-SCOPE-A | 用户报障 `/api/v1/gpu-inventory/occupancy` 与 `/api/v1/platform/capacity` 的 GPU 空闲数互相矛盾（前者 `available=24`，后者 `gpu_free=0`）。两接口注入同一个 `GPUInventory` 与同一个 `KubernetesRESTClient`，设备集合同源，`total` 与 `gpu_total` 实测恒等（都是 24），矛盾只在占用口径。**三层根因**：① occupancy 的 `in_use` 是租户级，而平台 token 的 `tenant_id` 由 auth-service 置为 `uuid.Nil`、网关侧呈现为**全零 UUID**（30080 access log 实测 `00000000-0000-0000-0000-000000000000`），旧代码只判空串未识别全零 UUID，按该值去查不存在的命名空间 `ani-tenant-00000000-…-0000` → 0 个 Pod → `in_use=0`、`available=total`；② 两侧都拿「带租户 label 的 Running Pod」当 GPU 占用、未校验 Pod 是否真的请求 GPU 资源（偏离 `plan-platform-capacity.md` §3.4 写明的「Running 且请求 GPU 资源」口径）——实测集群 53 个此类 Pod 只有 7 个真的请求 GPU（其余为 VM `virt-launcher-*`/`nginx`/`precheck-*`/`secret-bind-ctl-*` 等 CPU-only 工作负载），再按节点 `min(Pod 数, 设备数)` 截断使三节点全部顶满 → `in_use=24` → `gpu_free=0`，occupancy 侧同源缺陷；③ 30080 环境从未应用迁移 `20260911_001_gpu_device_surface.sql`（GPU-POOL-SURFACE-A 只在 ani-test2 验证并执行过），`gpu_device_overlays`/`gpu_device_events` 两表缺失，`GET /gpu-inventory/events` 与 `PATCH /gpu-inventory/{device_id}` 均报 `42P01`。**修复**：新增 `pkg/adapters/runtime/gpu_pod_occupancy.go` 作为唯一占用判定入口（`ParseRunningGPUPodOccupancy` 只保留「Running + `ani-tenant-*` 命名空间 + 请求 `nvidia.com/gpu`/`nvidia.com/vgpu`/`volcano.sh/vgpu-number`」的 Pod，与设备枚举口径一致），`KubernetesPlatformCapacityService.runningGPUPodCountsByNode` 与 gateway occupancy 共用该解析器；`gpuNodeOccupancy` 抽出 `gpuNodeOccupancyForRequest` + 新增 `platformScopeTenant`（同时识别空串与全零 UUID），平台占位值走集群级跨租户查询、其余走本租户命名空间；聚合抽为 `gpuNodeOccupancyMapFromPods`，Pod 记录增 `TenantID` 供跨租户视角回显。**契约零变更**（未改 v1.yaml、无 SDK/docs/authz 生成物变更、无新增迁移）。单测：解析器 4 用例 + 平台容量非 GPU Pod 反例（设备数 8 ≫ Pod 数，避免被截断掩盖）+ gateway 平台/租户视角与 `platformScopeTenant` 分类用例。门禁：`validate_component_imports`/`validate_inference_legacy_control_plane`/`validate_gateway_authz_drift`(no drift)/`validate_core_gateway_authz_routes`(324 路由 0 error)/`git diff --check` 全绿（pkg 仅既有 Windows symlink 用例失败，与批次无关）。**live 验证 PASS**（ani-system 10.10.1.66:30080，镜像 `dev-20260923-gpu-occupancy-scope2`）：平台 token occupancy `24/0/24` → **`total=24 in_use=7 available=17`**、capacity `gpu_free=0` → **`gpu_total=24 gpu_free=17`**，与集群真实值（3 节点 × 8 vGPU 切片，7 个请求 GPU 的 Running Pod）独立复算一致；租户 token occupancy 同为 7/17、租户访问 `/platform/capacity` 仍 403；迁移在 ani-system 应用后两表创建（owner `ani`、RLS `platform_bypass` 单策略、`ani_app` 授权、`ani_app_user` 插入冒烟通过），`events` 由 400 `42P01` 转 200 且带 `node_name`/`gpu_type`/`actor`，PATCH maintenance → `available` 17→16 + `maintenance_count=1`、idle 还原回 17/0；验证台账行已清理。**已知边界**：`gpu_free` 按契约不扣台账，台账存在 maintenance/unavailable 时 `gpu_free − occupancy.available = 台账覆盖卡数 − 其中同时被 Pod 占用的卡数`（维护窗口实测 `17−16=1`），是否让 `gpu_free` 也扣台账需改契约并把台账 store 注入平台容量服务，属独立决策；NotReady 卡被台账覆盖时 `occupancy.fault` 与 `capacity.gpu_fault` 不等（差为该类卡数）；租户 scope 不合并台账（防跨租户泄露），租户视角 `available` 与 `gpu_free` 另差一层租户范围；`logical_card_count`（vGPU 下 96）不等于 `gpu_total`（24），前端「空闲未分配」应以 `occupancy.available` 为准；PATCH 同 `Idempotency-Key` 重放直接返回缓存响应且不落库（复验脚本每次须换新 key）；30080 无 `atlas_schema_revisions`、迁移为手工 psql 应用，正式环境首启须走 atlas 流程；ani-test2 未部署本批次镜像 | gpu-occupancy-scope-a.md |
+### 推理服务创建命令支持文本输入（2026-09-28，local verified）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INFERENCE-COMMAND-TEXT-ADAPTER-A | Services v1 创建入参新增 string/array command 分支；Gateway 将普通命令文本安全解析为内部 argv，旧数组客户端和数组响应保持兼容；未执行 shell、未部署或 live inference 验证。 | inference-command-text-adapter-a.md |
+
+### 推理 GPU 规格 ID 与服务状态筛选（2026-09-28，local verified）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INFERENCE-GPU-SPEC-LIST-FILTER-A | Services 推理请求统一使用公共 GPUSpec ID；Core 兼容旧型号别名并按整卡/vGPU 显存准入；推理服务列表支持 status 过滤和 offset 兼容分页，过滤在 SQL 层执行。未部署或 live 验证。 | inference-gpu-spec-list-filter-a.md |
+
+### KB 通过 service_id 解析推理服务内部 SVC（2026-09-29，local verified）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INFERENCE-INTERNAL-ENDPOINT-RESOLVER-A | inference-service 新增集群内部 gRPC resolver；KB 传入 tenant_id + service_id 获取 running 推理服务的私有 `/v1` base_url、served_model_name 和冻结的 task（generate 对话 / embed 向量）；不修改 KB、公开 Services API 或 AI Gateway。仓库级门禁已通过，集群 live 验证待执行。 | inference-internal-endpoint-resolver-a.md |
+
+### 推理服务列表返回任务类型（2026-09-29，local verified）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INFERENCE-SERVICE-TASK-TYPE-A | `/svc/inference-services` 增加冻结的 `task`：`generate` 对话/文本生成，`embed` 向量；由模型能力推导，不能根据 vLLM、模型名或镜像名猜测。Services 契约、Gateway、SDK/docs 与测试已通过，未部署或 live 验证。 | inference-service-task-type-a.md |
 
 ### GPU 容器实例调度状态按 live status 现算（2026-09-20，分支 hotfix/gpu-scheduling-state-live）
 
@@ -324,6 +347,7 @@
 | MODEL-REPOSITORY-REMOTE-IMPORT | 远程模型导入 Task 1–6 及完整性/快照 follow-up local/logic verified：Gateway 202 入口、租户隔离/幂等导入任务与 outbox、公共 HTTPS Hugging Face/ModelScope source、ModelScope 根目录遍历与 branch→40-hex commit 解析、确定性 `model.tar.gz`、租约 worker、fetcher 有界安全解压和 archive runtime 目录；real-k8s-lab 增加 worker/config contract。v1/protobuf 未改，ModelScope 常见 `master` 需显式 revision；镜像 digest、Secret、mTLS/workload identity、NetworkPolicy、真实 PG/MinIO/集群 live 仍是前置，不得外推 runtime/production ready | model-repository-remote-import.md |
 | ANI-GATEWAY-OPENAI-ROUTE-BOUNDARY | 移除 ANI Gateway 旧 `POST /v1/chat/completions` 占位代理，明确独立 Envoy AI Gateway 承载 OpenAI 数据面；`GET /api/v1/svc/models/{model_id}/versions` 接入已审批的版本列表内部调用并完成 live 200 验证。无 v1/protobuf 新增；未做 Console 或动态 Envoy live 推理验收 | ani-gateway-openai-route-boundary.md |
 | INFERENCE-SERVICE-C41 | Envoy AI Gateway 多租户动态发布 local/logic verified：Services v1 无新 endpoint/field，只有 `served_model_name`/`invocation_url` 描述澄清；AK-only authentication、认证后 tenant/model/path 解析、trusted header overwrite + `recomputeRoute`、generation-fenced Publisher、withdraw-before-runtime lifecycle、least-privilege RBAC/NetworkPolicy 与脱敏 live-gate contract 已落地。Task 8 server dry-run 为 10/11 accepted，已安装 BackendTrafficPolicy CRD 的 `int32`/`maximum` schema 自相矛盾；live status `not-run`，不得标 runtime/production ready。外部 normal/race/module/repository tests 均通过；Console schema 三处 description 生成更新纳入隔离 shipping index 后 `make validate-services` EXIT:0，真实 index 保持为空；PG live integration 因 DSN 未设而 skip。 | inference-envoy-ai-gateway-c41.md |
+| INFERENCE-SERVICE-CAPABILITIES-FILTER-A | 创建时从 model-service 冻结模型版本 `capabilities` 到 desired spec；列表/详情返回 `capabilities`，`?capability=embedding` 在租户范围内持久层过滤；旧记录返回空数组。不新增 Kubernetes label、不改 KB；local verified，未部署或 live 验证 | inference-service-capabilities-filter-a.md |
 
 
 ### Core Quota Service（2026-08）
