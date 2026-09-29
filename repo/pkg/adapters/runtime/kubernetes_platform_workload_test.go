@@ -93,6 +93,7 @@ func TestKubernetesPlatformWorkloadCPUCreateGetStopStartScaleDelete(t *testing.T
 	ctx := context.Background()
 	tenant := "11111111-1111-1111-1111-111111111111"
 	spec := sampleCPUPlatformWorkloadSpec("1df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-cpu-example")
+	spec.ImageRef = "registry.ani.internal/platform/runtime:latest"
 
 	created, err := svc.Create(ctx, tenant, spec)
 	if err != nil {
@@ -412,12 +413,16 @@ func TestKubernetesPlatformWorkloadSurvivesServiceRestartWithSharedStore(t *test
 	}
 }
 
-func TestKubernetesPlatformWorkloadRejectsTagImage(t *testing.T) {
-	svc := NewKubernetesPlatformWorkloadService(newReadyFakePlatformWorkloadRuntime())
+func TestKubernetesPlatformWorkloadAcceptsTagImage(t *testing.T) {
+	provider := newReadyFakePlatformWorkloadRuntime()
+	svc := NewKubernetesPlatformWorkloadService(provider)
 	spec := sampleCPUPlatformWorkloadSpec("7df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-latest")
 	spec.ImageRef = "registry.ani.internal/platform/runtime:latest"
-	if _, err := svc.Create(context.Background(), "11111111-1111-1111-1111-111111111111", spec); !errors.Is(err, ports.ErrInvalid) {
+	if _, err := svc.Create(context.Background(), "11111111-1111-1111-1111-111111111111", spec); err != nil {
 		t.Fatalf("tag image Create() error = %v", err)
+	}
+	if len(provider.applies) != 1 || provider.applies[0].ImageRef != spec.ImageRef {
+		t.Fatalf("applied image_ref = %q, want %q", provider.applies[0].ImageRef, spec.ImageRef)
 	}
 }
 
@@ -476,8 +481,8 @@ func TestRenderPlatformWorkloadManifestsUsesClusterIPAndInferenceLabels(t *testi
 	}
 	container, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
 	image, _ := container["image"].(string)
-	if !strings.Contains(image, "@sha256:") {
-		t.Fatalf("image = %q, want digest-pinned", image)
+	if image != spec.ImageRef {
+		t.Fatalf("image = %q, want %q", image, spec.ImageRef)
 	}
 	resources, _ := container["resources"].(map[string]any)["requests"].(map[string]any)
 	if _, ok := resources["nvidia.com/gpu"]; ok {

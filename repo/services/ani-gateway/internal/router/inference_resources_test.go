@@ -925,15 +925,19 @@ func TestInferenceCreateRequiresImage(t *testing.T) {
 	}
 }
 
-func TestInferenceCreateRejectsUnpinnedImageRef(t *testing.T) {
+func TestInferenceCreateAcceptsTaggedImageRef(t *testing.T) {
 	client := &fakeInferenceClient{createResp: sampleService()}
 	h := setupInferenceTestServer(t, client)
-	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", inferenceCreateBody(`"image_ref":"registry.local/user/vllm:latest"`), "11111111-1111-1111-1111-111111111111")
-	if resp.StatusCode() != http.StatusUnprocessableEntity {
+	imageRef := "docker.changqingyun.cn/ani/vllm-openai:v0.17.0"
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", inferenceCreateBody(`"image_ref":"`+imageRef+`"`), "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
 	}
-	if client.lastCreate != nil {
-		t.Fatal("unpinned image_ref must not reach gRPC without registry")
+	if client.lastCreate == nil {
+		t.Fatal("tagged image_ref must reach gRPC")
+	}
+	if client.lastCreate.GetImageRef() != imageRef {
+		t.Fatalf("image_ref = %q, want %q", client.lastCreate.GetImageRef(), imageRef)
 	}
 }
 
@@ -973,7 +977,7 @@ func TestInferenceCreateResolvesImageIDBeforeImageRef(t *testing.T) {
 	if resp.StatusCode() != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
 	}
-	want := "registry.local/" + tenant + "/runtime@" + digest
+	want := "registry.local/" + tenant + "/runtime:latest"
 	if client.lastCreate.GetImageId() != tenant+"/runtime:latest" || client.lastCreate.GetImageRef() != want {
 		t.Fatalf("create request = %+v", client.lastCreate)
 	}

@@ -647,7 +647,7 @@ components:
         size_bytes: { type: integer, format: int64, minimum: 1, description: "物化文件的期望字节数。" }
         checksum_sha256: { type: string, pattern: '^sha256:[a-f0-9]{64}$', description: "物化文件的期望 SHA-256 摘要。" }
         model_service_grpc_addr: { type: string, minLength: 1, description: "受控 model-service gRPC 地址；不含凭据。" }
-        fetcher_image_ref: { type: string, minLength: 1, pattern: '^.+@sha256:[a-f0-9]{64}$', description: "digest-pinned model-fetcher 镜像引用。" }
+        fetcher_image_ref: { type: string, minLength: 1, description: "model-fetcher 镜像引用；支持 tag、digest 及其他非空格式。" }
         target_path: { type: string, minLength: 1, pattern: '^/(?!.*\\.\\.).+$', description: "校验后写入共享模型卷的绝对目标路径；不得包含路径穿越片段。" }
 
     PlatformWorkloadSecretBinding:
@@ -711,8 +711,7 @@ components:
         image_ref:
           type: string
           minLength: 1
-          pattern: '^.+@sha256:[a-f0-9]{64}$'
-          description: 必须是批准 registry 中的 digest-pinned image；tag 和 latest 必须拒绝。
+          description: 用户提供的运行镜像引用；支持 tag、digest 及其他非空镜像引用格式。
         command:
           type: array
           minItems: 1

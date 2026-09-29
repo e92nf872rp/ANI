@@ -295,7 +295,7 @@ Core 契约只表达通用 workload intent。`topology.profile_id/version` 引�
 
 调用方不得填写 PodGroup `minMember/minResources`、Volcano queue 名、schedulerName 或 LWS 原生字段。Core 根据 role 数量与 requests 派生一个 group 的 gang 约束，并验证 queue class。P0 `leader_worker` 只接受 `replicas=1`；收到更大值返回 `422 UNSUPPORTED_TOPOLOGY`。后续若支持多个 group，必须先增加按 group reconcile PodGroup 的 Core controller，不能由静态 renderer 伪造。
 
-`image_ref` 必须是批准镜像仓库中的 digest；`command/args` 必须匹配 `workload_class + topology.profile_id/version` 的 admission policy。Core 拒绝 tag/`latest`、保留 label 覆盖、跨租户 secret/artifact 和未批准命令，避免把该接口变成任意容器执行面。`owner_ref` 对 Core 是不解析的关联值；provider 资源的真正 owner 始终是 Core `PlatformWorkload`。
+`image_ref` 只要求非空，支持 tag、digest 及其他镜像引用格式；`command/args` 必须匹配 `workload_class + topology.profile_id/version` 的 admission policy。Core 仍拒绝保留 label 覆盖、跨租户 secret/artifact 和未批准命令，避免把该接口变成任意容器执行面。`owner_ref` 对 Core 是不解析的关联值；provider 资源的真正 owner 始终是 Core `PlatformWorkload`。
 
 ### 5.3 响应字段
 
@@ -382,8 +382,8 @@ placement_mode: string         # auto|single_node|multi_node，默认 auto
 兼容规则：
 
 - 为避免改变现有 required/generated SDK，v1 继续要求 `model`；新客户端同时传 `model=<version UUID>` 与 `model_version_id`。
-- `image_id` 与 `image_ref` 都是可选创建字段，两者至少填一个：`image_id` 从镜像仓库选择，`image_ref` 由用户直接输入；同时传入时优先 `image_id`。创建前固定 digest。进程环境中的平台默认引擎镜像不是创建路径权威来源。
-- 两者都缺时返回 `400 INVALID_ARGUMENT`；选定或输入的镜像无法解析为 digest 时返回 `422 IMAGE_UNAVAILABLE`。
+- `image_id` 与 `image_ref` 都是可选创建字段，两者至少填一个：`image_id` 从镜像仓库选择，`image_ref` 由用户直接输入，支持 tag、digest 及其他非空格式；同时传入时优先 `image_id`，仓库选择路径解析为 Registry 返回的镜像引用。进程环境中的平台默认引擎镜像不是创建路径权威来源。
+- 两者都缺时返回 `400 INVALID_ARGUMENT`；`image_id` 无法解析为仓库镜像时返回 `422 IMAGE_UNAVAILABLE`，手填 `image_ref` 的可用性由运行时拉取和启动结果反馈。
 - 旧客户端只传 `model` 时，服务必须立即解析并落库 `model_version_id`；旧 `name:version` 仅作为兼容输入。
 - 两者同时存在时必须指向同一版本，否则返回 `409 IDEMPOTENCY_CONFLICT` 或 `400 INVALID_ARGUMENT`，取决于是否发生在幂等重放。
 - 响应继续保留 `model` 作为展示快照，调度与幂等指纹只使用 `model_version_id`。
@@ -413,7 +413,7 @@ P0 规范化与 shape 决策必须覆盖以下表格：
 | 旧请求含 `gpu_type`，未传新 `resources/placement_mode` | accelerator + single_node | 保持旧客户端单节点语义，不自动升级为 LWS |
 | 新旧字段同时存在但不一致 | 冲突 | `400 INVALID_ARGUMENT` |
 | `image_id` 与 `image_ref` 都缺失 | 非法输入 | `400 INVALID_ARGUMENT` |
-| 选定或输入的镜像无法解析为 digest | 镜像不可用 | `422 IMAGE_UNAVAILABLE` |
+| `image_id` 无法解析为仓库镜像 | 镜像不可用 | `422 IMAGE_UNAVAILABLE` |
 
 虽然 schema 使用通用名 `accelerator`，P0 allowlist 只接受已通过 live gate 的整卡 GPU `spec_id`；不接受 vGPU/MIG，也不表示 TPU、NPU 或其他 accelerator 已受支持。所有规范化结果与 GPUSpec 不可变快照都进入 request hash、desired spec 和审计快照，避免规格目录变化或重试后得到不同 execution plan。
 
@@ -430,7 +430,7 @@ P0 规范化与 shape 决策必须覆盖以下表格：
 | `model` | 模型名称/版本展示快照 |
 | `model_version_id` | 实际部署的不可变版本 |
 | `image_id` | 创建时从镜像仓库选定的 Registry 镜像 ID；手填 `image_ref` 时可为缺省 |
-| `image_ref` | 创建时解析并冻结的 digest 引用；只读 |
+| `image_ref` | 创建时使用的镜像引用，支持 tag、digest 及其他非空格式；只读 |
 | `served_model_name` | OpenAI 请求中的稳定 `model` 值，租户内唯一 |
 | `replicas` | 期望独立服务副本数 |
 | `ready_replicas` | 当前健康副本数 |
@@ -701,7 +701,7 @@ resources.accelerator 存在 + placement_mode = auto
 
 Core 根据 execution plan 渲染 LeaderWorkerSet、一个 PodGroup 和仅选择 leader/API Pod 的 ClusterIP Service。leader/worker Pod 必须携带同一 PodGroup 绑定与 Volcano scheduler，`minMember` 等于完整 group Pod 数。若 LWS CRD/controller、Volcano queue/controller、Ray、模型共享路径或网络条件不满足，返回 `422 UNSUPPORTED_TOPOLOGY`，不得静默拆成普通 Deployment，也不得改为 CPU。
 
-P0 固定 execution profile，不允许客户端直接填写 worker 数、TP、PP、Ray 参数、PodGroup 或 schedulerName。profile 由模型版本、GPUSpec、GPU 总数和集群能力确定，并将 profile ID/version、vLLM/Ray/Python/CUDA/NCCL 镜像 digest 保存到 operation 审计中。
+P0 固定 execution profile，不允许客户端直接填写 worker 数、TP、PP、Ray 参数、PodGroup 或 schedulerName。profile 由模型版本、GPUSpec、GPU 总数和集群能力确定，并将 profile ID/version 及 vLLM/Ray/Python/CUDA/NCCL 镜像引用（tag、digest 或其他非空格式）保存到 operation 审计中。
 
 ### 10.4 模型挂载
 

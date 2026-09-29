@@ -17,8 +17,7 @@ import (
 )
 
 var (
-	platformWorkloadNameRE  = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-	platformWorkloadImageRE = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
+	platformWorkloadNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
 const (
@@ -268,8 +267,8 @@ func validatePlatformWorkloadCreate(spec ports.PlatformWorkloadCreateSpec, tenan
 	if spec.WorkloadClass != "inference" || spec.RuntimeKind != "container" {
 		return fmt.Errorf("%w: only inference container workloads are supported", ports.ErrInvalid)
 	}
-	if !platformWorkloadImageRE.MatchString(spec.ImageRef) {
-		return fmt.Errorf("%w: image_ref must be digest-pinned", ports.ErrInvalid)
+	if strings.TrimSpace(spec.ImageRef) == "" {
+		return fmt.Errorf("%w: image_ref is required", ports.ErrInvalid)
 	}
 	if len(spec.Command) == 0 || spec.Replicas < 1 {
 		return fmt.Errorf("%w: command and replicas are required", ports.ErrInvalid)
@@ -351,7 +350,7 @@ func validatePlatformWorkloadMaterialization(spec ports.PlatformWorkloadCreateSp
 	if platformWorkloadArchiveObjectRef(mat.ObjectRef) {
 		targetValid = safeArchivePlatformWorkloadTargetPath(targetPath, mat.ModelVersionID)
 	}
-	if strings.TrimSpace(mat.ModelServiceGRPCAddr) == "" || strings.Count(strings.TrimSpace(mat.FetcherImageRef), "@") != 1 || !platformWorkloadImageRE.MatchString(strings.TrimSpace(mat.FetcherImageRef)) || !targetValid {
+	if strings.TrimSpace(mat.ModelServiceGRPCAddr) == "" || strings.TrimSpace(mat.FetcherImageRef) == "" || !targetValid {
 		return fmt.Errorf("%w: materialization runtime configuration is invalid", ports.ErrInvalid)
 	}
 	return nil

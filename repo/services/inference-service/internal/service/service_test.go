@@ -525,19 +525,21 @@ func TestCreateReturnsCoreCapacityErrorToCaller(t *testing.T) {
 	}
 }
 
-func TestCreateRejectsUnpinnedImageBeforeCatalog(t *testing.T) {
-	store := &storeStub{create: func(domain.Service, domain.Operation) (repository.CreateResult, error) {
-		t.Fatal("unpinned image must not persist a service")
-		return repository.CreateResult{}, nil
+func TestCreateAcceptsTaggedImageRef(t *testing.T) {
+	store := &storeStub{create: func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
+		return repository.CreateResult{Service: resource, Operation: operation}, nil
 	}}
 	catalogPort := &catalogStub{resolved: readyVersion()}
 	input := validInput()
-	input.ImageRef = "registry.local/user/vllm:latest"
-	_, _, err := NewCreator(store, catalogPort, time.Now).Create(context.Background(), uuid.New(), input)
-	if !errors.Is(err, ErrImageUnavailable) {
-		t.Fatalf("Create() error = %v, want ErrImageUnavailable", err)
+	input.ImageRef = "docker.changqingyun.cn/ani/vllm-openai:v0.17.0"
+	resource, _, err := NewCreator(store, catalogPort, time.Now).Create(context.Background(), uuid.New(), input)
+	if err != nil {
+		t.Fatalf("Create() error = %v, want tagged image_ref to be accepted", err)
 	}
-	if store.calls != 0 || catalogPort.calls != 0 {
+	if resource.DesiredSpec.ExecutionProfile.ImageRef != input.ImageRef {
+		t.Fatalf("execution image_ref = %q, want %q", resource.DesiredSpec.ExecutionProfile.ImageRef, input.ImageRef)
+	}
+	if store.calls != 1 || catalogPort.calls != 1 {
 		t.Fatalf("store/catalog calls = %d/%d", store.calls, catalogPort.calls)
 	}
 }

@@ -43,6 +43,21 @@ class ModelRepositoryRemoteImportContractTest(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "must match ConfigMap"):
                 validator.validate_manifest(path)
 
+    def test_manifest_accepts_tagged_model_fetcher_image(self) -> None:
+        root = pathlib.Path(__file__).resolve().parents[1]
+        manifest = root / "deploy/real-k8s-lab/inference-incluster-e2e.yaml"
+        docs = list(yaml.safe_load_all(manifest.read_text(encoding="utf-8")))
+        config = next(
+            item
+            for item in docs
+            if item and item.get("kind") == "ConfigMap" and item.get("metadata", {}).get("name") == "ani-inference-materialization"
+        )
+        config["data"]["model_fetcher_image_ref"] = "docker.changqingyun.cn/ani/model-fetcher:v0.17.0"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = pathlib.Path(temporary) / "profile.yaml"
+            path.write_text(yaml.safe_dump_all(docs), encoding="utf-8")
+            validator.validate_manifest(path)
+
     def test_atlas_migration_checksum_matches_all_sql_files(self) -> None:
         validator.validate_migration_checksum(pathlib.Path(__file__).resolve().parents[1])
 

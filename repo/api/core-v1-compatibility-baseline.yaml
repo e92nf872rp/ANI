@@ -13455,7 +13455,6 @@ schemas:
         signature:
           type: string
           minLength: 1
-          pattern: ^.+@sha256:[a-f0-9]{64}$
         enum: []
       metadata:
         signature:
@@ -13643,7 +13642,6 @@ schemas:
         signature:
           type: string
           minLength: 1
-          pattern: ^.+@sha256:[a-f0-9]{64}$
         enum: []
       model_service_grpc_addr:
         signature:

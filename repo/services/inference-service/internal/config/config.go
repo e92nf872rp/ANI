@@ -17,7 +17,7 @@ type Config struct {
 	CoreServiceToken     string // 访问 platform-workloads 的静态 service token（无 minter 时）
 	PlatformDatabaseURL  string // reconciler claim/observation 使用的跨租户平台连接；应为专用 BYPASSRLS 角色
 	ModelServiceGRPCAddr string // model-service 内部 gRPC，空则用 fake catalog
-	ModelFetcherImageRef string // digest-pinned model-fetcher init-container image
+	ModelFetcherImageRef string // non-empty model-fetcher init-container image reference (tag, digest, or other form)
 	AuthServiceGRPCAddr  string // 用于按租户 mint Core service JWT
 	AuthMintSecret       string // mint 调用凭据
 	MaxAttempts          int    // worker 对同一 operation 的最大尝试次数
