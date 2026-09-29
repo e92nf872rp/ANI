@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -33,7 +34,79 @@ func (r *KubernetesPlatformWorkloadRuntime) DiscoverCapabilities(ctx context.Con
 		return caps, nil
 	}
 	caps.AcceleratorSpecs = acceleratorSpecsFromGPUNodes(nodes, volcanoReady)
+	if r.specStore != nil {
+		specs, specErr := r.specStore.List(ctx)
+		if specErr != nil {
+			return caps, specErr
+		}
+		caps.AcceleratorSpecs = mergeGPUSpecCapabilities(caps.AcceleratorSpecs, specs)
+	}
 	return caps, nil
+}
+
+func mergeGPUSpecCapabilities(base []ports.PlatformWorkloadAcceleratorCapability, specs []ports.GPUSpecCRD) []ports.PlatformWorkloadAcceleratorCapability {
+	out := make([]ports.PlatformWorkloadAcceleratorCapability, 0, len(base)+len(specs))
+	for _, spec := range specs {
+		id := strings.TrimSpace(spec.ID)
+		if id == "" {
+			continue
+		}
+		memoryPerShare := 0
+		if strings.TrimSpace(spec.GPUMode) == "vgpu" {
+			memoryPerShare = spec.MBPerShare
+		}
+		item := ports.PlatformWorkloadAcceleratorCapability{
+			SpecID:             id,
+			Available:          false,
+			GPUMode:            strings.TrimSpace(spec.GPUMode),
+			MemoryPerShareMB:   memoryPerShare,
+			MaxSingleNodeCount: 0,
+		}
+		for index := range base {
+			model := &base[index]
+			if !acceleratorModelMatches(spec, model) {
+				continue
+			}
+			item.Available = spec.Available && model.Available
+			if item.GPUMode == "wholecard" {
+				item.MaxWholeCardCount = model.MaxWholeCardCount
+				item.MaxSingleNodeCount = model.MaxWholeCardCount
+			} else {
+				item.MaxVGPUCount = model.MaxVGPUCount
+				item.MaxSingleNodeCount = model.MaxVGPUCount
+			}
+			item.Aliases = append(item.Aliases, model.SpecID)
+			item.Aliases = append(item.Aliases, model.Aliases...)
+			break
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func acceleratorModelMatches(spec ports.GPUSpecCRD, capability *ports.PlatformWorkloadAcceleratorCapability) bool {
+	if capability == nil {
+		return false
+	}
+	if spec.GPUMode == "wholecard" && capability.MaxWholeCardCount < 1 {
+		return false
+	}
+	if spec.GPUMode == "vgpu" && capability.MaxVGPUCount < 1 {
+		return false
+	}
+	for _, value := range []string{spec.GPUType, spec.NodeAffinity.GPUSpec, spec.NodeAffinity.GPUSharingSpec} {
+		if acceleratorModelKey(value) != "" && strings.Contains(acceleratorModelKey(capability.SpecID), acceleratorModelKey(value)) {
+			return true
+		}
+	}
+	return false
+}
+
+func acceleratorModelKey(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = regexp.MustCompile(`[-]?\d+(mib|gb)$`).ReplaceAllString(value, "")
+	value = strings.NewReplacer("gpu-", "", "nvidia-", "", "geforce-", "", "rtx-", "", "-", "", "_", "", " ", "").Replace(value)
+	return value
 }
 
 func (r *KubernetesPlatformWorkloadRuntime) clusterResourceExists(ctx context.Context, path string) bool {

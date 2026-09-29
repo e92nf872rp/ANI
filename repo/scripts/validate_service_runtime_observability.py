@@ -44,6 +44,14 @@ ALLOWED_RUNTIMEADMIN_IMPORTERS = {
 FORBIDDEN_PREFIXES = (
     "repo/services/reconcile-worker/",
 )
+# excluded 服务目录内不触达运行时行为的纯构建文件允许变更（如修复构建方式），
+# Go 源码等行为文件仍 fail-closed——观察契约约束的是运行时行为而非构建方式。
+EXCLUDED_SERVICE_BUILD_FILES = frozenset({
+    "Dockerfile",
+    ".dockerignore",
+    "go.mod",
+    "go.sum",
+})
 # envoy-authz-adapter 的调用鉴权与限流属于独立 Services 业务，允许正常迭代。
 # 它仍不属于七服务观测清单；inventory、Prometheus whitelist 与 runtimeadmin
 # importer 校验继续禁止其被隐式纳入本批观测范围。
@@ -264,11 +272,15 @@ def validate_sources(root: Path) -> list[str]:
 
 
 def validate_forbidden_changes(changed: set[str]) -> list[str]:
-    return [
-        f"excluded service changed: {path}"
-        for path in sorted(changed)
-        if path.startswith(FORBIDDEN_PREFIXES)
-    ]
+    errors = []
+    for path in sorted(changed):
+        if not path.startswith(FORBIDDEN_PREFIXES):
+            continue
+        # 纯构建文件不改变运行时行为，放行；其余（尤其 .go 源码）仍 fail-closed。
+        if path.rsplit("/", 1)[-1] in EXCLUDED_SERVICE_BUILD_FILES:
+            continue
+        errors.append(f"excluded service changed: {path}")
+    return errors
 
 
 def validate_fixed_plan(root: Path) -> list[str]:

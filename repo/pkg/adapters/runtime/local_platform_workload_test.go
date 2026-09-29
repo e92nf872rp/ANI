@@ -229,6 +229,23 @@ func TestValidatePlatformWorkloadImportedArchiveAllowsVersionDirectory(t *testin
 	}
 }
 
+func TestValidatePlatformWorkloadSnapshotManifestAllowsVersionDirectory(t *testing.T) {
+	tenant := "11111111-1111-1111-1111-111111111111"
+	version := "33333333-3333-3333-3333-333333333333"
+	spec := sampleCPUPlatformWorkloadSpec("cfd72d71-9d49-46c4-a48a-52bb37b082ab", "inference-snapshot-materialized")
+	spec.ModelMaterialization = &ports.PlatformWorkloadModelMaterialization{
+		TenantID: tenant, ModelVersionID: version,
+		ObjectRef: "object://models/" + tenant + "/22222222-2222-2222-2222-222222222222/import-44444444-4444-4444-4444-444444444444/snapshot/manifest.json",
+		SizeBytes: 12, ChecksumSHA256: "sha256:" + strings.Repeat("a", 64),
+		ModelServiceGRPCAddr: "model-service:9090",
+		FetcherImageRef:      "registry.local/model-fetcher@sha256:" + strings.Repeat("b", 64),
+		TargetPath:           "/models/" + version,
+	}
+	if err := validatePlatformWorkloadCreate(spec); err != nil {
+		t.Fatalf("snapshot materialization rejected: %v", err)
+	}
+}
+
 func sampleCPUPlatformWorkloadSpec(key, name string) ports.PlatformWorkloadCreateSpec {
 	return ports.PlatformWorkloadCreateSpec{
 		IdempotencyKey: key,

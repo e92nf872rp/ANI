@@ -318,6 +318,7 @@ SCHEMAS = [
     "CreateGpuContainerRequest",
     "CreateInferenceAccessPolicyRequest",
     "CreateInferenceEndpointRequest",
+    "CreateInferenceServiceEngine",
     "CreateInferenceServiceRequest",
     "CreateIntegrationBotRequest",
     "CreateIntegrationRequest",

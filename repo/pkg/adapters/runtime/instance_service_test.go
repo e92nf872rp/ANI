@@ -39,7 +39,13 @@ func TestLocalInstanceServiceCreatesContainerThroughOrchestrator(t *testing.T) {
 
 func TestLocalInstanceServiceCreateProvisionsVMDataDisks(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
-	storage := &fakeInstanceStorageBinder{}
+	storage := &fakeInstanceStorageBinder{
+		// VM data disks attach as raw block devices, so an existing volume
+		// referenced by volume_id must itself be block mode.
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-existing": {TenantID: "tenant-a", VolumeID: "vol-existing", VolumeMode: ports.StorageVolumeModeBlock},
+		},
+	}
 	service := NewLocalInstanceServiceWithOptions(
 		orchestrator,
 		&fakeInstanceStore{},
@@ -88,10 +94,142 @@ func TestLocalInstanceServiceCreateProvisionsVMDataDisks(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceCreateRejectsFilesystemVolumeForVMDataDisk(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	storage := &fakeInstanceStorageBinder{
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-fs": {TenantID: "tenant-a", VolumeID: "vol-fs", VolumeMode: ports.StorageVolumeModeFilesystem},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		orchestrator,
+		&fakeInstanceStore{},
+		NewLocalInstanceOpsGuard(),
+		WithInstanceStorageService(storage),
+	)
+	_, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey: "vm-create-fs-datadisk",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "vm-fs",
+			Kind:     ports.WorkloadKindVM,
+			Image:    "harbor/app:1",
+			VM: &ports.VMInstanceSpec{
+				BootImage:     "ubuntu.qcow2",
+				DataDiskSpecs: []ports.InstanceDiskSpec{{VolumeID: "vol-fs"}},
+			},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("Create() error = %v, want ErrInvalid for a filesystem-mode vm data disk", err)
+	}
+	if orchestrator.creates != 0 {
+		t.Fatalf("orchestrator creates = %d, want 0 before provider apply", orchestrator.creates)
+	}
+}
+
+func TestLocalInstanceServiceCreateRejectsBlockVolumeForContainerMount(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	storage := &fakeInstanceStorageBinder{
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-block": {TenantID: "tenant-a", VolumeID: "vol-block", VolumeMode: ports.StorageVolumeModeBlock},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		orchestrator,
+		&fakeInstanceStore{},
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceStorageService(storage),
+	)
+	_, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey: "container-create-block-mount",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "app-block",
+			Kind:     ports.WorkloadKindContainer,
+			Image:    "harbor/app:1",
+			Container: &ports.ContainerInstanceSpec{
+				VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: "vol-block", MountPath: "/data"}},
+			},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("Create() error = %v, want ErrInvalid for a block-mode container mount", err)
+	}
+	if orchestrator.creates != 0 {
+		t.Fatalf("orchestrator creates = %d, want 0 before provider apply", orchestrator.creates)
+	}
+}
+
+func TestLocalInstanceServiceAttachVolumeRejectsModeMismatch(t *testing.T) {
+	service := func(kind ports.WorkloadKind, volumeMode string) (*LocalInstanceService, *fakeLifecycleExecutor) {
+		store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
+			TenantID:   "tenant-a",
+			InstanceID: "inst-a",
+			Kind:       kind,
+			Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		}}
+		storage := &fakeInstanceStorageBinder{
+			storedVolumes: map[string]ports.StorageVolumeRecord{
+				"vol-data": {TenantID: "tenant-a", VolumeID: "vol-data", VolumeMode: volumeMode},
+			},
+		}
+		lifecycle := &fakeLifecycleExecutor{}
+		svc := NewLocalInstanceServiceWithOptions(
+			&fakeInstanceOrchestrator{},
+			store,
+			NewLocalInstanceOpsGuard(),
+			WithOperationStore(NewLocalOperationStore()),
+			WithInstanceLifecycleExecutor(lifecycle),
+			WithInstanceStorageService(storage),
+		)
+		return svc, lifecycle
+	}
+
+	cases := []struct {
+		name       string
+		kind       ports.WorkloadKind
+		volumeMode string
+	}{
+		{name: "vm requires block", kind: ports.WorkloadKindVM, volumeMode: ports.StorageVolumeModeFilesystem},
+		{name: "container requires filesystem", kind: ports.WorkloadKindContainer, volumeMode: ports.StorageVolumeModeBlock},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, lifecycle := service(tc.kind, tc.volumeMode)
+			_, err := svc.AttachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+				IdempotencyKey:  "attach-mismatch-" + tc.name,
+				TenantID:        "tenant-a",
+				InstanceID:      "inst-a",
+				VolumeID:        "vol-data",
+				UserID:          "user-a",
+				PermissionProof: "rbac:update:workload",
+				RequestedAt:     time.Unix(1700, 0),
+			})
+			if !errors.Is(err, ports.ErrInvalid) {
+				t.Fatalf("AttachVolume() error = %v, want ErrInvalid for a volume_mode mismatch", err)
+			}
+			if lifecycle.calls != 0 {
+				t.Fatalf("lifecycle calls = %d, want 0 before provider attach", lifecycle.calls)
+			}
+		})
+	}
+}
+
 func TestLocalInstanceServiceCreateOrchestratesNetworkAndStorage(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	operations := NewLocalOperationStore()
-	storage := &fakeInstanceStorageBinder{}
+	storage := &fakeInstanceStorageBinder{
+		// Container volume mounts require a filesystem-mode volume.
+		storedVolumes: map[string]ports.StorageVolumeRecord{
+			"vol-data": {TenantID: "tenant-a", VolumeID: "vol-data", VolumeMode: ports.StorageVolumeModeFilesystem},
+		},
+	}
 	resolver := &capturingInstanceResourceResolver{
 		result: ports.WorkloadResourceResolveResult{
 			Spec: ports.WorkloadSpec{

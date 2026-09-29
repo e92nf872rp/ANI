@@ -336,6 +336,7 @@ public final class ApiClient {
         "CreateGpuContainerRequest",
         "CreateInferenceAccessPolicyRequest",
         "CreateInferenceEndpointRequest",
+        "CreateInferenceServiceEngine",
         "CreateInferenceServiceRequest",
         "CreateIntegrationBotRequest",
         "CreateIntegrationRequest",

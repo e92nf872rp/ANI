@@ -257,6 +257,7 @@ func main() {
 		defer closeMeteringRuntime()
 	}
 	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
+	platformWorkloadRuntimeConfig.GPUSpecStore = gpuSpecStore
 	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
 	if err != nil {
 		logger.Error("failed to configure platform workload provider runtime", "err", err)
@@ -325,13 +326,14 @@ func main() {
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
-			Service:        instanceRuntime.Service,
-			Store:          instanceRuntime.Store,
-			Operations:     instanceRuntime.Operations,
-			SandboxRuntime: instanceRuntime.SandboxRuntime,
-			TaskStore:      instanceRuntime.AsyncTasks,
-			RealProvider:   true,
-			Provider:       strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
+			Service:             instanceRuntime.Service,
+			Store:               instanceRuntime.Store,
+			Operations:          instanceRuntime.Operations,
+			SandboxRuntime:      instanceRuntime.SandboxRuntime,
+			TaskStore:           instanceRuntime.AsyncTasks,
+			RealProvider:        true,
+			ReconcileController: instanceRuntime.ReconcileController,
+			Provider:            strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
 		}
 	}
 	// 开物复用实例运行时的 Kubernetes REST client；没有真实 Kubernetes

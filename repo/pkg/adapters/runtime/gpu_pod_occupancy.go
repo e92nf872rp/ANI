@@ -8,11 +8,14 @@ package runtime
 //   - 只有 Running 且真的请求 GPU 扩展资源的 Pod 才算占用；CPU-only 工作负载
 //     （VM virt-launcher、探针、作业 Pod 等）即使带租户 label 也不占 GPU；
 //   - 只统计 ani-tenant-* 租户命名空间，避免把平台自身组件算进来；
-//   - 每个 Pod 占 1 个设备记录（整卡 Pod = 1 张物理卡，vGPU Pod = 1 个切片），
-//     与 gpuInventoryRecordFromDevice 的 in_use 语义一致。
+//   - 每个 Pod 占用的设备记录数 = 其请求的 GPU 数量（整卡 Pod = limits 里的
+//     nvidia.com/gpu 数，vGPU Pod = volcano.sh/vgpu-number 数），与
+//     gpuInventoryRecordFromDevice 的 in_use 语义一致；K8s 对扩展资源按容器
+//     独立分配设备，多容器取 limits 之和。
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -45,11 +48,13 @@ type kubernetesPodContainerSpec struct {
 
 // GPUPodOccupancyRecord 是从 K8s Pod 提取的最小 GPU 占用信息。
 // InstanceName 可能为空（未打实例 label 的裸 GPU Pod），此时只参与占用计数，
-// 不参与 instance_id 回显。
+// 不参与 instance_id 回显。GPUCount 是该 Pod 请求的 GPU 设备数（整卡 = limits
+// nvidia.com/gpu 数，vGPU = volcano.sh/vgpu-number 数），解析失败保守按 1。
 type GPUPodOccupancyRecord struct {
 	TenantID     string
 	InstanceName string
 	NodeName     string
+	GPUCount     int
 }
 
 // ParseRunningGPUPodOccupancy 解析 K8s Pod list JSON，只保留「Running + 位于
@@ -95,9 +100,36 @@ func ParseRunningGPUPodOccupancy(body []byte) ([]GPUPodOccupancyRecord, error) {
 			TenantID:     strings.TrimSpace(pod.Metadata.Labels[GPUTenantLabel]),
 			InstanceName: strings.TrimSpace(pod.Metadata.Labels[GPUInstanceLabel]),
 			NodeName:     nodeName,
+			GPUCount:     podGPUCount(pod.Spec.Containers),
 		})
 	}
 	return records, nil
+}
+
+// podGPUCount 汇总 Pod 请求的 GPU 设备数：K8s 对扩展资源按容器独立分配设备，
+// 因此跨容器取 limits 之和；同一容器只可能用一种 GPU 资源名，重复资源名取
+// 首个命中。数量解析失败或非正数保守按 1（与旧「每 Pod 1 设备」口径一致，
+// 宁可不少算）。
+func podGPUCount(containers []kubernetesPodContainerSpec) int {
+	total := 0
+	for _, container := range containers {
+		for _, name := range gpuPodResourceNames {
+			raw := strings.TrimSpace(container.Resources.Limits[name])
+			if raw == "" {
+				continue
+			}
+			count := 1
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				count = parsed
+			}
+			total += count
+			break
+		}
+	}
+	if total <= 0 {
+		return 1
+	}
+	return total
 }
 
 // podRequestsGPU 判断任一容器是否请求了 GPU 扩展资源。

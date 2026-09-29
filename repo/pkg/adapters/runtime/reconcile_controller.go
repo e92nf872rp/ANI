@@ -831,59 +831,11 @@ func (c *LocalWorkloadReconcileController) runQuotaTransition(ctx context.Contex
 // prevents outbox failures from rolling back the quota Confirm/Cancel/Release
 // and status write, which are the critical operations in the transaction.
 func (c *LocalWorkloadReconcileController) writeOutbox(ctx context.Context, tx ports.MetadataTx, eventType string, record ports.WorkloadInstanceRecord) error {
-	if c.outboxWriter == nil {
-		return nil
-	}
-	// The outbox_events table casts aggregate_id and tenant_id to UUID.
-	// instance_id is "inst_<uuid>" which is NOT a valid UUID, so the INSERT
-	// would fail with SQLSTATE 22P02 and abort the entire PostgreSQL
-	// transaction — rolling back the quota Confirm/Cancel/Release and status
-	// write that already executed in the same tx. Extract the UUID part
-	// from "inst_<uuid>" before writing; skip the outbox write entirely
-	// when no valid UUID can be extracted.
-	aggregateID := extractUUIDFromInstanceID(record.InstanceID)
-	if aggregateID == "" {
-		slog.Warn("writeOutbox: instance_id has no valid UUID, skipping outbox",
-			"instance_id", record.InstanceID,
-			"event_type", eventType,
-		)
-		return nil
-	}
-	if _, err := uuid.Parse(record.TenantID); err != nil {
-		slog.Warn("writeOutbox: tenant_id is not a valid UUID, skipping outbox",
-			"tenant_id", record.TenantID,
-			"event_type", eventType,
-		)
-		return nil
-	}
-	payload, err := encodeOutboxPayload(map[string]any{
-		"instance_id": record.InstanceID,
-		"kind":        string(record.Kind),
-		"state":       string(record.Status.State),
-		"reason":      record.Status.Reason,
-	})
-	if err != nil {
-		slog.Warn("writeOutbox: encode payload failed, skipping outbox",
-			"instance_id", record.InstanceID,
-			"event_type", eventType,
-			"err", err,
-		)
-		return nil
-	}
-	if err := c.outboxWriter.WriteTx(ctx, tx, OutboxEvent{
-		AggregateType: "workload_instance",
-		AggregateID:   aggregateID,
-		EventType:     eventType,
-		TenantID:      record.TenantID,
-		Payload:       payload,
-	}); err != nil {
-		slog.Warn("writeOutbox: outbox write failed, skipping (quota+status still commit)",
-			"instance_id", record.InstanceID,
-			"event_type", eventType,
-			"err", err,
-		)
-		return nil
-	}
+	// Payload follows the ports.InstanceLifecycleEvent contract consumed by
+	// metering-service (pkg/ports/instance_events.go): the consumer routes on
+	// new_status and extracts GPU count from gpu_spec. event_seq is injected
+	// at publish time by the outbox publisher (outbox_events.id).
+	writeInstanceOutboxTx(ctx, tx, c.outboxWriter, eventType, record)
 	return nil
 }
 

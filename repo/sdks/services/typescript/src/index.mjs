@@ -314,6 +314,7 @@ export const schemas = [
   "CreateGpuContainerRequest",
   "CreateInferenceAccessPolicyRequest",
   "CreateInferenceEndpointRequest",
+  "CreateInferenceServiceEngine",
   "CreateInferenceServiceRequest",
   "CreateIntegrationBotRequest",
   "CreateIntegrationRequest",

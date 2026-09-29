@@ -188,10 +188,9 @@ func TestPlatformAuditTotalApprox(t *testing.T) {
 	now := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		query := r.URL.Query().Get("query")
-		if strings.Contains(query, "count_over_time") {
-			// matrix: sum(count_over_time(...)) 返回 1 个样本 137
-			_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1757480400000000000,"137"]]}]}}`)
+		if r.URL.Path == "/loki/api/v1/index/stats" {
+			// index stats: 窗口内总行数 137（entries）
+			_, _ = fmt.Fprint(w, `{"streams":7,"chunks":12,"bytes":204800,"entries":137}`)
 			return
 		}
 		_, _ = fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
@@ -215,6 +214,41 @@ func TestPlatformAuditTotalApprox(t *testing.T) {
 	}
 	if !result.DevProfile.RealProvider {
 		t.Fatalf("dev_profile real_provider = false, want true on success")
+	}
+}
+
+func TestPlatformAuditTotalApproxBestEffortOnStatsFailure(t *testing.T) {
+	// 主查询成功而 index/stats 失败（非 200）→ 仅 total 置 0，不报错。
+	now := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/loki/api/v1/index/stats" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = fmt.Fprint(w, buildAuditStreamResponse(t, map[string][]struct {
+			TsNs int64
+			Line string
+		}{
+			"node": {{tsNs(t, "2026-09-10T07:59:40Z"), auditLine("id-1", "create", "u", "pods", "ns", 200)}},
+		}))
+	}
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	defer srv.Close()
+
+	api := mustPlatformAudit(t, srv.URL, now)
+	from := now.Add(-time.Hour)
+	result, err := api.QueryAuditLogs(context.Background(), ports.PlatformAuditLogQuery{
+		TimeFrom: &from, TimeTo: &now, PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("QueryAuditLogs() error = %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(result.Items))
+	}
+	if result.TotalApprox != 0 {
+		t.Fatalf("total_approx = %d, want 0 (best-effort on stats failure)", result.TotalApprox)
 	}
 }
 

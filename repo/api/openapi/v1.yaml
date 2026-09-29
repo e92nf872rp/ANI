@@ -418,12 +418,12 @@ components:
     # ── 平台内部工作负载（仅服务身份）────────────────────────────────────────
     PlatformWorkloadAcceleratorCapability:
       type: object
-      description: 单个 GPU 型号对平台内部工作负载的准入能力摘要。spec_id 只表示型号。
+      description: 单个 Core GPUSpec 对平台内部工作负载的准入能力摘要。spec_id 是用户可引用的规格 ID。
       required: [spec_id, available, max_single_node_count]
       properties:
         spec_id:
           type: string
-          description: GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号，不表示整卡或 vGPU。不表达租户配额。
+          description: Core GPUSpec ID，例如 rtx4090-12g-4。旧节点型号 ID 仅作为迁移期别名，不表达租户配额。
         available:
           type: boolean
           description: 当前是否允许用于新的 PlatformWorkload 准入。
@@ -468,7 +468,7 @@ components:
       type: object
       description: |
         单个 Pod role 或单节点副本申请的加速器资源。
-        spec_id 是 GPU 型号，count 是申请卡数，memory 是申请显存（MiB）。
+        spec_id 是 Core GPUSpec ID，count 是申请卡数，memory 是申请显存（MiB）。
         不填 memory 为整卡，填写 memory 为 vGPU。
       required: [spec_id, count]
       additionalProperties: false
@@ -476,7 +476,7 @@ components:
         spec_id:
           type: string
           minLength: 1
-          description: GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号。历史 -full/-Nx ID 实现剥掉后缀后仍按型号处理。
+          description: Core GPUSpec ID，例如 rtx4090-12g-4。旧节点型号 ID 仅在迁移期兼容。
         count:
           type: integer
           minimum: 1
@@ -2221,7 +2221,7 @@ components:
         resource_type:  { type: string, enum: [instance_cpu_seconds, instance_memory_gib_seconds, instance_gpu_seconds, token_input, token_output, token_total] }
         total_quantity: { type: number, format: double }
         unit:           { type: string }
-        period:         { type: string, nullable: true }
+        period:         { type: string, nullable: true, description: "统计周期桶标签，按 Asia/Shanghai（UTC+8）本地时间输出；group_by=day 为 YYYY-MM-DD，group_by=hour 为 YYYY-MM-DDTHH；无时间聚合时为 null" }
         tenant_id:      { type: string, nullable: true }
 
     MeteringUsageResponse:
@@ -2707,6 +2707,7 @@ components:
         storage_class: { type: string }
         zone:          { type: string, nullable: true }
         volume_type:   { type: string, enum: [ssd, hdd, high_performance_ssd], nullable: true }
+        volume_mode:   { type: string, enum: [block, filesystem], nullable: true }
         iops:          { type: integer, minimum: 0, nullable: true }
         encrypted:     { type: boolean, nullable: true }
         mount_instance_id: { type: string, nullable: true }
@@ -2854,9 +2855,10 @@ components:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
         name:            { type: string, minLength: 1, maxLength: 128 }
         size_gib:        { type: integer, format: int64, minimum: 1 }
-        storage_class:   { type: string, default: standard }
+        storage_class:   { type: string, default: ani-block }
         zone:            { type: string }
         volume_type:     { type: string, enum: [ssd, hdd, high_performance_ssd], default: ssd }
+        volume_mode:     { type: string, enum: [block, filesystem], default: filesystem, description: "卷的 Kubernetes volumeMode。filesystem（默认）用于容器/GPU 容器按目录挂载；block 用于 VM 数据盘（裸设备在线热插）。volumeMode 不可变，创建后不能切换，VM 数据盘由服务端自动使用 block。" }
         encrypted:       { type: boolean, default: false }
         mount_instance_id: { type: string, nullable: true }
         mount_route:       { type: string, nullable: true }
@@ -6756,7 +6758,9 @@ paths:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户活跃实例（pending/provisioning/starting/running/stopping）的 storage_attachments 引用" }
-        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；省略时不过滤" }
+        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；支持逗号分隔多值（如 pending,available，任一命中即返回）；省略时不过滤" }
+        - { name: volume_mode, in: query, schema: { type: string, enum: [block, filesystem] }, description: "按卷模式过滤（block=VM 数据盘/裸设备热插，filesystem=容器按目录挂载）；省略时不过滤" }
+        - { name: available_for_instance_id, in: query, schema: { type: string }, description: "按目标实例过滤可挂载卷：实例必须存在且属于本租户（否则 400 BAD_REQUEST）；仅返回 volume_mode 与实例类型匹配（VM=block，其余工作负载=filesystem）且未被任何活跃实例占用的卷" }
         - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
         - { name: keyword, in: query, schema: { type: string }, description: "按名称/id 模糊过滤（大小写不敏感）；省略时不过滤" }
       responses:
@@ -7063,7 +7067,7 @@ paths:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户 provisioning/running 状态实例的 storage_attachments 引用" }
-        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；省略时不过滤" }
+        - { name: state, in: query, schema: { type: string }, description: "按状态过滤（pending/available/failed/deleting/deleted）；支持逗号分隔多值（如 pending,available，任一命中即返回）；省略时不过滤" }
         - { name: search_field, in: query, schema: { type: string, enum: [id, name] }, description: "配合 keyword 限定匹配字段；name=按名称(默认)，id=按资源 ID。" }
         - { name: keyword, in: query, schema: { type: string }, description: "按名称/id 模糊过滤（大小写不敏感）；省略时不过滤" }
       responses:
@@ -8765,7 +8769,7 @@ paths:
                         resource_type: { type: string }
                         total_quantity: { type: number }
                         unit:           { type: string }
-                        period:         { type: string }
+                        period:         { type: string, description: "统计周期桶标签，按 Asia/Shanghai（UTC+8）本地时间输出；group_by=day 为 YYYY-MM-DD，group_by=hour 为 YYYY-MM-DDTHH；无时间聚合时为空" }
                   total: { type: integer }
                   dev_profile:
                     $ref: '#/components/schemas/CoreDevProfileInfo'

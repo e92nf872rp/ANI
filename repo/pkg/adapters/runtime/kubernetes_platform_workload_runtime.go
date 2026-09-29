@@ -59,6 +59,16 @@ type KubernetesPlatformWorkloadRuntime struct {
 	modelFetcherGRPCAddr          string
 	modelFetcherImageRef          string
 	modelFetcherAllowInsecureHTTP bool
+	specStore                     ports.GPUSpecStore
+}
+
+// WithGPUSpecStore supplies the public Core GPUSpec directory used by
+// platform-workload admission. It is optional for local/legacy profiles.
+func (r *KubernetesPlatformWorkloadRuntime) WithGPUSpecStore(store ports.GPUSpecStore) *KubernetesPlatformWorkloadRuntime {
+	if r != nil {
+		r.specStore = store
+	}
+	return r
 }
 
 func NewKubernetesPlatformWorkloadRuntime(client *KubernetesRESTClient) *KubernetesPlatformWorkloadRuntime {
@@ -100,6 +110,9 @@ func (r *KubernetesPlatformWorkloadRuntime) Apply(ctx context.Context, tenantID,
 	if err := validatePlatformWorkloadCreate(spec, tenantID); err != nil {
 		return platformWorkloadObservation{}, err
 	}
+	if err := r.ResolveAccelerator(ctx, &spec); err != nil {
+		return platformWorkloadObservation{}, err
+	}
 	nodeCIDRs, err := r.client.ListNodeInternalCIDRs(ctx)
 	if err != nil {
 		return platformWorkloadObservation{}, err
@@ -115,7 +128,7 @@ func (r *KubernetesPlatformWorkloadRuntime) Apply(ctx context.Context, tenantID,
 			return platformWorkloadObservation{}, err
 		}
 	} else {
-		// ServiceAccount and Certificate are tenant-scoped shared identity
+		// Fetcher RBAC, ServiceAccount, and Certificate are tenant-scoped shared identity
 		// resources. Apply each in its own request so a later workload failure
 		// cannot make ApplyManifests compensation delete an identity used by a
 		// sibling workload in the same tenant.
@@ -124,7 +137,7 @@ func (r *KubernetesPlatformWorkloadRuntime) Apply(ctx context.Context, tenantID,
 		}
 		workloadOwned := make([]ports.WorkloadManifest, 0, len(workloadManifests))
 		for _, manifest := range workloadManifests {
-			if manifest.Kind == "ServiceAccount" || manifest.Kind == "Certificate" {
+			if manifest.Kind == "Role" || manifest.Kind == "RoleBinding" || manifest.Kind == "ServiceAccount" || manifest.Kind == "Certificate" {
 				if _, err := r.client.ApplyManifests(ctx, []ports.WorkloadManifest{manifest}); err != nil {
 					return platformWorkloadObservation{}, err
 				}
@@ -151,16 +164,20 @@ func orderModelMaterializationManifests(manifests []ports.WorkloadManifest) []po
 	ordered := append([]ports.WorkloadManifest(nil), manifests...)
 	rank := func(kind string) int {
 		switch kind {
-		case "ServiceAccount":
+		case "Role":
 			return 0
-		case "Certificate":
+		case "RoleBinding":
 			return 1
-		case "NetworkPolicy":
+		case "ServiceAccount":
 			return 2
-		case "Service":
+		case "Certificate":
 			return 3
-		default:
+		case "NetworkPolicy":
 			return 4
+		case "Service":
+			return 5
+		default:
+			return 6
 		}
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -453,9 +470,71 @@ func renderPlatformWorkloadManifestsWithFetcherConfig(tenantID, workloadID strin
 		renderPlatformWorkloadNetworkPolicy(tenantID, workloadID, spec, nodeCIDRs),
 	}
 	if spec.ModelMaterialization != nil {
-		manifests = append(manifests, renderModelFetcherServiceAccount(tenantID), renderModelFetcherCertificate(tenantID))
+		manifests = append(manifests, renderModelFetcherProvisionerRole(tenantID), renderModelFetcherProvisionerRoleBinding(tenantID), renderModelFetcherServiceAccount(tenantID), renderModelFetcherCertificate(tenantID))
 	}
 	return manifests
+}
+
+const modelFetcherProvisionerName = "ani-model-fetcher-provisioner"
+
+func renderModelFetcherProvisionerRole(tenantID string) ports.WorkloadManifest {
+	namespace := tenantNamespace(tenantID)
+	content := manifest(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "Role",
+		"metadata": map[string]any{
+			"name":      modelFetcherProvisionerName,
+			"namespace": namespace,
+			"labels": map[string]string{
+				"app.kubernetes.io/part-of": "ani-platform",
+				"ani.dev/tenant-id":         tenantID,
+				"ani.dev/profile":           "model-repository-runtime",
+			},
+		},
+		"rules": []any{
+			map[string]any{
+				"apiGroups": []string{"cert-manager.io"},
+				"resources": []string{"certificates"},
+				"verbs":     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+			},
+			map[string]any{
+				"apiGroups": []string{""},
+				"resources": []string{"serviceaccounts"},
+				"verbs":     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+			},
+		},
+	})
+	return ports.WorkloadManifest{Name: modelFetcherProvisionerName, Kind: "Role", Provider: platformWorkloadProviderName, Content: content}
+}
+
+func renderModelFetcherProvisionerRoleBinding(tenantID string) ports.WorkloadManifest {
+	namespace := tenantNamespace(tenantID)
+	content := manifest(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata": map[string]any{
+			"name":      modelFetcherProvisionerName,
+			"namespace": namespace,
+			"labels": map[string]string{
+				"app.kubernetes.io/part-of": "ani-platform",
+				"ani.dev/tenant-id":         tenantID,
+				"ani.dev/profile":           "model-repository-runtime",
+			},
+		},
+		"roleRef": map[string]any{
+			"apiGroup": "rbac.authorization.k8s.io",
+			"kind":     "Role",
+			"name":     modelFetcherProvisionerName,
+		},
+		"subjects": []any{
+			map[string]any{
+				"kind":      "ServiceAccount",
+				"name":      "ani-gateway",
+				"namespace": "ani-system",
+			},
+		},
+	})
+	return ports.WorkloadManifest{Name: modelFetcherProvisionerName, Kind: "RoleBinding", Provider: platformWorkloadProviderName, Content: content}
 }
 
 func renderModelFetcherServiceAccount(tenantID string) ports.WorkloadManifest {
@@ -587,7 +666,7 @@ func renderLeaderWorkerPlatformWorkloadManifestsWithFetcherConfig(tenantID, work
 		renderPlatformWorkloadNetworkPolicy(tenantID, workloadID, spec, nodeCIDRs),
 	}
 	if spec.ModelMaterialization != nil {
-		manifests = append(manifests, renderModelFetcherServiceAccount(tenantID), renderModelFetcherCertificate(tenantID))
+		manifests = append(manifests, renderModelFetcherProvisionerRole(tenantID), renderModelFetcherProvisionerRoleBinding(tenantID), renderModelFetcherServiceAccount(tenantID), renderModelFetcherCertificate(tenantID))
 	}
 	return manifests
 }
@@ -840,7 +919,7 @@ func platformWorkloadArchiveObjectRef(raw string) bool {
 	if err != nil || parsed.Scheme != "object" || parsed.Host != "models" || parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return false
 	}
-	return strings.HasSuffix(parsed.Path, "/model.tar.gz") && !strings.Contains(parsed.Path, "..")
+	return (strings.HasSuffix(parsed.Path, "/model.tar.gz") || strings.HasSuffix(parsed.Path, "/snapshot/manifest.json")) && !strings.Contains(parsed.Path, "..")
 }
 
 func cloneVolumeMounts(mounts []any) []any {
@@ -892,6 +971,13 @@ const volcanoGPUMemoryFactor = 10
 // platformWorkloadAcceleratorResourceMap 按 memory 选择资源：
 // 有 AcceleratorMemoryMB → vGPU；没有 → 整卡。不看 spec_id 后缀。
 func platformWorkloadAcceleratorResourceMap(resources ports.PlatformWorkloadResources) map[string]any {
+	if len(resources.AcceleratorResourceRequests) > 0 {
+		out := make(map[string]any, len(resources.AcceleratorResourceRequests))
+		for key, value := range resources.AcceleratorResourceRequests {
+			out[key] = value
+		}
+		return out
+	}
 	if resources.AcceleratorCount < 1 {
 		return nil
 	}
@@ -908,7 +994,8 @@ func volcanoVGPUMemoryUnits(memoryMB int) int {
 	if memoryMB < 1 {
 		return 0
 	}
-	units := (memoryMB + volcanoGPUMemoryFactor - 1) / volcanoGPUMemoryFactor
+	// Floor so the requested resource never exceeds the selected slice.
+	units := memoryMB / volcanoGPUMemoryFactor
 	if units < 1 {
 		return 1
 	}
@@ -1015,6 +1102,12 @@ func platformWorkloadPodSpec(spec ports.PlatformWorkloadCreateSpec, containers [
 	if forceVolcano || spec.Resources.AcceleratorCount > 0 {
 		podSpec["schedulerName"] = kubernetesVolcanoSchedulerName
 	}
+	if spec.Resources.AcceleratorSchedulerName != "" {
+		podSpec["schedulerName"] = spec.Resources.AcceleratorSchedulerName
+	}
+	if len(spec.Resources.AcceleratorNodeSelector) > 0 {
+		podSpec["nodeSelector"] = spec.Resources.AcceleratorNodeSelector
+	}
 	if spec.ModelMaterialization != nil {
 		podSpec["serviceAccountName"] = "ani-inference-fetcher"
 		// Model PVCs are commonly provisioned root:root 0755. Let the
@@ -1048,6 +1141,11 @@ func platformWorkloadPodAnnotations(spec ports.PlatformWorkloadCreateSpec, podGr
 	if podGroupName != "" {
 		annotations["scheduling.k8s.io/group-name"] = podGroupName
 	}
+	for key, value := range spec.Resources.AcceleratorAnnotations {
+		if strings.TrimSpace(key) != "" {
+			annotations[key] = value
+		}
+	}
 	return annotations
 }
 
@@ -1077,6 +1175,31 @@ func roleResourcesOrFallback(role, fallback ports.PlatformWorkloadResources) por
 	}
 	if out.AcceleratorMemoryMB < 1 {
 		out.AcceleratorMemoryMB = fallback.AcceleratorMemoryMB
+	}
+	if out.AcceleratorSpecID == fallback.AcceleratorSpecID {
+		if len(out.AcceleratorNodeSelector) == 0 {
+			out.AcceleratorNodeSelector = clonePlatformStringMap(fallback.AcceleratorNodeSelector)
+		}
+		if len(out.AcceleratorResourceRequests) == 0 {
+			out.AcceleratorResourceRequests = clonePlatformStringMap(fallback.AcceleratorResourceRequests)
+		}
+		if out.AcceleratorSchedulerName == "" {
+			out.AcceleratorSchedulerName = fallback.AcceleratorSchedulerName
+		}
+		if len(out.AcceleratorAnnotations) == 0 {
+			out.AcceleratorAnnotations = clonePlatformStringMap(fallback.AcceleratorAnnotations)
+		}
+	}
+	return out
+}
+
+func clonePlatformStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value
 	}
 	return out
 }

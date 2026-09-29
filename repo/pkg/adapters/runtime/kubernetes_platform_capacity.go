@@ -96,9 +96,9 @@ func (s *KubernetesPlatformCapacityService) GetCapacityOverview(ctx context.Cont
 					azSet[az] = struct{}{}
 				}
 			}
-			// in_use：跨租户 Running GPU Pod 统计（每 Pod 占 1 设备）。
-			// 与 gpuInventoryRecordFromDevice 语义一致：各 Ready 节点取
-			// min(设备数, PodCount) 之和，Pod 数超出设备数时按设备数截断。
+			// in_use：跨租户 Running GPU Pod 按请求 GPU 数量累计（多卡 Pod 占
+			// 多台设备）。与 gpuInventoryRecordFromDevice 语义一致：各 Ready 节点
+			// 取 min(设备数, GPU 占用数) 之和，超出设备数时按设备数截断。
 			podCounts, podErr := s.runningGPUPodCountsByNode(ctx)
 			if podErr != nil {
 				degraded = append(degraded, "cross-tenant gpu pod occupancy failed: "+podErr.Error())
@@ -187,9 +187,11 @@ func (s *KubernetesPlatformCapacityService) runningGPUPodCountsByNode(ctx contex
 	if err != nil {
 		return nil, err
 	}
+	// in_use 按每个 Pod 请求的 GPU 数量累计（多卡 Pod 占多台设备），与
+	// gpuInventoryRecordFromDevice 的设备级 in_use 口径保持一致。
 	counts := map[string]int{}
 	for _, pod := range pods {
-		counts[pod.NodeName]++
+		counts[pod.NodeName] += pod.GPUCount
 	}
 	return counts, nil
 }
@@ -246,8 +248,12 @@ func parseK8sQuantityFloor(raw string) float64 {
 		suffix string
 		mul    float64
 	}{
-		{"Ki", 1 << 10}, {"Mi", 1 << 20}, {"Gi", 1 << 30},
-		{"Ti", 1 << 40}, {"Pi", 1 << 50}, {"Ei", 1 << 60},
+		{"Ki", 1 << 10},
+		{"Mi", 1 << 20},
+		{"Gi", 1 << 30},
+		{"Ti", 1 << 40},
+		{"Pi", 1 << 50},
+		{"Ei", 1 << 60},
 	}
 	for _, bs := range binarySuffixes {
 		if strings.HasSuffix(value, bs.suffix) {
@@ -263,8 +269,15 @@ func parseK8sQuantityFloor(raw string) float64 {
 		suffix string
 		mul    float64
 	}{
-		{"n", 1e-9}, {"u", 1e-6}, {"m", 1e-3},
-		{"k", 1e3}, {"M", 1e6}, {"G", 1e9}, {"T", 1e12}, {"P", 1e15}, {"E", 1e18},
+		{"n", 1e-9},
+		{"u", 1e-6},
+		{"m", 1e-3},
+		{"k", 1e3},
+		{"M", 1e6},
+		{"G", 1e9},
+		{"T", 1e12},
+		{"P", 1e15},
+		{"E", 1e18},
 	}
 	for _, ds := range decimalSuffixes {
 		if strings.HasSuffix(value, ds.suffix) {

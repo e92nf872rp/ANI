@@ -36,7 +36,7 @@ func (r *KubernetesStorageRenderer) RenderVolume(_ context.Context, record ports
 		"spec": map[string]any{
 			"accessModes":      []any{"ReadWriteOnce"},
 			"storageClassName": firstNetworkNonEmpty(record.StorageClass, defaultVolumeStorageClassName),
-			"volumeMode":       "Filesystem",
+			"volumeMode":       renderVolumeMode(record),
 			"resources":        pvcStorageResources(record.SizeGiB),
 		},
 	})
@@ -219,6 +219,17 @@ func pvcStorageResources(sizeGiB int64) map[string]any {
 		"requests": map[string]any{
 			"storage": fmt.Sprintf("%dGi", sizeGiB),
 		},
+	}
+}
+
+// renderVolumeMode maps the stored volume_mode onto the Kubernetes volumeMode.
+// 空值回退为 Filesystem，保护存量卷（volumeMode 不可变，渲染错了会破坏 re-observe）。
+func renderVolumeMode(record ports.StorageVolumeRecord) string {
+	switch strings.ToLower(strings.TrimSpace(record.VolumeMode)) {
+	case ports.StorageVolumeModeBlock:
+		return "Block"
+	default:
+		return "Filesystem"
 	}
 }
 

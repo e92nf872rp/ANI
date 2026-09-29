@@ -11,4 +11,7 @@ var (
 	ErrEngineProfileUnapproved    = errors.New("inference engine profile is not approved")       // 引擎底盘未批准
 	ErrReservedFieldConflict      = errors.New("inference reserved field conflicts")             // Core 保留字段冲突
 	ErrRuntimeIntentConflict      = errors.New("inference runtime idempotency intent conflicts") // 同一幂等键意图不同
+	ErrInferenceServiceNotReady   = errors.New("inference service is not ready")
+	ErrRuntimeEndpointMissing     = errors.New("inference runtime endpoint is missing")
+	ErrRuntimeEndpointInvalid     = errors.New("inference runtime endpoint is invalid")
 )

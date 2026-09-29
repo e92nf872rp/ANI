@@ -123,9 +123,11 @@ type stubInstanceStore struct {
 func (s stubInstanceStore) UpsertStatus(context.Context, ports.WorkloadInstanceRecord) error {
 	return ports.ErrUnsupported
 }
+
 func (s stubInstanceStore) Get(context.Context, string, string) (ports.WorkloadInstanceRecord, error) {
 	return ports.WorkloadInstanceRecord{}, ports.ErrNotFound
 }
+
 func (s stubInstanceStore) List(_ context.Context, _ string, _ ports.WorkloadKind) ([]ports.WorkloadInstanceRecord, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -173,7 +175,10 @@ func TestGPUInventoryListEchoesInstanceIDForRunningGPUContainerOnSameNode(t *tes
 
 	// Build occupancy map directly (bypass Hertz context).
 	occupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{
-		"gpu-node-a": {TenantID: "tenant-a", InstanceID: "inst-a-001", NodeName: "gpu-node-a", PodCount: 1},
+		"gpu-node-a": {
+			TenantID: "tenant-a", InstanceID: "inst-a-001", NodeName: "gpu-node-a", PodCount: 1, GPUCount: 1,
+			Pods: []gpuNodeOccupancyPod{{TenantID: "tenant-a", InstanceID: "inst-a-001", GPUCount: 1}},
+		},
 	}}
 	records, err := api.inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
 	if err != nil {
@@ -283,7 +288,10 @@ func TestGPUInventoryListMarksFaultNodeAsFaultRegardlessOfOccupancy(t *testing.T
 	api := newGPUInventoryAPIWithStore(inventory, store, nil)
 
 	occupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{
-		"fault-node": {TenantID: "tenant-a", InstanceID: "inst-a-003", NodeName: "fault-node", PodCount: 1},
+		"fault-node": {
+			TenantID: "tenant-a", InstanceID: "inst-a-003", NodeName: "fault-node", PodCount: 1, GPUCount: 1,
+			Pods: []gpuNodeOccupancyPod{{TenantID: "tenant-a", InstanceID: "inst-a-003", GPUCount: 1}},
+		},
 	}}
 	records, err := api.inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
 	if err != nil {
@@ -317,7 +325,12 @@ func TestGPUInventoryOccupancyCountsInUseWhenInstanceEchoed(t *testing.T) {
 	api := newGPUInventoryAPIWithStore(newFakeGPUInventoryWithNode("gpu-node-a", 2), store, nil)
 
 	occupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{
-		"gpu-node-a": {TenantID: "tenant-a", InstanceID: "inst-a-004", NodeName: "gpu-node-a", PodCount: 2},
+		"gpu-node-a": {
+			TenantID: "tenant-a", InstanceID: "inst-a-004", NodeName: "gpu-node-a", PodCount: 2, GPUCount: 2,
+			Pods: []gpuNodeOccupancyPod{
+				{TenantID: "tenant-a", InstanceID: "inst-a-004", GPUCount: 2},
+			},
+		},
 	}}
 	records, err := api.inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
 	if err != nil {
@@ -585,5 +598,85 @@ func TestGPUNodeOccupancyTenantScopeQueriesTenantNamespaceAndFiltersGPU(t *testi
 	}
 	if !strings.Contains(requested, "/api/v1/namespaces/ani-tenant-tenant-a/pods?labelSelector=") {
 		t.Fatalf("pods endpoint = %q, want tenant-namespace query", requested)
+	}
+}
+
+// ---- 占用数量口径与多实例分段回显（GPU-OCCUPANCY-PODCOUNT-B） ----
+
+// TestGPUNodeOccupancyMapFromPodsAggregatesGPUCountAndSortsPods 锁定聚合口径：
+// GPUCount = 各 Pod 请求 GPU 数量之和；Pods 按实例名字典序稳定排序（设备级
+// 回显的分段顺序依据）；TenantID/InstanceID 摘要取字典序最小实例。
+func TestGPUNodeOccupancyMapFromPodsAggregatesGPUCountAndSortsPods(t *testing.T) {
+	pods := []gpuPodOccupancy{
+		{TenantID: "tenant-a", InstanceName: "inst-b", NodeName: "node-1", Phase: "Running", GPUCount: 2},
+		{TenantID: "tenant-b", InstanceName: "inst-a", NodeName: "node-1", Phase: "Running", GPUCount: 1},
+		{TenantID: "tenant-a", InstanceName: "inst-c", NodeName: "node-1", Phase: "Pending", GPUCount: 1},
+	}
+	occupancy := gpuNodeOccupancyMapFromPods(pods, "fallback")
+	entry, ok := occupancy.lookup("node-1")
+	if !ok {
+		t.Fatal("node-1 entry missing")
+	}
+	if entry.PodCount != 2 {
+		t.Fatalf("PodCount = %d, want 2 (Pending Pod 不计入)", entry.PodCount)
+	}
+	if entry.GPUCount != 3 {
+		t.Fatalf("GPUCount = %d, want 3 (2+1)", entry.GPUCount)
+	}
+	if len(entry.Pods) != 2 || entry.Pods[0].InstanceID != "inst-a" || entry.Pods[1].InstanceID != "inst-b" {
+		t.Fatalf("Pods = %+v, want sorted [inst-a, inst-b]", entry.Pods)
+	}
+	if entry.InstanceID != "inst-a" || entry.TenantID != "tenant-b" {
+		t.Fatalf("summary = %s/%s, want inst-a/tenant-b (字典序最小)", entry.InstanceID, entry.TenantID)
+	}
+}
+
+// TestGPUInventoryListEchoesPerPodDeviceSegments 验证多实例共节点时设备级
+// 回显按 Pods 顺序分段分配：inst-a 占 1 台、inst-b 占 2 台、其余 available。
+// 修复前整节点全部 in_use 设备都回显字典序最小的一个实例。
+func TestGPUInventoryListEchoesPerPodDeviceSegments(t *testing.T) {
+	store := stubInstanceStore{records: []ports.WorkloadInstanceRecord{}}
+	api := newGPUInventoryAPIWithStore(newFakeGPUInventoryWithNode("gpu-node-a", 4), store, nil)
+
+	pods := []gpuPodOccupancy{
+		{TenantID: "tenant-a", InstanceName: "inst-b", NodeName: "gpu-node-a", Phase: "Running", GPUCount: 2},
+		{TenantID: "tenant-b", InstanceName: "inst-a", NodeName: "gpu-node-a", Phase: "Running", GPUCount: 1},
+	}
+	occupancy := gpuNodeOccupancyMapFromPods(pods, "")
+	records, err := api.inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListNodeClasses error = %v", err)
+	}
+	listResponse := api.gpuInventoryListFromNodes(context.Background(), records, "", "", "", occupancy, emptySurfaceState())
+	if len(listResponse.Items) != 4 {
+		t.Fatalf("items = %d, want 4", len(listResponse.Items))
+	}
+	expect := []struct {
+		status   string
+		tenant   string
+		instance string
+	}{{"in_use", "tenant-b", "inst-a"}, {"in_use", "tenant-a", "inst-b"}, {"in_use", "tenant-a", "inst-b"}, {"available", "", ""}}
+	for i, want := range expect {
+		item := listResponse.Items[i]
+		if item.Status != want.status {
+			t.Fatalf("item[%d].status = %q, want %q", i, item.Status, want.status)
+		}
+		if want.instance == "" {
+			if item.InstanceID != nil {
+				t.Fatalf("item[%d].instance_id = %v, want nil", i, item.InstanceID)
+			}
+			continue
+		}
+		if item.InstanceID == nil || *item.InstanceID != want.instance {
+			t.Fatalf("item[%d].instance_id = %v, want %s", i, item.InstanceID, want.instance)
+		}
+		if item.TenantID == nil || *item.TenantID != want.tenant {
+			t.Fatalf("item[%d].tenant_id = %v, want %s", i, item.TenantID, want.tenant)
+		}
+	}
+	// occupancy 汇总：in_use = GPUCount 合计（3），available = 1。
+	occupancyResp := api.gpuOccupancyFromNodes(context.Background(), records, occupancy, emptySurfaceState())
+	if occupancyResp.InUse != 3 || occupancyResp.Available != 1 {
+		t.Fatalf("occupancy in_use/available = %d/%d, want 3/1", occupancyResp.InUse, occupancyResp.Available)
 	}
 }

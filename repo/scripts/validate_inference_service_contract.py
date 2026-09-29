@@ -275,8 +275,8 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     for field in ("model_version_id", "served_model_name", "resources", "placement_mode", "image_id", "image_ref", "engine"):
         if field not in create_properties:
             errors.append(f"CreateInferenceServiceRequest missing {field}")
-    if (create_properties.get("engine") or {}).get("$ref") != "#/components/schemas/InferenceServiceEngine":
-        errors.append("CreateInferenceServiceRequest.engine must reference InferenceServiceEngine")
+    if (create_properties.get("engine") or {}).get("$ref") != "#/components/schemas/CreateInferenceServiceEngine":
+        errors.append("CreateInferenceServiceRequest.engine must reference CreateInferenceServiceEngine")
     if "default" in (create_properties.get("engine") or {}):
         errors.append("CreateInferenceServiceRequest.engine must remain optional in generated clients")
     for field in ("gpu_type", "gpu_count_per_pod", "max_concurrency"):
@@ -291,6 +291,48 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref", "engine"):
         if "default" in (create_properties.get(field) or {}):
             errors.append(f"CreateInferenceServiceRequest.{field} must remain optional in generated clients")
+
+    create_engine = schemas.get("CreateInferenceServiceEngine") or {}
+    if create_engine.get("additionalProperties") is not False:
+        errors.append("CreateInferenceServiceEngine must set additionalProperties false")
+    expected_reserved_env = [
+        "CUDA_VISIBLE_DEVICES",
+        "NVIDIA_VISIBLE_DEVICES",
+        "NVIDIA_DRIVER_CAPABILITIES",
+        "PYTHONPATH",
+        "PATH",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
+    ]
+    if (create_engine.get("x-ani-reserved-engine-env-names") or []) != expected_reserved_env:
+        errors.append("CreateInferenceServiceEngine must freeze the reserved engine env names")
+    create_env = (create_engine.get("properties") or {}).get("env") or {}
+    if create_env.get("maxItems") != 32:
+        errors.append("CreateInferenceServiceEngine.env must cap at 32 items")
+    if create_env.get("items", {}).get("$ref") != "#/components/schemas/InferenceServiceEngineEnvVar":
+        errors.append("CreateInferenceServiceEngine.env items must be InferenceServiceEngineEnvVar")
+    create_command = (create_engine.get("properties") or {}).get("command") or {}
+    command_variants = create_command.get("oneOf") or []
+    if len(command_variants) != 2:
+        errors.append("CreateInferenceServiceEngine.command must accept exactly text and argv variants")
+    else:
+        command_text, command_argv = command_variants
+        if (
+            command_text.get("type") != "string"
+            or command_text.get("minLength") != 1
+            or command_text.get("maxLength") != 262144
+        ):
+            errors.append("CreateInferenceServiceEngine.command text must be bounded UTF-8 input")
+        if command_argv.get("type") != "array" or command_argv.get("minItems") != 1 or command_argv.get("maxItems") != 64:
+            errors.append("CreateInferenceServiceEngine.command argv must cap at 64 items")
+        command_argv_item = command_argv.get("items") or {}
+        if (
+            command_argv_item.get("type") != "string"
+            or command_argv_item.get("minLength") != 1
+            or command_argv_item.get("maxLength") != 4096
+        ):
+            errors.append("CreateInferenceServiceEngine.command argv items must be bounded non-empty strings")
 
     resources = schemas.get("InferenceServiceResources") or {}
     if set(resources.get("required") or []) != {"cpu", "memory"}:

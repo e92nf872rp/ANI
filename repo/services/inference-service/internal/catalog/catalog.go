@@ -39,6 +39,7 @@ type ModelVersion struct {
 	ID              uuid.UUID
 	ModelID         uuid.UUID
 	DisplayName     string
+	Capabilities    []string
 	Ready           bool
 	Format          string // safetensors | gguf | pytorch
 	SizeBytes       int64

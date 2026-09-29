@@ -51,7 +51,9 @@ func TestCreateInputFromProtoMapsAcceleratorMemory(t *testing.T) {
 func TestProtoServiceEchoesAcceleratorMemory(t *testing.T) {
 	msg := protoService(service.ServiceView{
 		ID: testService, Name: "qwen-chat", Model: testModel.String(), ModelVersionID: testModel,
-		Replicas: 1,
+		Task:         domain.InferenceTaskEmbed,
+		Capabilities: []string{"embedding"},
+		Replicas:     1,
 		Resources: service.ResourcesView{
 			CPU: "8", Memory: "32Gi",
 			Accelerator: &domain.Accelerator{SpecID: "gpu-nvidia-geforce-rtx-4090", CountPerReplica: 1, MemoryMB: 10240},
@@ -60,6 +62,12 @@ func TestProtoServiceEchoesAcceleratorMemory(t *testing.T) {
 	})
 	if msg.GetResources().GetAccelerator().GetMemory() != 10240 {
 		t.Fatalf("memory = %d", msg.GetResources().GetAccelerator().GetMemory())
+	}
+	if msg.GetTask() != "embed" {
+		t.Fatalf("task = %q, want embed", msg.GetTask())
+	}
+	if len(msg.GetCapabilities()) != 1 || msg.GetCapabilities()[0] != "embedding" {
+		t.Fatalf("capabilities = %#v", msg.GetCapabilities())
 	}
 }
 

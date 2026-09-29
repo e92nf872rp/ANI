@@ -2652,14 +2652,22 @@ func TestParseMultiValueQuery(t *testing.T) {
 func TestInstanceListMultiValueKindAndStateFilters(t *testing.T) {
 	api := newInstanceAPI()
 	seed := []ports.WorkloadInstanceRecord{
-		{TenantID: "tenant-a", InstanceID: "inst_vm_run", Name: "vm-running", Kind: ports.WorkloadKindVM,
-			Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(100, 0).UTC()},
-		{TenantID: "tenant-a", InstanceID: "inst_ct_stop", Name: "ct-stopped", Kind: ports.WorkloadKindContainer,
-			Status: ports.WorkloadStatus{State: ports.WorkloadStateStopped}, CreatedAt: time.Unix(200, 0).UTC()},
-		{TenantID: "tenant-a", InstanceID: "inst_gpu_pend", Name: "gpu-pending", Kind: ports.WorkloadKindGPUContainer,
-			Status: ports.WorkloadStatus{State: ports.WorkloadStatePending}, CreatedAt: time.Unix(300, 0).UTC()},
-		{TenantID: "tenant-a", InstanceID: "inst_nb_run", Name: "nb-running", Kind: ports.WorkloadKindNotebook,
-			Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(400, 0).UTC()},
+		{
+			TenantID: "tenant-a", InstanceID: "inst_vm_run", Name: "vm-running", Kind: ports.WorkloadKindVM,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(100, 0).UTC(),
+		},
+		{
+			TenantID: "tenant-a", InstanceID: "inst_ct_stop", Name: "ct-stopped", Kind: ports.WorkloadKindContainer,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStateStopped}, CreatedAt: time.Unix(200, 0).UTC(),
+		},
+		{
+			TenantID: "tenant-a", InstanceID: "inst_gpu_pend", Name: "gpu-pending", Kind: ports.WorkloadKindGPUContainer,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStatePending}, CreatedAt: time.Unix(300, 0).UTC(),
+		},
+		{
+			TenantID: "tenant-a", InstanceID: "inst_nb_run", Name: "nb-running", Kind: ports.WorkloadKindNotebook,
+			Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, CreatedAt: time.Unix(400, 0).UTC(),
+		},
 	}
 	for i := range seed {
 		if err := api.store.UpsertStatus(context.Background(), seed[i]); err != nil {
@@ -2714,5 +2722,241 @@ func TestInstanceListMultiValueKindAndStateFilters(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("空过滤列表应包含 %s，body=%s", want, body)
 		}
+	}
+}
+
+// ---- 读修复状态转换委托（read-repair → ReconcileNow，配额 TCC 闭环） ----
+
+// stubReconcileController 记录 ReconcileNow 调用，用于验证读修复路径把
+// 生命周期转换委托给 reconcile 控制器（TCC 配额动作 + outbox 同事务提交）。
+type stubReconcileController struct {
+	mu    sync.Mutex
+	calls []ports.ReconcileTarget
+	err   error
+}
+
+func (s *stubReconcileController) Start(context.Context) error { return nil }
+
+func (s *stubReconcileController) ReconcileNow(_ context.Context, target ports.ReconcileTarget) (ports.ReconcileResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, target)
+	if s.err != nil {
+		return ports.ReconcileResult{}, s.err
+	}
+	return ports.ReconcileResult{
+		TenantID:      target.TenantID,
+		InstanceID:    target.InstanceID,
+		PreviousState: target.State,
+		CurrentState:  ports.WorkloadStateRunning,
+		StateChanged:  true,
+	}, nil
+}
+
+func (s *stubReconcileController) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.calls)
+}
+
+// TestRefreshOneStoreStatusDelegatesTransitionWithQuotaTxIDs 验证：携带 QuotaTxIDs
+// 的实例在读修复中发生 provisioning→running 转换时，必须委托 ReconcileNow，
+// 使 Confirm 与状态写入同事务提交，而不是裸 UpsertStatus 绕过配额链。
+func TestRefreshOneStoreStatusDelegatesTransitionWithQuotaTxIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apis/apps/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"metadata":{"name":"gpu-1"},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1,"updatedReplicas":1}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	controller := &stubReconcileController{}
+	api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore(), reconcileController: controller}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "inst_gpu_1",
+		TenantID:   "tenant-a",
+		Name:       "gpu-1",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Provider:   "kubernetes",
+		QuotaTxIDs: []string{"tx-1"},
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateProvisioning,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if controller.callCount() != 1 {
+		t.Fatalf("ReconcileNow calls = %d, want 1", controller.callCount())
+	}
+	got := controller.calls[0]
+	if got.TenantID != "tenant-a" || got.InstanceID != "inst_gpu_1" {
+		t.Fatalf("target = %+v, want tenant-a/inst_gpu_1", got)
+	}
+	if got.State != ports.WorkloadStateProvisioning {
+		t.Fatalf("target.state = %s, want provisioning (previous state)", got.State)
+	}
+}
+
+// TestRefreshOneStoreStatusSkipsDelegateWithoutQuotaTxIDs 验证：无 QuotaTxIDs 的
+// 实例（GPU_QUOTA_ENABLED 开启前创建或非配额实例）不委托 ReconcileNow，读修复
+// 行为与修复前完全一致。
+func TestRefreshOneStoreStatusSkipsDelegateWithoutQuotaTxIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apis/apps/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"metadata":{"name":"gpu-2"},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1,"updatedReplicas":1}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	controller := &stubReconcileController{}
+	api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore(), reconcileController: controller}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "inst_gpu_2",
+		TenantID:   "tenant-a",
+		Name:       "gpu-2",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Provider:   "kubernetes",
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateProvisioning,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if controller.callCount() != 0 {
+		t.Fatalf("ReconcileNow calls = %d, want 0 (no QuotaTxIDs)", controller.callCount())
+	}
+}
+
+// TestRefreshOneStoreStatusDelegatesDeploymentGoneToFailed 验证：Deployment 消失
+// 触发 provisioning→failed 转换时同样委托 ReconcileNow（Cancel 释放预占）。
+func TestRefreshOneStoreStatusDelegatesDeploymentGoneToFailed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	controller := &stubReconcileController{}
+	api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore(), reconcileController: controller}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "inst_gpu_3",
+		TenantID:   "tenant-a",
+		Name:       "gpu-3",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Provider:   "kubernetes",
+		QuotaTxIDs: []string{"tx-3"},
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateProvisioning,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateFailed {
+		t.Fatalf("state = %s, want failed", record.Status.State)
+	}
+	if controller.callCount() != 1 {
+		t.Fatalf("ReconcileNow calls = %d, want 1", controller.callCount())
+	}
+	if controller.calls[0].State != ports.WorkloadStateProvisioning {
+		t.Fatalf("target.state = %s, want provisioning", controller.calls[0].State)
+	}
+}
+
+// TestRefreshOneVMStoreStatusDelegatesTransitionWithQuotaTxIDs 验证 VM 读修复
+// 路径同样委托：KubeVirt 观测到 Running 且 QuotaTxIDs 非空时调用 ReconcileNow。
+func TestRefreshOneVMStoreStatusDelegatesTransitionWithQuotaTxIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-2"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`))
+		case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-2"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachineInstance","status":{"phase":"Running","nodeName":"dev-phys-02","interfaces":[{"name":"default","ipAddress":"10.60.0.9","primary":true}]}}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	controller := &stubReconcileController{}
+	api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore(), reconcileController: controller}
+
+	record := ports.WorkloadInstanceRecord{
+		TenantID:     "tenant-a",
+		InstanceID:   "inst_vm_2",
+		Name:         "vm-2",
+		Kind:         ports.WorkloadKindVM,
+		Provider:     "kubevirt",
+		ResourceRefs: []string{"kubevirt/VirtualMachine/vm-2"},
+		QuotaTxIDs:   []string{"tx-vm-2"},
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateProvisioning,
+		},
+		SSH: &ports.VMSSHConnectionInfo{Ready: false},
+	}
+
+	if err := api.refreshOneVMStoreStatus(context.Background(), &record); err != nil {
+		t.Fatalf("refreshOneVMStoreStatus error = %v", err)
+	}
+
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if controller.callCount() != 1 {
+		t.Fatalf("ReconcileNow calls = %d, want 1", controller.callCount())
+	}
+	if controller.calls[0].State != ports.WorkloadStateProvisioning {
+		t.Fatalf("target.state = %s, want provisioning", controller.calls[0].State)
 	}
 }

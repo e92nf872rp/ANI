@@ -211,6 +211,8 @@ components:
         image_id:              { type: string, description: 创建时从镜像仓库选定的 Registry 镜像 ID；手填 image_ref 时可为缺省 }
         image_ref:             { type: string, nullable: true, description: 创建时解析并冻结的 digest 引用；只读 }
         served_model_name:     { type: string, description: OpenAI-compatible 请求体中的 model 值；在当前租户的活动推理服务内唯一，创建后不可变 }
+        task:                  { type: string, enum: [generate, embed], description: 冻结的推理任务类型；generate 为对话/文本生成，embed 为向量生成 }
+        capabilities:          { type: array, items: { type: string }, description: 创建时从模型冻结的能力列表，例如 embedding 或 text-generation }
         replicas:              { type: integer, minimum: 1, default: 1 }
         ready_replicas:        { type: integer, minimum: 0, default: 0 }
         resources:             { $ref: '#/components/schemas/InferenceServiceResources' }
@@ -234,14 +236,14 @@ components:
       type: object
       description: |
         推理服务每个副本申请的加速器资源。
-        spec_id 是 GPU 型号，count_per_replica 是申请卡数，memory 是申请显存（MiB）。
+        spec_id 是 Core GPUSpec ID，count_per_replica 是申请卡数，memory 是申请显存（MiB）。
         不填 memory 为整卡，填写 memory 为 vGPU。
       required: [spec_id, count_per_replica]
       properties:
         spec_id:
           type: string
           minLength: 1
-          description: GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号。历史 -full/-Nx ID 实现剥掉后缀后仍按型号处理。
+          description: Core GPUSpec ID，必须来自 GET /gpu-specs 或 /gpu-specs/availability，例如 rtx4090-12g-4。旧节点型号 ID 仅在迁移期兼容。
         count_per_replica:
           type: integer
           minimum: 1
@@ -317,6 +319,50 @@ components:
             minLength: 1
             maxLength: 4096
 
+    CreateInferenceServiceEngine:
+      type: object
+      additionalProperties: false
+      description: |
+        创建时的环境变量与完整启动命令。command 可由前端文本框直接提交字符串，兼容原有 argv 数组。
+        字符串由网关解析为 argv 后冻结、保存和下发，创建及查询响应仍返回 InferenceServiceEngine 的数组形式。
+        不拼接或追加平台默认命令，不隐式调用 shell；不进入 PATCH。env 保留名规则与 InferenceServiceEngine 相同。
+      x-ani-reserved-engine-env-names:
+        - CUDA_VISIBLE_DEVICES
+        - NVIDIA_VISIBLE_DEVICES
+        - NVIDIA_DRIVER_CAPABILITIES
+        - PYTHONPATH
+        - PATH
+        - LD_PRELOAD
+        - LD_LIBRARY_PATH
+        - RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES
+      properties:
+        env:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/InferenceServiceEngineEnvVar'
+        command:
+          description: |
+            完整启动命令文本或 argv 数组；省略表示沿用平台默认启动命令。
+            文本用空格或制表符分隔参数，支持单/双引号及反斜杠转义、反斜杠换行续行。
+            双引号内仅转义双引号、反斜杠、美元符号、反引号和换行；其余反斜杠保留。
+            不执行变量展开、通配符展开或命令替换。未引用且未转义的 ; & | < > ( ) 或换行不支持；
+            美元符号和反引号仅能作为单引号内或转义后的字面量。复杂命令继续使用显式 argv 数组。
+            空白命令、空参数、未闭合引号、末尾反斜杠、NUL 或超限返回 400 INVALID_ARGUMENT。
+            文本解析后的 argv 也须满足数组分支的限制，运行时仍处理显式 --model/--model-path 参数的挂载路径替换。
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 262144
+              example: 'python3 -m vllm.entrypoints.openai.api_server --model /models/qwen --served-model-name qwen3.5-0.8b --host 0.0.0.0 --port 8000 --dtype bfloat16'
+            - type: array
+              minItems: 1
+              maxItems: 64
+              items:
+                type: string
+                minLength: 1
+                maxLength: 4096
+
     CreateInferenceServiceRequest:
       type: object
       required: [idempotency_key, name, model]
@@ -334,7 +380,7 @@ components:
         replicas: { type: integer, description: 省略时服务按 1 个副本处理 }
         resources: { $ref: '#/components/schemas/InferenceServiceResources' }
         placement_mode: { type: string, enum: [auto, single_node, multi_node], description: 省略时服务按 auto 处理 }
-        engine: { $ref: '#/components/schemas/InferenceServiceEngine', description: 可选；前端传入 env 与完整启动命令 command，创建时冻结。省略表示沿用平台默认启动命令和环境 }
+        engine: { $ref: '#/components/schemas/CreateInferenceServiceEngine', description: 可选；前端传入 env 与完整启动命令 command（字符串或 argv 数组），解析后创建时冻结。省略表示沿用平台默认启动命令和环境 }
         gpu_type: { type: string, deprecated: true, description: v1 兼容输入；新客户端不得发送 }
         gpu_count_per_pod: { type: integer, deprecated: true, description: v1 兼容输入；单独出现时不得推断为 GPU }
         max_concurrency: { type: integer, deprecated: true, description: v1 兼容输入；P0 不执行 }
@@ -2149,7 +2195,10 @@ paths:
       security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
-        - { name: cursor, in: query, required: false, schema: { type: string }, description: 下一页游标 }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 }, description: 从过滤后的结果集开始的偏移量；与 cursor 不能同时使用 }
+        - { name: cursor, in: query, required: false, schema: { type: string }, description: 下一页游标；与 offset 不能同时使用 }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [pending, deploying, running, stopping, stopped, failed] }, description: 按推理服务状态过滤；省略表示全部 }
+        - { name: capability, in: query, required: false, schema: { type: string, minLength: 1, maxLength: 64 }, description: 按创建时冻结的模型能力过滤，例如 embedding }
       responses:
         "200":
           description: 推理服务列表
@@ -2161,6 +2210,7 @@ paths:
                   next_cursor: { type: string, nullable: true }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
     post:
       operationId: createInferenceService
       summary: 部署推理服务

@@ -15,6 +15,13 @@ const (
 	StorageResourceDeleted   StorageResourceState = "deleted"
 )
 
+// StorageVolumeMode 取值是块存储卷的 Kubernetes volumeMode：block 用于 VM 数据盘
+// 热插裸设备（无需卷内 disk.img）；filesystem 用于容器/沙箱按目录挂载。
+const (
+	StorageVolumeModeBlock      = "block"
+	StorageVolumeModeFilesystem = "filesystem"
+)
+
 type StorageVolumeRecord struct {
 	TenantID                 string
 	VolumeID                 string
@@ -23,6 +30,7 @@ type StorageVolumeRecord struct {
 	StorageClass             string
 	Zone                     string
 	VolumeType               string
+	VolumeMode               string
 	IOPS                     int
 	Encrypted                bool
 	MountInstanceID          string
@@ -322,6 +330,7 @@ type StorageVolumeCreateRequest struct {
 	StorageClass    string
 	Zone            string
 	VolumeType      string
+	VolumeMode      string
 	Encrypted       bool
 	MountInstanceID string
 	MountRoute      string

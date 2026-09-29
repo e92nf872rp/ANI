@@ -172,9 +172,10 @@ func (api *platformWorkloadAPI) capabilities(ctx context.Context, c *app.Request
 		"accelerator_specs": func() []map[string]any {
 			items := make([]map[string]any, 0, len(caps.AcceleratorSpecs))
 			for _, spec := range caps.AcceleratorSpecs {
-				items = append(items, map[string]any{
+				item := map[string]any{
 					"spec_id": spec.SpecID, "available": spec.Available, "max_single_node_count": spec.MaxSingleNodeCount,
-				})
+				}
+				items = append(items, item)
 			}
 			return items
 		}(),

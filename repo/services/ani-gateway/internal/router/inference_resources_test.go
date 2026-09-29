@@ -40,22 +40,28 @@ type fakeInferenceClient struct {
 	lastReplicas int32
 	lastCreate   *inferencecontrolv1.CreateInferenceServiceRequest
 
-	listResp   *inferencecontrolv1.ListInferenceServicesResponse
-	createResp *inferencecontrolv1.InferenceService
-	getResp    *inferencecontrolv1.InferenceService
-	scaleResp  *inferencecontrolv1.InferenceOperation
-	deleteResp *inferencecontrolv1.InferenceOperation
-	lifeResp   *inferencecontrolv1.InferenceOperation
-	opResp     *inferencecontrolv1.InferenceOperation
-	logsResp   *inferencecontrolv1.ListInferenceServiceLogsResponse
-	lastLimit  int32
-	lastCursor string
-	lastLevel  string
-	err        error
+	listResp      *inferencecontrolv1.ListInferenceServicesResponse
+	createResp    *inferencecontrolv1.InferenceService
+	getResp       *inferencecontrolv1.InferenceService
+	scaleResp     *inferencecontrolv1.InferenceOperation
+	deleteResp    *inferencecontrolv1.InferenceOperation
+	lifeResp      *inferencecontrolv1.InferenceOperation
+	opResp        *inferencecontrolv1.InferenceOperation
+	logsResp      *inferencecontrolv1.ListInferenceServiceLogsResponse
+	lastLimit     int32
+	lastCursor    string
+	lastLevel     string
+	lastListQuery *inferencecontrolv1.ListInferenceServicesRequest
+	err           error
 }
 
 func (f *fakeInferenceClient) ListInferenceServices(_ context.Context, tenantID string) (*inferencecontrolv1.ListInferenceServicesResponse, error) {
 	f.lastTenantID = tenantID
+	return f.listResp, f.err
+}
+func (f *fakeInferenceClient) ListInferenceServicesPage(_ context.Context, tenantID string, req *inferencecontrolv1.ListInferenceServicesRequest) (*inferencecontrolv1.ListInferenceServicesResponse, error) {
+	f.lastTenantID = tenantID
+	f.lastListQuery = req
 	return f.listResp, f.err
 }
 func (f *fakeInferenceClient) CreateInferenceService(_ context.Context, tenantID string, req *inferencecontrolv1.CreateInferenceServiceRequest) (*inferencecontrolv1.InferenceService, error) {
@@ -130,7 +136,8 @@ func sampleService() *inferencecontrolv1.InferenceService {
 	return &inferencecontrolv1.InferenceService{
 		Id: "22222222-2222-2222-2222-222222222222", Name: "qwen-chat", Model: "Qwen 7B / v1",
 		ModelVersionId: "33333333-3333-3333-3333-333333333333", ServedModelName: "qwen-chat",
-		Replicas: 1, Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
+		Capabilities: []string{"embedding"},
+		Replicas:     1, Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
 		PlacementMode: "auto", Status: "pending", CurrentOperationId: "55555555-5555-5555-5555-555555555555",
 		ImageRef:  pinnedInferenceImageRef,
 		CreatedAt: timestamppb.New(time.Date(2026, 8, 15, 1, 2, 3, 0, time.UTC)),
@@ -558,6 +565,51 @@ func TestInferenceRoutesRegistered(t *testing.T) {
 	}
 }
 
+func TestListInferenceServicesForwardsStatusAndOffset(t *testing.T) {
+	running := proto.Clone(sampleService()).(*inferencecontrolv1.InferenceService)
+	running.Id = "running-2"
+	running.Status = "running"
+	client := &fakeInferenceClient{listResp: &inferencecontrolv1.ListInferenceServicesResponse{Items: []*inferencecontrolv1.InferenceService{running}}}
+	h := setupInferenceTestServer(t, client)
+	resp := performInference(h, http.MethodGet, "/api/v1/svc/inference-services?limit=1&offset=1&status=running&capability=embedding", "", "tenant-a")
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastListQuery == nil || client.lastListQuery.GetStatus() != "running" || client.lastListQuery.GetCapability() != "embedding" || client.lastListQuery.GetLimit() != 1 || client.lastListQuery.GetOffset() != 1 {
+		t.Fatalf("query=%+v", client.lastListQuery)
+	}
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 1 || body.Items[0]["id"] != "running-2" {
+		t.Fatalf("items=%v", body.Items)
+	}
+	if got, ok := body.Items[0]["capabilities"].([]any); !ok || len(got) != 1 || got[0] != "embedding" {
+		t.Fatalf("capabilities=%v", body.Items[0]["capabilities"])
+	}
+}
+
+func TestListInferenceServicesRejectsInvalidQuery(t *testing.T) {
+	for _, query := range []string{
+		"status=unknown", "capability=a,b", "offset=-1", "offset=abc", "offset=4294967296", "limit=0", "limit=201", "cursor=abc", "cursor=4294967296", "cursor=1&offset=1",
+	} {
+		t.Run(query, func(t *testing.T) {
+			client := &fakeInferenceClient{listResp: &inferencecontrolv1.ListInferenceServicesResponse{}}
+			h := setupInferenceTestServer(t, client)
+			resp := performInference(h, http.MethodGet, "/api/v1/svc/inference-services?"+query, "", "tenant-a")
+			if resp.StatusCode() != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", resp.StatusCode(), resp.Body())
+			}
+			if client.lastListQuery != nil || client.lastTenantID != "" {
+				t.Fatalf("downstream called for invalid query: query=%+v tenant=%q", client.lastListQuery, client.lastTenantID)
+			}
+		})
+	}
+}
+
 func TestInferenceCreateReturnsAcceptedPublicProjection(t *testing.T) {
 	client := &fakeInferenceClient{createResp: sampleService()}
 	h := setupInferenceTestServer(t, client)
@@ -595,8 +647,12 @@ func TestInferenceCreateReturnsAcceptedPublicProjection(t *testing.T) {
 
 func TestInferenceServiceJSONProjectsPublishedInvocationURL(t *testing.T) {
 	msg := sampleService()
+	msg.Task = "embed"
 	msg.InvocationUrl = "https://ai.example.com/v1/chat/completions"
 	got := inferenceServiceJSON(msg)
+	if got["task"] != "embed" {
+		t.Fatalf("task = %v, want embed", got["task"])
+	}
 	if got["invocation_url"] != msg.GetInvocationUrl() {
 		t.Fatalf("invocation_url = %v", got["invocation_url"])
 	}
@@ -626,6 +682,55 @@ func TestInferenceCreateForwardsEngineCommandAndEnv(t *testing.T) {
 	}
 	if strings.Join(engine.GetCommand(), " ") != "python3 -m vllm.entrypoints.openai.api_server --model /models/qwen" {
 		t.Fatalf("command = %#v", engine.GetCommand())
+	}
+}
+
+func TestInferenceCreateAcceptsTextEngineCommandAndNormalizesArgv(t *testing.T) {
+	client := &fakeInferenceClient{createResp: sampleService()}
+	h := setupInferenceTestServer(t, client)
+	body := inferenceCreateBody(`"image_ref":"` + pinnedInferenceImageRef + `","engine":{"command":"python3 -m vllm.entrypoints.openai.api_server --model \"/models/qwen model\" --dtype bfloat16"}`)
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", body, "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastCreate == nil || client.lastCreate.GetEngine() == nil {
+		t.Fatal("engine was not forwarded")
+	}
+	want := "python3 -m vllm.entrypoints.openai.api_server --model /models/qwen model --dtype bfloat16"
+	if got := strings.Join(client.lastCreate.GetEngine().GetCommand(), " "); got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
+func TestInferenceCreateRejectsInvalidTextEngineCommand(t *testing.T) {
+	for _, command := range []string{
+		"python3 --model qwen && echo bad",
+		"python3 --model $MODEL",
+		"python3 --model 'unterminated",
+	} {
+		t.Run(command, func(t *testing.T) {
+			client := &fakeInferenceClient{createResp: sampleService()}
+			h := setupInferenceTestServer(t, client)
+			encoded, err := json.Marshal(command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := inferenceCreateBody("\"image_ref\":\"" + pinnedInferenceImageRef + "\",\"engine\":{\"command\":" + string(encoded) + "}")
+			resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", body, "11111111-1111-1111-1111-111111111111")
+			if resp.StatusCode() != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+			}
+			if client.lastCreate != nil {
+				t.Fatal("invalid command must not reach gRPC")
+			}
+			var got map[string]any
+			if err := json.Unmarshal(resp.Body(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got["code"] != "INVALID_ARGUMENT" {
+				t.Fatalf("code = %v", got["code"])
+			}
+		})
 	}
 }
 
@@ -918,5 +1023,22 @@ func TestCreateInferenceServiceRejectsZeroAcceleratorMemory(t *testing.T) {
 	}
 	if client.lastCreate != nil {
 		t.Fatal("zero accelerator memory must not reach gRPC")
+	}
+}
+
+func TestCreateInferenceServiceRejectsLegacyAcceleratorFields(t *testing.T) {
+	for _, body := range []string{
+		inferenceCreateBody(`"resources":{"cpu":"2","memory":"4Gi","acc":{"model":"rtx4090"}}`),
+		inferenceCreateBody(`"resources":{"cpu":"2","memory":"4Gi","accelerator":{"count":1}}`),
+	} {
+		client := &fakeInferenceClient{createResp: &inferencecontrolv1.InferenceService{Id: "svc-1"}}
+		h := setupInferenceTestServer(t, client)
+		resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", body, "11111111-1111-1111-1111-111111111111")
+		if resp.StatusCode() != http.StatusBadRequest {
+			t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+		}
+		if client.lastCreate != nil {
+			t.Fatal("legacy accelerator field must not reach gRPC")
+		}
 	}
 }

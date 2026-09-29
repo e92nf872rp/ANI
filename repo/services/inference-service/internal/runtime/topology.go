@@ -17,10 +17,14 @@ type CapabilityView struct {
 }
 
 type AcceleratorView struct {
-	// SpecID 是 GPU 型号。与创建请求的 spec_id 比对时剥掉历史 -full / -Nx。
+	// SpecID is the public GPUSpec ID. Aliases are accepted only for
+	// migration; exact public IDs always take precedence.
 	SpecID             string
 	Available          bool
 	MaxSingleNodeCount int
+	GPUMode            string
+	MemoryPerShareMB   int
+	Aliases            []string
 }
 
 // TopologyPlan 告诉 Core 用单节点 Deployment 还是 leader_worker。CPU 永远单节点。
@@ -43,7 +47,7 @@ func PlanTopology(spec domain.Spec, caps CapabilityView) (TopologyPlan, error) {
 		}
 		return TopologyPlan{Mode: "single_node", ProfileID: "container-single-node", ProfileVersion: "v1"}, nil
 	}
-	item, ok := findAccelerator(caps, spec.Accelerator.SpecID)
+	item, ok := findAccelerator(caps, spec.Accelerator.SpecID, spec.Accelerator.MemoryMB)
 	if !ok || !item.Available {
 		return TopologyPlan{}, ErrRuntimeUnsupported
 	}
@@ -108,14 +112,46 @@ func commandProvidesRay(command []string) bool {
 	return strings.Contains(joined, "ray start") || strings.Contains(joined, "multi-node-serving.sh")
 }
 
-func findAccelerator(caps CapabilityView, specID string) (AcceleratorView, bool) {
-	want := canonicalAcceleratorSpecID(specID)
+func findAccelerator(caps CapabilityView, specID string, memoryMB int) (AcceleratorView, bool) {
+	want := strings.ToLower(strings.TrimSpace(specID))
+	var aliases []AcceleratorView
 	for _, item := range caps.AcceleratorSpecs {
-		if canonicalAcceleratorSpecID(item.SpecID) == want {
+		if strings.EqualFold(strings.TrimSpace(item.SpecID), want) && acceleratorViewMemoryMatches(item, memoryMB) {
+			return item, true
+		}
+	}
+	for _, item := range caps.AcceleratorSpecs {
+		for _, alias := range item.Aliases {
+			if strings.EqualFold(strings.TrimSpace(alias), want) && acceleratorViewMemoryMatches(item, memoryMB) {
+				aliases = append(aliases, item)
+				break
+			}
+		}
+	}
+	if len(aliases) == 1 {
+		return aliases[0], true
+	}
+	if len(aliases) > 1 {
+		return AcceleratorView{}, false
+	}
+	legacyWant := canonicalAcceleratorSpecID(want)
+	for _, item := range caps.AcceleratorSpecs {
+		if legacyWant != want && canonicalAcceleratorSpecID(item.SpecID) == legacyWant && acceleratorViewMemoryMatches(item, memoryMB) {
 			return item, true
 		}
 	}
 	return AcceleratorView{}, false
+}
+
+func acceleratorViewMemoryMatches(item AcceleratorView, memoryMB int) bool {
+	switch item.GPUMode {
+	case "vgpu":
+		return memoryMB > 0 && item.MemoryPerShareMB > 0 && memoryMB == item.MemoryPerShareMB
+	case "wholecard":
+		return memoryMB == 0
+	default:
+		return true
+	}
 }
 
 var legacyAcceleratorSuffix = regexp.MustCompile(`-\d+x$`)

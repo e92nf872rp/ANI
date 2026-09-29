@@ -44,6 +44,9 @@ func TestResolveReadySafetensorsAssignsCPUAndGPUProfiles(t *testing.T) {
 	if got.DisplayName != "Qwen 7B / v1" || got.ArtifactDigest != "sha256:abc" {
 		t.Fatalf("snapshot = %+v", got)
 	}
+	if len(got.Capabilities) != 1 || got.Capabilities[0] != "text-generation" {
+		t.Fatalf("capabilities = %#v", got.Capabilities)
+	}
 	if got.CPUProfile.ID != "vllm-chat-cpu" || got.CPUProfile.Runtime != "vllm" || got.GPUProfile.ID != "vllm-chat-gpu" {
 		t.Fatalf("profiles = cpu=%+v gpu=%+v", got.CPUProfile, got.GPUProfile)
 	}

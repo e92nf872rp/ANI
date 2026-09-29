@@ -33,10 +33,16 @@ service InferenceControl {
 
 message ListInferenceServicesRequest {
   string tenant_id = 1;
+  string status = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+  string cursor = 5;
+  string capability = 6;
 }
 
 message ListInferenceServicesResponse {
   repeated InferenceService items = 1;
+  string next_cursor = 2;
 }
 
 message CreateInferenceServiceRequest {
@@ -131,6 +137,8 @@ message InferenceService {
   string image_ref = 22;
   InferenceServiceEngine engine = 23;
   string invocation_url = 24;
+  string task = 25;
+  repeated string capabilities = 26;
 }
 
 message InferenceServiceEngine {
