@@ -105,29 +105,35 @@ func endpointHostPort(raw string, target repository.PublicationTarget) (string, 
 	if err != nil || u.Scheme != "http" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") || u.Path != "" || u.RawPath != "" {
 		return "", 0, errors.New("invalid runtime endpoint")
 	}
-	if u.Port() == "" || strings.Contains(u.Host, "%") {
+	host := u.Hostname()
+	if host == "" || u.Port() == "" || strings.Contains(u.Host, "%") {
 		return "", 0, errors.New("invalid runtime endpoint")
 	}
 	port, err := strconv.Atoi(u.Port())
 	if err != nil || port < 1 || port > 65535 {
 		return "", 0, errors.New("invalid runtime endpoint")
 	}
-	host := u.Hostname()
-	expectedHost := runtimeServiceHost(target.ServiceID, target.TenantID)
-	shortHost := strings.TrimSuffix(expectedHost, ".cluster.local")
-	qualifiedHost := expectedHost
-	if host == "" || (host != shortHost && host != qualifiedHost) || host != strings.ToLower(host) || strings.HasSuffix(host, ".") || net.ParseIP(host) != nil || !validDNSName(host) {
+	// The endpoint must point at a Service inside the owning tenant's
+	// namespace, but the service name itself is not pinned to the current
+	// `pw-<id>` convention: models created by earlier platform versions use
+	// legacy `<uuid>.ani-tenant-<tenant>.svc` names and those Services are
+	// real, so they stay publishable. Envoy Gateway runs in a different
+	// namespace, so the fully-qualified form is always published.
+	tenantSuffix := ".ani-tenant-" + target.TenantID.String() + ".svc"
+	if host != strings.ToLower(host) || strings.HasSuffix(host, ".") || net.ParseIP(host) != nil || !validDNSName(host) {
 		return "", 0, errors.New("invalid runtime endpoint")
 	}
-	// Always publish the fully-qualified Kubernetes service DNS name. The
-	// runtime endpoint may come back as the short `.svc` form, but the
-	// Envoy Gateway runs in a different namespace and must resolve the
-	// cross-namespace target unambiguously.
+	if !strings.HasSuffix(host, tenantSuffix) && !strings.HasSuffix(host, tenantSuffix+".cluster.local") {
+		return "", 0, errors.New("invalid runtime endpoint")
+	}
+	if host == strings.TrimPrefix(tenantSuffix, ".") {
+		return "", 0, errors.New("invalid runtime endpoint")
+	}
+	qualifiedHost := host
+	if !strings.HasSuffix(host, ".cluster.local") {
+		qualifiedHost += ".cluster.local"
+	}
 	return qualifiedHost, port, nil
-}
-
-func runtimeServiceHost(serviceID, tenantID uuid.UUID) string {
-	return "pw-" + serviceID.String() + ".ani-tenant-" + tenantID.String() + ".svc.cluster.local"
 }
 
 func validDNSName(name string) bool {

@@ -12,12 +12,14 @@ import (
 )
 
 type policyStoreFake struct {
-	policies   []domain.AccessPolicy
-	events     []domain.AccessPolicyEvent
-	published  map[string]domain.Service
-	resolveErr error
-	listErr    error
-	updateHash string
+	policies      []domain.AccessPolicy
+	events        []domain.AccessPolicyEvent
+	published     map[string]domain.Service
+	services      map[uuid.UUID]domain.Service
+	resolveErr    error
+	getServiceErr error
+	listErr       error
+	updateHash    string
 }
 
 func (f *policyStoreFake) ListServiceAccessPolicies(context.Context, uuid.UUID, uuid.UUID) ([]domain.AccessPolicy, error) {
@@ -54,6 +56,17 @@ func (f *policyStoreFake) ResolvePublishedService(_ context.Context, tenantID uu
 		return domain.Service{}, f.resolveErr
 	}
 	service, ok := f.published[tenantID.String()+"/"+servedModelName]
+	if !ok {
+		return domain.Service{}, repository.ErrNotFound
+	}
+	return service, nil
+}
+
+func (f *policyStoreFake) GetService(_ context.Context, _ uuid.UUID, serviceID uuid.UUID) (domain.Service, error) {
+	if f.getServiceErr != nil {
+		return domain.Service{}, f.getServiceErr
+	}
+	service, ok := f.services[serviceID]
 	if !ok {
 		return domain.Service{}, repository.ErrNotFound
 	}

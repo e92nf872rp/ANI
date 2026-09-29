@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     # RPCs are accessed via gRPC (default localhost:50052).
     rag_engine_grpc_addr: str = "localhost:50052"
 
+    # inference-service gRPC (internal control API). Used to resolve a
+    # published served_model_name to its cluster runtime endpoint via
+    # ResolveInferenceServiceEndpoint; the endpoint is then passed through
+    # to rag-engine so Embed/Generate connect directly to the tenant's
+    # own inference service (no Gateway routing by API key).
+    inference_service_grpc_addr: str = (
+        "inference-service.ani-system.svc.cluster.local:9104"
+    )
+
     # NATS (outbox dispatch) — maps to env NATS_URL
     nats_url: str = "nats://localhost:4222"
     nats_parse_subject: str = "ani.tasks.kb.parse"

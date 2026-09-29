@@ -131,18 +131,25 @@ async def list_kbs(
     tenant_id: str,
     limit: int = 20,
     cursor: str | None = None,
+    status: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """List knowledge_bases with cursor pagination (RLS-scoped).
 
     Returns (rows, total). Cursor is the `id` of the last row of the previous
     page (lexicographic UUID ordering). Soft-deleted rows (status='deleted')
-    are excluded from both the page and the total.
+    are excluded from both the page and the total. A non-empty ``status``
+    (active | rebuilding) additionally narrows both to that exact status.
     """
+    status = (status or "").strip()
+    status_total_sql = (
+        "SELECT count(*) FROM knowledge_bases "
+        "WHERE status <> 'deleted' AND status = $1"
+        if status
+        else "SELECT count(*) FROM knowledge_bases WHERE status <> 'deleted'"
+    )
     async with conn.transaction():
         await set_tenant_context(conn, tenant_id)
-        total = await conn.fetchval(
-            "SELECT count(*) FROM knowledge_bases WHERE status <> 'deleted'"
-        )
+        total = await conn.fetchval(status_total_sql, *( (status,) if status else () ))
         if cursor:
             rows = await conn.fetch(
                 """
@@ -156,11 +163,13 @@ async def list_kbs(
                        created_at, updated_at, vector_store_id
                   FROM knowledge_bases
                  WHERE id > $1 AND status <> 'deleted'
+                   AND ($3 = '' OR status = $3)
                  ORDER BY id ASC
                  LIMIT $2
                 """,
                 uuid.UUID(cursor),
                 limit,
+                status,
             )
         else:
             rows = await conn.fetch(
@@ -174,11 +183,12 @@ async def list_kbs(
                                     AND d.error_message = 'deleted')) AS doc_count,
                        created_at, updated_at, vector_store_id
                   FROM knowledge_bases
-                 WHERE status <> 'deleted'
+                 WHERE status <> 'deleted' AND ($2 = '' OR status = $2)
                  ORDER BY id ASC
                  LIMIT $1
                 """,
                 limit,
+                status,
             )
     return [dict(r) for r in rows], total
 

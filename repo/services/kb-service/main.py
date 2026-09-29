@@ -57,6 +57,8 @@ _parse_consumer = None                       # Plan step 6: NATS consumer
 _rebuild_consumer = None                     # P1 #24: rebuild NATS consumer
 _rag_engine_grpc = None                      # Plan step 6: rag-engine gRPC client (parse consumer, uvicorn loop)
 _query_rag_engine_grpc = None                 # Query path client (dedicated gRPC loop)
+_inference_service_grpc = None                # inference-service client (parse/rebuild, uvicorn loop)
+_query_inference_service_grpc = None          # Query path inference-service client (dedicated gRPC loop)
 
 
 async def _build_pool() -> asyncpg.Pool:
@@ -188,6 +190,7 @@ def _start_grpc_server(
     session_cache=None,
     retrieve_service_factory=None,
     rag_engine_grpc_client_factory=None,
+    inference_service_client_factory=None,
 ) -> grpc.Server:
     """Start the gRPC server (blocking call done in a background thread).
 
@@ -201,6 +204,7 @@ def _start_grpc_server(
             session_cache_factory=lambda: session_cache,
             retrieve_service_factory=retrieve_service_factory,
             rag_engine_grpc_client_factory=rag_engine_grpc_client_factory,
+            inference_service_client_factory=inference_service_client_factory,
         ),
         server,
     )
@@ -214,6 +218,7 @@ async def lifespan(app: FastAPI):
     """Manage DB pools + NATS + outbox dispatcher + gRPC server lifecycle."""
     global _db_pool, _outbox_pool, _outbox_dispatcher, _nats_client, _session_cache, _grpc_server
     global _parse_consumer, _rag_engine_grpc, _query_rag_engine_grpc, _rebuild_consumer
+    global _inference_service_grpc, _query_inference_service_grpc
 
     # 1. start the dedicated gRPC event loop on a background thread
     _start_grpc_loop()
@@ -250,6 +255,17 @@ async def lifespan(app: FastAPI):
                 _rag_engine_grpc = RagEngineGRPCClient(
                     addr=settings.rag_engine_grpc_addr
                 )
+                # inference-service client for resolving per-model runtime
+                # endpoints. Built on the uvicorn loop (its channel is created
+                # lazily on first use, inside a consumer task) so it stays
+                # loop-safe alongside the parse/rebuild consumers.
+                if _inference_service_grpc is None:
+                    from app.inference_service.client import (
+                        InferenceServiceGRPCClient,
+                    )
+                    _inference_service_grpc = InferenceServiceGRPCClient(
+                        addr=settings.inference_service_grpc_addr
+                    )
                 orchestrator = ParseOrchestrator(
                     db_pool=_outbox_pool,
                     core_client_factory=_default_core_client,
@@ -260,6 +276,7 @@ async def lifespan(app: FastAPI):
                     db_pool=_outbox_pool,
                     orchestrator=orchestrator,
                     subject=settings.nats_parse_subject_v2,
+                    inference_service_client=_inference_service_grpc,
                 )
                 await _parse_consumer.start()
                 logger.info(
@@ -288,6 +305,13 @@ async def lifespan(app: FastAPI):
                     _rag_engine_grpc = RagEngineGRPCClient(
                         addr=settings.rag_engine_grpc_addr
                     )
+                if _inference_service_grpc is None:
+                    from app.inference_service.client import (
+                        InferenceServiceGRPCClient,
+                    )
+                    _inference_service_grpc = InferenceServiceGRPCClient(
+                        addr=settings.inference_service_grpc_addr
+                    )
                 rebuild_orchestrator = ParseOrchestrator(
                     db_pool=_outbox_pool,
                     core_client_factory=_default_core_client,
@@ -298,6 +322,7 @@ async def lifespan(app: FastAPI):
                     db_pool=_outbox_pool,
                     orchestrator=rebuild_orchestrator,
                     subject=settings.nats_rebuild_subject,
+                    inference_service_client=_inference_service_grpc,
                 )
                 await _rebuild_consumer.start()
                 logger.info(
@@ -339,8 +364,10 @@ async def lifespan(app: FastAPI):
     # QueryOrchestrator path.
     _retrieve_service_factory = None
     _rag_engine_grpc_client_factory = None
+    _inference_service_client_factory = None
     try:
         from app.rag_engine.client import RagEngineGRPCClient
+        from app.inference_service.client import InferenceServiceGRPCClient
         from app.services.retrieve_service import RetrieveService
         from app.api.grpc_server import _default_core_client
 
@@ -366,6 +393,14 @@ async def lifespan(app: FastAPI):
                 rag_engine_client=_query_rag_engine_grpc,
             )
         _retrieve_service_factory = _make_retrieve_service
+
+        # Same loop-isolation rule as the rag-engine Query client: build a
+        # dedicated inference-service client for the Query path. Its channel
+        # is created lazily inside a Query RPC, binding it to the gRPC loop.
+        _query_inference_service_grpc = InferenceServiceGRPCClient(
+            addr=settings.inference_service_grpc_addr
+        )
+        _inference_service_client_factory = lambda: _query_inference_service_grpc
     except Exception:  # noqa: BLE001 — best-effort, service still starts
         logger.exception("Query orchestrator setup failed")
 
@@ -374,6 +409,7 @@ async def lifespan(app: FastAPI):
         session_cache=_session_cache,
         retrieve_service_factory=_retrieve_service_factory,
         rag_engine_grpc_client_factory=_rag_engine_grpc_client_factory,
+        inference_service_client_factory=_inference_service_client_factory,
     )
     print(f"kb-service gRPC server listening on :{settings.grpc_port}", flush=True)
     yield
@@ -402,6 +438,22 @@ async def lifespan(app: FastAPI):
         loop = _grpc_server_module._grpc_loop
         future = asyncio.run_coroutine_threadsafe(
             _query_rag_engine_grpc.aclose(), loop
+        )
+        try:
+            future.result(timeout=5)
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            pass
+    # Close the parse/rebuild inference-service client (uvicorn loop).
+    if _inference_service_grpc is not None:
+        try:
+            await _inference_service_grpc.aclose()
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            pass
+    # Close the Query-path inference-service client on the gRPC loop.
+    if _query_inference_service_grpc is not None:
+        loop = _grpc_server_module._grpc_loop
+        future = asyncio.run_coroutine_threadsafe(
+            _query_inference_service_grpc.aclose(), loop
         )
         try:
             future.result(timeout=5)

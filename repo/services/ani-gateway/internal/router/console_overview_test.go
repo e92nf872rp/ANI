@@ -73,7 +73,7 @@ type overviewKBFake struct {
 	err   error
 }
 
-func (f *overviewKBFake) ListKBs(_ context.Context, tenantID string, _ int32, _ string) (*kbv1.ListKBsResponse, error) {
+func (f *overviewKBFake) ListKBs(_ context.Context, tenantID string, _ int32, _ string, _ string) (*kbv1.ListKBsResponse, error) {
 	f.calls++
 	f.lastTenantID = tenantID
 	if f.err != nil {

@@ -61,8 +61,12 @@ class _FakeRagEngine:
         self._dimension = dimension
         self.embed_calls: list[dict] = []
 
-    async def embed(self, *, texts, model: str = ""):
-        self.embed_calls.append({"texts": list(texts), "model": model})
+    async def embed(self, *, texts, model: str = "", runtime_endpoint: str = ""):
+        self.embed_calls.append({
+            "texts": list(texts),
+            "model": model,
+            "runtime_endpoint": runtime_endpoint,
+        })
         return list(self._vectors), self._dimension
 
 
@@ -259,7 +263,9 @@ async def test_hybrid_invokes_embed_and_vector_search_and_keyword_search():
     )
 
     # embed called once with the question
-    assert rag.embed_calls == [{"texts": ["查询"], "model": ""}]
+    assert rag.embed_calls == [
+        {"texts": ["查询"], "model": "", "runtime_endpoint": ""}
+    ]
     # search_vector_store called with the embedded vector, top_k*2
     assert len(core.search_calls) == 1
     assert core.search_calls[0]["vector"] == [0.5, 0.6, 0.7, 0.8]
@@ -391,7 +397,9 @@ async def test_vector_only_mode_skips_keyword_search():
         top_k=5, retrieval_mode="vector",
         vector_store_id=VECTOR_STORE_ID,
     )
-    assert rag.embed_calls == [{"texts": ["查询"], "model": ""}]
+    assert rag.embed_calls == [
+        {"texts": ["查询"], "model": "", "runtime_endpoint": ""}
+    ]
     assert len(core.search_calls) == 1
     # No keyword_search
     assert kw_calls == []

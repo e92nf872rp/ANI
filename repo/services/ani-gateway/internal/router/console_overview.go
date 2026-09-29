@@ -208,7 +208,7 @@ func countOverviewKnowledgeBases(ctx context.Context, tenantID string, out *cons
 	}
 	cursor := ""
 	for page := 0; page < overviewMaxPages; page++ {
-		resp, err := kbInjectedClient.ListKBs(ctx, tenantID, overviewListPageLimit, cursor)
+		resp, err := kbInjectedClient.ListKBs(ctx, tenantID, overviewListPageLimit, cursor, "")
 		if err != nil {
 			return fmt.Errorf("knowledge base list failed: %w", err)
 		}

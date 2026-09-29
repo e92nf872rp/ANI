@@ -72,6 +72,11 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.NotifyDocumentUploadedRequest.SerializeToString,
                 response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
                 _registered_method=True)
+        self.CompleteDocumentUpload = channel.unary_unary(
+                '/kb.v1.KBService/CompleteDocumentUpload',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.CompleteDocumentUploadRequest.SerializeToString,
+                response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+                _registered_method=True)
         self.GetDocument = channel.unary_unary(
                 '/kb.v1.KBService/GetDocument',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.GetDocumentRequest.SerializeToString,
@@ -86,6 +91,11 @@ class KBServiceStub:
                 '/kb.v1.KBService/DeleteDocument',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.DeleteDocumentRequest.SerializeToString,
                 response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                _registered_method=True)
+        self.GetObjectURL = channel.unary_unary(
+                '/kb.v1.KBService/GetObjectURL',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetObjectURLRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.GetObjectURLResponse.FromString,
                 _registered_method=True)
         self.Query = channel.unary_unary(
                 '/kb.v1.KBService/Query',
@@ -157,6 +167,16 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.FromString,
                 _registered_method=True)
+        self.ListOperations = channel.unary_unary(
+                '/kb.v1.KBService/ListOperations',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.ListOperationsRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListOperationsResponse.FromString,
+                _registered_method=True)
+        self.GetOperation = channel.unary_unary(
+                '/kb.v1.KBService/GetOperation',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetOperationRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.KBOperation.FromString,
+                _registered_method=True)
 
 
 class KBServiceServicer:
@@ -197,7 +217,10 @@ class KBServiceServicer:
 
     def GetDocumentUploadURL(self, request, context):
         """GetDocumentUploadURL returns a presigned MinIO PUT URL for direct upload.
-        Creates a kb_documents record (parse_status=pending) and returns the doc_id.
+        KB-SPLIT-P1I (#058, ADR §D1): kb signs against its own MinIO bucket
+        (key {kb_id}/{doc_id}); no kb_documents row is written here — the
+        registration moves to CompleteDocumentUpload after HeadObject verifies
+        the object exists.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -206,6 +229,18 @@ class KBServiceServicer:
     def NotifyDocumentUploaded(self, request, context):
         """NotifyDocumentUploaded is called after the client uploads directly to MinIO.
         Validates the checksum, then enqueues a parse task via Outbox pattern.
+        DEPRECATED by KB-SPLIT-P1I (#058): the upload flow is
+        GetDocumentUploadURL → CompleteDocumentUpload; removal is tracked in #065.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CompleteDocumentUpload(self, request, context):
+        """CompleteDocumentUpload finishes the direct upload (KB-SPLIT-P1I #058,
+        ADR §D1 three-step flow): kb HeadObject-verifies the uploaded object
+        exists (and its size), then registers kb_documents (parse_status=pending)
+        and enqueues the parse task via the Outbox pattern in one transaction.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -227,6 +262,21 @@ class KBServiceServicer:
 
     def DeleteDocument(self, request, context):
         """DeleteDocument removes a document and its Milvus vectors (idempotent).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetObjectURL(self, request, context):
+        """GetObjectURL returns a presigned public-view (NodePort) GET URL for a
+        kb-owned object (KB-SPLIT-P1J #059, ADR §D1-取用). object_id carries the
+        kb-owned object identity in `{bucket}/{key}` form — the same literal stored
+        in markdown image placeholders `[图片: caption](object_id)`. kb validates
+        the object belongs to the requested KB (prefix `{kb_id}/`) before signing;
+        the caller (end-user browser, outside the cluster) fetches the bytes
+        directly from MinIO — the gateway never proxies the payload (前端契约不变:
+        only the gateway is perceived). The public view matches the presign-PUT
+        endpoint: internal ClusterIP addresses do not resolve outside the cluster.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -350,6 +400,25 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListOperations(self, request, context):
+        """ListOperations lists kb operations (idempotency + progress records)
+        for a tenant (P1C #052, ADR 0001 §D4-2). Temporary progress query
+        surface until task-service subscribes to kb outbox events and takes
+        over task display (ADR §五-阶段6). Keyset pagination: created_at DESC,
+        id DESC; optional operation_type / resource_id / status filters.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetOperation(self, request, context):
+        """GetOperation returns a single kb operation by id (P1C #052).
+        Cross-tenant ids are invisible (tenant isolation) → NOT_FOUND.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_KBServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -388,6 +457,11 @@ def add_KBServiceServicer_to_server(servicer, server):
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.NotifyDocumentUploadedRequest.FromString,
                     response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
             ),
+            'CompleteDocumentUpload': grpc.unary_unary_rpc_method_handler(
+                    servicer.CompleteDocumentUpload,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.CompleteDocumentUploadRequest.FromString,
+                    response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
+            ),
             'GetDocument': grpc.unary_unary_rpc_method_handler(
                     servicer.GetDocument,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetDocumentRequest.FromString,
@@ -402,6 +476,11 @@ def add_KBServiceServicer_to_server(servicer, server):
                     servicer.DeleteDocument,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.DeleteDocumentRequest.FromString,
                     response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+            'GetObjectURL': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetObjectURL,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetObjectURLRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.GetObjectURLResponse.SerializeToString,
             ),
             'Query': grpc.unary_unary_rpc_method_handler(
                     servicer.Query,
@@ -472,6 +551,16 @@ def add_KBServiceServicer_to_server(servicer, server):
                     servicer.ListKBAuditLogs,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.SerializeToString,
+            ),
+            'ListOperations': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListOperations,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListOperationsRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.ListOperationsResponse.SerializeToString,
+            ),
+            'GetOperation': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetOperation,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetOperationRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.KBOperation.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -675,6 +764,33 @@ class KBService:
             _registered_method=True)
 
     @staticmethod
+    def CompleteDocumentUpload(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/CompleteDocumentUpload',
+            kb_dot_v1_dot_kb__service__pb2.CompleteDocumentUploadRequest.SerializeToString,
+            common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def GetDocument(request,
             target,
             options=(),
@@ -745,6 +861,33 @@ class KBService:
             '/kb.v1.KBService/DeleteDocument',
             kb_dot_v1_dot_kb__service__pb2.DeleteDocumentRequest.SerializeToString,
             google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetObjectURL(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetObjectURL',
+            kb_dot_v1_dot_kb__service__pb2.GetObjectURLRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.GetObjectURLResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1123,6 +1266,60 @@ class KBService:
             '/kb.v1.KBService/ListKBAuditLogs',
             kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsRequest.SerializeToString,
             kb_dot_v1_dot_kb__service__pb2.ListKBAuditLogsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListOperations(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/ListOperations',
+            kb_dot_v1_dot_kb__service__pb2.ListOperationsRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.ListOperationsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetOperation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetOperation',
+            kb_dot_v1_dot_kb__service__pb2.GetOperationRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.KBOperation.FromString,
             options,
             channel_credentials,
             insecure,

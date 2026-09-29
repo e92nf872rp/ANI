@@ -85,7 +85,7 @@ class RagEngineClientProtocol(Protocol):
         ...
 
     async def embed(
-        self, *, texts: list[str], model: str = ""
+        self, *, texts: list[str], model: str = "", runtime_endpoint: str = ""
     ) -> tuple[list[list[float]], int]:
         """Call rag-engine Embed RPC.
 
@@ -94,6 +94,9 @@ class RagEngineClientProtocol(Protocol):
             model: Per-KB embedding model name (from the KB row's
                   ``embedding_model`` column); empty uses the rag-engine
                   server default model.
+            runtime_endpoint: Cluster runtime endpoint of the KB owner's
+                  published inference service; empty falls back to the
+                  rag-engine server default endpoint.
 
         Returns:
             (vectors, dimension) tuple. vectors[i] is the embedding of
@@ -112,6 +115,7 @@ class RagEngineClientProtocol(Protocol):
         history: list[dict[str, str]],
         inference_service_name: str = "",
         max_tokens: int = 2048,
+        runtime_endpoint: str = "",
     ) -> dict[str, Any]:
         """Call rag-engine Generate RPC.
 
@@ -146,6 +150,7 @@ class RagEngineClientProtocol(Protocol):
         history: list[dict[str, str]],
         inference_service_name: str = "",
         max_tokens: int = 2048,
+        runtime_endpoint: str = "",
     ) -> AsyncIterator[dict[str, Any]]:
         """Call rag-engine GenerateStream RPC; async-iterate tokens.
 
@@ -315,6 +320,7 @@ class RetrieveServiceProtocol(Protocol):
         retrieval_mode: str = "hybrid",
         vector_store_id: str | None = None,
         embedding_model: str = "",
+        runtime_endpoint: str = "",
     ) -> tuple[list[dict[str, Any]], float]:
         """Run hybrid retrieval and return (sources, max_score).
 
@@ -331,6 +337,9 @@ class RetrieveServiceProtocol(Protocol):
             embedding_model: Per-KB embedding model name (routed by the
                              rag-engine Embed RPC); empty string uses the
                              rag-engine default model.
+            runtime_endpoint: Cluster runtime endpoint of the KB owner's
+                             published inference service; empty falls back
+                             to the rag-engine server default endpoint.
 
         Returns:
             (sources, max_score) tuple.
@@ -369,6 +378,8 @@ class ParseOrchestratorProtocol(Protocol):
         chunk_size: int,
         vector_store_id: str,
         embedding_model: str = "",
+        embed_runtime_endpoint: str = "",
+        generate_runtime_endpoint: str = "",
     ) -> None:
         """Process a single document end-to-end through the parse pipeline.
 
@@ -386,6 +397,15 @@ class ParseOrchestratorProtocol(Protocol):
             embedding_model: Per-KB embedding model name (from the KB row's
                             ``embedding_model`` column); empty uses the
                             rag-engine server default.
+            embed_runtime_endpoint: Cluster runtime endpoint of the KB owner's
+                            published **embedding** inference service (resolved
+                            from ``embedding_model``); empty falls back to the
+                            rag-engine server default endpoint.
+            generate_runtime_endpoint: Cluster runtime endpoint of the KB
+                            owner's published **chat** inference service
+                            (resolved from the KB's default inference service);
+                            used by the best-effort summary Generate RPC;
+                            empty falls back to the rag-engine default.
 
         Returns:
             None. The document's parse_status is updated to `ready` on
@@ -418,6 +438,8 @@ class QueryOrchestratorProtocol(Protocol):
         inference_service_name: str,
         vector_store_id: str,
         history: list[dict[str, str]],
+        embed_runtime_endpoint: str = "",
+        generate_runtime_endpoint: str = "",
     ) -> QueryResult:
         """Run a synchronous RAG query and return a QueryResult.
 
@@ -449,6 +471,14 @@ class QueryOrchestratorProtocol(Protocol):
                                     so the current-turn user appears twice —
                                     this matches the legacy {query_str} template
                                     behavior and is intentional.
+            embed_runtime_endpoint: Cluster runtime endpoint of the KB owner's
+                                    published **embedding** inference service
+                                    (resolved from the KB's ``embedding_model``);
+                                    empty falls back to the rag-engine default.
+            generate_runtime_endpoint: Cluster runtime endpoint of the KB
+                                    owner's published **chat** inference service
+                                    (resolved from ``inference_service_name``);
+                                    empty falls back to the rag-engine default.
 
         Returns:
             QueryResult dataclass (answer, sources, session_id, input_tokens,
@@ -469,6 +499,8 @@ class QueryOrchestratorProtocol(Protocol):
         inference_service_name: str,
         vector_store_id: str,
         history: list[dict[str, str]],
+        embed_runtime_endpoint: str = "",
+        generate_runtime_endpoint: str = "",
     ) -> AsyncIterator[Any]:
         """Streaming RAG query — async generator (issue-038: Retrieve RPC).
 

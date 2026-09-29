@@ -115,6 +115,9 @@ message GetKBRequest {
 message ListKBsRequest {
   string tenant_id = 1;
   common.v1.CursorPageRequest page = 2;
+  // Optional status filter (active | rebuilding). Empty means no filter
+  // (soft-deleted rows are always excluded).
+  string status = 3;
 }
 
 message ListKBsResponse {

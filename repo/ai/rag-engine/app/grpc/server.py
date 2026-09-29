@@ -213,7 +213,7 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
             # block, caller error) can exceed the model's context limit.
             texts = [t[:EMBED_SAFE_CHARS] for t in request.texts]
             vectors, dim = await asyncio.to_thread(
-                svc.embed, texts, request.model
+                svc.embed, texts, request.model, request.runtime_endpoint
             )
         except Exception as exc:
             logger.exception("rag-engine Embed failed")
@@ -276,6 +276,7 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
                 history_dicts,
                 request.inference_service_name,
                 max_tokens,
+                request.runtime_endpoint,
             )
         except TimeoutError as exc:
             logger.warning("rag-engine Generate LLM timeout: %s", exc)
@@ -355,6 +356,7 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
                     history_dicts,
                     request.inference_service_name,
                     max_tokens,
+                    request.runtime_endpoint,
                 ):
                     loop.call_soon_threadsafe(token_queue.put_nowait, token)
             except Exception as exc:  # noqa: BLE001

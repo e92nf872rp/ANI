@@ -625,6 +625,12 @@ func mapError(err error) error {
 		return status.Error(codes.FailedPrecondition, "MODEL_NOT_READY")
 	case errors.Is(err, catalog.ErrNoCompatibleProfile):
 		return status.Error(codes.FailedPrecondition, "MODEL_INCOMPATIBLE")
+	case errors.Is(err, service.ErrInferenceServiceNotReady):
+		return status.Error(codes.FailedPrecondition, "INFERENCE_SERVICE_NOT_READY")
+	case errors.Is(err, service.ErrRuntimeEndpointMissing):
+		return status.Error(codes.FailedPrecondition, "RUNTIME_ENDPOINT_MISSING")
+	case errors.Is(err, service.ErrRuntimeEndpointInvalid):
+		return status.Error(codes.FailedPrecondition, "RUNTIME_ENDPOINT_INVALID")
 	case errors.Is(err, service.ErrUnsupportedTopology):
 		return status.Error(codes.FailedPrecondition, "UNSUPPORTED_TOPOLOGY")
 	case errors.Is(err, service.ErrAcceleratorSpecUnavailable):
