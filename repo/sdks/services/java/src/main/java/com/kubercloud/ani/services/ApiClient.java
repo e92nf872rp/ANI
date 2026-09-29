@@ -544,6 +544,7 @@ public final class ApiClient {
         "listInferenceServices",
         "getInferenceServiceLogs",
         "listIntegrations",
+        "listKnowledgeBases",
         "listKnowledgeBaseAuditLogs",
         "listKnowledgeBaseCitations",
         "listKnowledgeBaseDocumentChunks",
