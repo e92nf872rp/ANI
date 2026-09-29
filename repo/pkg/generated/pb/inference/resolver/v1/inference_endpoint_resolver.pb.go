@@ -28,7 +28,7 @@ type ResolveInternalEndpointRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	TenantId        string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	ServiceId       string `protobuf:"bytes,2,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
+	ServiceId       string `protobuf:"bytes,2,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"` // legacy direct lookup; prefer served_model_name
 	ServedModelName string `protobuf:"bytes,3,opt,name=served_model_name,json=servedModelName,proto3" json:"served_model_name,omitempty"`
 }
 

@@ -43,14 +43,18 @@ class GetKBRequest(_message.Message):
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ...) -> None: ...
 
 class ListKBsRequest(_message.Message):
-    __slots__ = ("tenant_id", "page", "status")
+    __slots__ = ("tenant_id", "page", "status", "name", "id")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     PAGE_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     page: _common_pb2.CursorPageRequest
     status: str
-    def __init__(self, tenant_id: _Optional[str] = ..., page: _Optional[_Union[_common_pb2.CursorPageRequest, _Mapping]] = ..., status: _Optional[str] = ...) -> None: ...
+    name: str
+    id: str
+    def __init__(self, tenant_id: _Optional[str] = ..., page: _Optional[_Union[_common_pb2.CursorPageRequest, _Mapping]] = ..., status: _Optional[str] = ..., name: _Optional[str] = ..., id: _Optional[str] = ...) -> None: ...
 
 class ListKBsResponse(_message.Message):
     __slots__ = ("kbs", "meta")

@@ -513,10 +513,18 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             return
         limit = request.page.limit or 20
         cursor = request.page.cursor or None
+        name = (request.name or "").strip() or None
+        kb_id = (request.id or "").strip() or None
+        if kb_id is not None:
+            try:
+                uuid.UUID(kb_id)
+            except ValueError:
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT, "id must be a uuid")
+                return
         async with self._pool.acquire() as conn:
             rows, total = await kb_repo.list_kbs(
                 conn, tenant_id=request.tenant_id, limit=limit, cursor=cursor,
-                status=status,
+                status=status, name=name, kb_id=kb_id,
             )
         kbs = [_kb_row_to_pb(r) for r in rows]
         next_cursor = str(rows[-1]["id"]) if rows and len(rows) >= limit else ""

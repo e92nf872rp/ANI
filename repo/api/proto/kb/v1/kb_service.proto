@@ -118,6 +118,10 @@ message ListKBsRequest {
   // Optional status filter (active | rebuilding). Empty means no filter
   // (soft-deleted rows are always excluded).
   string status = 3;
+  // Optional case-insensitive substring filter on name. Empty means no filter.
+  string name = 4;
+  // Optional exact filter on id (UUID). Empty means no filter.
+  string id = 5;
 }
 
 message ListKBsResponse {

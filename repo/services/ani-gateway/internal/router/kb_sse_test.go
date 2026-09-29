@@ -110,7 +110,7 @@ func (f *fakeKBRetrieveClient) GetKB(context.Context, string, string) (*kbv1.Kno
 func (f *fakeKBRetrieveClient) UpdateKB(context.Context, string, string, string, string, string) (*kbv1.KnowledgeBase, error) {
 	return nil, nil
 }
-func (f *fakeKBRetrieveClient) ListKBs(context.Context, string, int32, string, string) (*kbv1.ListKBsResponse, error) {
+func (f *fakeKBRetrieveClient) ListKBs(context.Context, string, int32, string, string, string, string) (*kbv1.ListKBsResponse, error) {
 	return nil, nil
 }
 func (f *fakeKBRetrieveClient) DeleteKB(context.Context, string, string) (*emptypb.Empty, error) {
