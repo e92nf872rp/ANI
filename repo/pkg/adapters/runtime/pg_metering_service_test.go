@@ -157,10 +157,12 @@ func TestPgMeteringServiceQueryUsageGroupByDay(t *testing.T) {
 		t.Fatalf("QueryUsage error = %v", err)
 	}
 	sql := store.tx.querySQLs[0]
-	if !strings.Contains(sql, "SUBSTR(period, 1, 10)") {
+	// period 桶标签按平台时区输出：UTC 存储文本 → Asia/Shanghai 本地日期
+	localDayExpr := `to_char(SUBSTR(period, 1, 16)::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')`
+	if !strings.Contains(sql, localDayExpr) {
 		t.Fatalf("SQL missing day aggregation expr: %s", sql)
 	}
-	if !strings.Contains(sql, "GROUP BY resource_type, unit, SUBSTR(period, 1, 10)") {
+	if !strings.Contains(sql, "GROUP BY resource_type, unit, "+localDayExpr) {
 		t.Fatalf("SQL missing GROUP BY day: %s", sql)
 	}
 	if len(result.Items) != 1 || result.Items[0].Period != "2026-08-25" || result.Items[0].TotalQuantity != 120.0 {
@@ -185,10 +187,12 @@ func TestPgMeteringServiceQueryUsageGroupByHour(t *testing.T) {
 		t.Fatalf("QueryUsage error = %v", err)
 	}
 	sql := store.tx.querySQLs[0]
-	if !strings.Contains(sql, "SUBSTR(period, 1, 13)") {
+	// period 桶标签按平台时区输出：UTC 存储文本 → Asia/Shanghai 本地小时
+	localHourExpr := `to_char(SUBSTR(period, 1, 16)::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD"T"HH24')`
+	if !strings.Contains(sql, localHourExpr) {
 		t.Fatalf("SQL missing hour aggregation expr: %s", sql)
 	}
-	if !strings.Contains(sql, "GROUP BY resource_type, unit, SUBSTR(period, 1, 13)") {
+	if !strings.Contains(sql, "GROUP BY resource_type, unit, "+localHourExpr) {
 		t.Fatalf("SQL missing GROUP BY hour: %s", sql)
 	}
 }

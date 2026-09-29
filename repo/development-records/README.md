@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 计量 period 桶标签按 Asia/Shanghai 本地化（2026-09-24，live verified，分支 fix/metering-period-asia-shanghai）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| METERING-PERIOD-TZ-A | 用户报障平台计量接口 `GET /api/v1/metering/usage/platform?group_by=hour` 返回的 `period` 比实际使用时刻**早 8 小时**（当时北京时间 16 时返回 `2026-09-24T06/07/08`），初步判断为「读取时没设置时区」。**根因（读侧并非漏设时区）**：写入侧 `period` 是 UTC 裸字符串（`collectors.go`/`metering_collection_service.go` 均为 `time.Now().UTC()`，线上 metering-service 容器 `TZ` 为空即 UTC，全库 862,355 行 `bad_format=0`、`period >= '2026-09-24T09'` 行数为 0，无本地时间污染）；读侧过滤已显式 `to_char($n::timestamptz AT TIME ZONE 'UTC', ...)`（区间筛选正确）；**缺陷在输出**——`hour`/`day` 桶此前仅做 `SUBSTR(period,1,13/10)` 纯文本截取、无任何时区换算，且 `period` 契约无时区声明、字面量不带 `Z`，消费方按本地时间直显 → 整体早 8 小时；并派生第二后果：**`group_by=day` 日期归属落在 UTC 日界上**（北京时间 09-24 00:00~08:00 的数据被归进 `2026-09-23` 桶）。**修复（方案 A：读侧本地化）**：新增 `meteringPeriodLocalExpr = SUBSTR(period,1,16)::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai'`，`day` 输出 `to_char(..., 'YYYY-MM-DD')`、`hour` 输出 `to_char(..., 'YYYY-MM-DD"T"HH24')`，SELECT 与 GROUP BY 共用该表达式；**WHERE 刻意不动**（区间是绝对时刻，库里 UTC 字面量与 UTC 渲染边界同为 UTC 文本、字符串序即时间序，改动会破坏既有索引友好比较）；`::timestamp` 转换前已核对全库 period 严格 16 位分钟对齐格式，避免脏数据 cast 失败；契约 `v1.yaml` 两处 `period` 补 description 声明 Asia/Shanghai 与两种格式（仅描述文字，schema 形状零变更，兼容性基线/静态文档/生成物零漂移）；未引入环境变量等未要求的可配置性。单测：day/hour 两用例断言改为本地化表达式（含 GROUP BY），period 字符串比较用例保持不变以锁住 WHERE 仍按 UTC。门禁：`gofmt -l` 无输出、全量 `go test` 通过（仅既有 Windows sandbox symlink / `os.O_DIRECTORY` 两用例环境性失败，与本批次无关）、`validate-openapi-spec`（2 spec）/`validate-core-api-compatibility`/`validate-doc-api`/`validate-architecture` 全绿；`make test` 的 Go 段因本机 make 走 git-bash 无 `go` 命令无法整体执行，已用 Makefile 等价命令直接跑。**live 验证 PASS（ani-system 10.10.1.66:30080，镜像 `dev-20260924-metering-tz`，digest `sha256:ed218859…03af`；etcd 预检正常、只 set image 未改 env（82 个 env key diff 无输出）、rollout 成功、`/healthz` 首探 200）**：① 用户场景 hour 桶 `06/07/08` → **`14/15/16`**，三桶量值 720/6120/2760 **逐字不变**；② 跨 UTC 日界 tenant-a 闭窗口（`2026-09-23T16:00Z`~`2026-09-24T08:00Z`）day 由 `2026-09-23`(144000)+`2026-09-24`(167160) 两桶 → **单桶 `2026-09-24` = 289020**，与数据库按本地日表达式独立复算值**逐字一致**；③ 同窗口 hour 17 桶标签整体 +8h、量值逐一与库内真值一致；④ 租户视角 `GET /metering/usage` 与平台视角同窗口同口径。**已按要求回滚**：实测后镜像换回 `dev-20260924-metering-events2`（只 set image、env 一致、healthz 200）并复测旧行为恢复，故本批次改动当前不在 ani-system 线上，随 PR 合入后从 main 统一构建部署。遗留：`period` 仍是无时区裸串（未改 RFC3339/带 `Z`）；时区为固定常量 Asia/Shanghai（无请求级 tz 参数）；历史数据无需迁移 | metering-period-tz-a.md |
+
 ### /quotas 配额列表过滤已禁用租户（2026-09-24，live verified，分支 hotfix/gpu-occupancy-scope，随 PR #185 评审合并）
 
 | 批次 | 内容摘要 | 文件 |
