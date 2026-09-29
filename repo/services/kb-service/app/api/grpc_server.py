@@ -135,6 +135,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         session_cache_factory: Any | None = None,
         retrieve_service_factory: Any | None = None,
         rag_engine_grpc_client_factory: Any | None = None,
+        inference_service_client_factory: Any | None = None,
     ) -> None:
         # When pool is None the servicer still serves RPCs that don't need DB
         # (used by the skeleton tests in test_grpc_server.py). DB-backed RPCs
@@ -152,12 +153,59 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # rag_engine_grpc_client_factory() -> RagEngineGRPCClient; injected for
         # testing. In production, constructed from settings in main.py.
         self._rag_engine_grpc_client_factory = rag_engine_grpc_client_factory
+        # inference_service_client_factory() -> InferenceServiceGRPCClient;
+        # injected for testing. In production, constructed from settings in
+        # main.py. Used to resolve (tenant_id, served_model_name) → the
+        # published inference service's runtime_endpoint, which is then passed
+        # through to rag-engine (Embed/Generate) so the stateless RPCs connect
+        # directly to the tenant's own service.
+        self._inference_service_client_factory = inference_service_client_factory
         # Per-tenant orchestrator cache. Each tenant gets its own
         # QueryOrchestrator instance backed by a tenant-scoped
         # RetrieveService (which holds a tenant-scoped CoreClient). This
         # preserves multi-tenant isolation — a single global orchestrator
         # would cross tenant boundaries.
         self._orchestrators: dict[str, Any] = {}
+
+    async def _resolve_runtime_endpoint(
+        self, *, tenant_id: str, model: str
+    ) -> tuple[str, str]:
+        """Resolve a published model to (runtime endpoint, canonical name).
+
+        The selected model IS the tenant boundary (``inference_services`` has a
+        per-tenant uniqueness on ``served_model_name``), so resolving
+        ``(tenant_id, served_model_name)`` via the internal
+        ``InferenceEndpointResolver/ResolveInternalEndpoint`` RPC yields
+        exactly one service. The returned ``base_url`` is passed through to
+        rag-engine (Embed/Generate) so the stateless RPCs connect directly to
+        the tenant's own service — never through the AI Gateway — and the
+        canonical ``served_model_name`` MUST be used as the ``model`` in the
+        OpenAI request body.
+
+        Degrades to ("", "") (rag-engine then uses its server-default endpoint
+        and the caller keeps the original model name) when the model is empty,
+        no client is wired, or resolution fails — this keeps the CreateKB
+        dimension probe best-effort and lets the KB remain usable when a
+        service is temporarily unpublished. A failure is logged at warning
+        level with model + tenant so it is not silent. ``base_url`` is a
+        runtime snapshot: it is re-resolved on every call, never cached.
+        """
+        model = (model or "").strip()
+        if not model or self._inference_service_client_factory is None:
+            return "", ""
+        try:
+            client = self._inference_service_client_factory()
+            resolved = await client.resolve_endpoint(
+                tenant_id=tenant_id, served_model_name=model
+            )
+            return resolved.base_url, resolved.served_model_name or model
+        except Exception as exc:  # noqa: BLE001 — degrade to rag-engine default
+            logger.warning(
+                "kb-service: failed to resolve runtime endpoint for model %r "
+                "(tenant %s), falling back to rag-engine default: %s",
+                model, tenant_id, exc,
+            )
+            return "", ""
 
     # ── 10 P0 RPCs ───────────────────────────────────────────────────────────
 
@@ -313,8 +361,16 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 rag_engine_grpc = self._rag_engine_grpc_client_factory()
             else:
                 rag_engine_grpc = _default_rag_engine_grpc_client()
+            # Resolve the embedding service endpoint from the selected
+            # embedding model (model = tenant boundary) so the probe connects
+            # directly to the tenant's own service. The canonical
+            # served_model_name is used as the request-body model.
+            probe_endpoint, probe_model = await self._resolve_runtime_endpoint(
+                tenant_id=tenant_id, model=embedding_model
+            )
             _, probe_dim = await rag_engine_grpc.embed(
-                texts=["dimension probe"], model=embedding_model
+                texts=["dimension probe"], model=probe_model or embedding_model,
+                runtime_endpoint=probe_endpoint,
             )
         except Exception as exc:  # noqa: BLE001 — 探测仅降级，不阻断建库
             logger.warning(
@@ -1700,6 +1756,17 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             )
             self._orchestrators[tenant_id] = orch
 
+        # 7.5. Resolve per-model runtime endpoints (embed vs chat are distinct
+        #      inference services → distinct endpoints). The canonical
+        #      served_model_name is used as the request-body model; on
+        #      degradation the KB-config names are kept.
+        embed_endpoint, embed_model = await self._resolve_runtime_endpoint(
+            tenant_id=tenant_id, model=kb_cfg["embedding_model"]
+        )
+        generate_endpoint, generate_model = await self._resolve_runtime_endpoint(
+            tenant_id=tenant_id, model=inference_service_name
+        )
+
         # 8. Delegate to orchestrator.query_stream (single source of gate
         # logic). Failures before or mid-stream get the same failure trail
         # as the synchronous Query path (assistant error placeholder +
@@ -1722,10 +1789,12 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             top_k=top_k,
             score_threshold=score_threshold,
             retrieval_mode=retrieval_mode,
-            inference_service_name=inference_service_name,
+            inference_service_name=generate_model or inference_service_name,
             vector_store_id=vector_store_id,
-                    embedding_model=kb_cfg["embedding_model"],
+                    embedding_model=embed_model or kb_cfg["embedding_model"],
                     history=history,
+                    embed_runtime_endpoint=embed_endpoint,
+                    generate_runtime_endpoint=generate_endpoint,
                 ):
                     yield ev
             except Exception as e:
@@ -2100,7 +2169,20 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             )
             self._orchestrators[tenant_id] = orch
 
-        # 3. Run the orchestrator.
+        # 3. Resolve per-model runtime endpoints. The embedding model and the
+        #    chat model are two distinct inference services with distinct
+        #    endpoints; resolve each from its own model name so the embed and
+        #    generate legs connect to the right service. The canonical
+        #    served_model_name is used as the request-body model; on
+        #    degradation the KB-config names are kept.
+        embed_endpoint, embed_model = await self._resolve_runtime_endpoint(
+            tenant_id=tenant_id, model=embedding_model
+        )
+        generate_endpoint, generate_model = await self._resolve_runtime_endpoint(
+            tenant_id=tenant_id, model=inference_service_name
+        )
+
+        # 4. Run the orchestrator.
         result = await orch.query(
             tenant_id=tenant_id,
             kb_id=kb_id,
@@ -2109,10 +2191,12 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             top_k=top_k,
             score_threshold=score_threshold,
             retrieval_mode=retrieval_mode,
-            inference_service_name=inference_service_name,
+            inference_service_name=generate_model or inference_service_name,
             vector_store_id=vector_store_id,
-            embedding_model=embedding_model,
+            embedding_model=embed_model or embedding_model,
             history=history,
+            embed_runtime_endpoint=embed_endpoint,
+            generate_runtime_endpoint=generate_endpoint,
         )
 
         return result
@@ -3734,6 +3818,27 @@ def _default_rag_engine_grpc_client() -> Any:
     return _default_grpc_client_instance
 
 
+def _default_inference_service_client() -> Any:
+    """Build an InferenceServiceGRPCClient from app settings.
+
+    Used when no factory was injected. In production, main.py constructs the
+    client once at startup and injects it via
+    ``inference_service_client_factory``.
+
+    Module-level singleton so the gRPC channel is not re-created per request
+    (the channel itself is created lazily on first async call, binding to the
+    caller's loop).
+    """
+    global _default_inference_client_instance
+    if _default_inference_client_instance is None:
+        from app.inference_service.client import InferenceServiceGRPCClient
+
+        _default_inference_client_instance = InferenceServiceGRPCClient(
+            addr=settings.inference_service_grpc_addr
+        )
+    return _default_inference_client_instance
+
+
 def _default_retrieve_service(tenant_id: str, pool: Any) -> Any:
     """Build a RetrieveService from app settings (production default).
 
@@ -3756,6 +3861,9 @@ def _default_retrieve_service(tenant_id: str, pool: Any) -> Any:
 
 # Module-level singleton for the fallback gRPC client (avoids channel leak).
 _default_grpc_client_instance: Any = None
+
+# Module-level singleton for the fallback inference-service client.
+_default_inference_client_instance: Any = None
 
 
 def _kb_bucket_id(kb_id: str) -> str:

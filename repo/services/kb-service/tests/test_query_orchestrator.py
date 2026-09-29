@@ -53,6 +53,7 @@ class _FakeRetrieveService:
     async def retrieve(
         self, *, tenant_id, kb_id, question, top_k=5, score_threshold=0.3,
         retrieval_mode="hybrid", vector_store_id=None, embedding_model="",
+        runtime_endpoint="",
     ):
         self.retrieve_calls.append({
             "tenant_id": tenant_id,
@@ -63,6 +64,7 @@ class _FakeRetrieveService:
             "retrieval_mode": retrieval_mode,
             "vector_store_id": vector_store_id,
             "embedding_model": embedding_model,
+            "runtime_endpoint": runtime_endpoint,
         })
         return list(self._sources), self._max_score
 
@@ -78,7 +80,7 @@ class _FakeRagEngineGenerate:
 
     async def generate(
         self, *, question, session_id="", context=None, history=None,
-        inference_service_name="", max_tokens=2048,
+        inference_service_name="", max_tokens=2048, runtime_endpoint="",
     ):
         self.generate_calls.append({
             "question": question,
@@ -87,6 +89,7 @@ class _FakeRagEngineGenerate:
             "history": list(history or []),
             "inference_service_name": inference_service_name,
             "max_tokens": max_tokens,
+            "runtime_endpoint": runtime_endpoint,
         })
         return {
             "answer": self._answer,

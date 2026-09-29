@@ -32,8 +32,13 @@ class Settings(BaseSettings):
     # ``embedding_api_base`` is the OpenAI-compatible base URL, overridden by
     # .env (EMBEDDING_API_BASE).
     embedding_model: str = "BAAI/bge-m3"
+    # Fallback base URL when the caller passes no per-request runtime endpoint.
+    # The KB owner's tenant boundary IS the published model itself: kb-service
+    # resolves ``(tenant, served_model_name)`` to the service's cluster
+    # runtime_endpoint and passes it in ``EmbedRequest.runtime_endpoint`` /
+    # ``GenerateRequest.runtime_endpoint``, so the normal path uses that.
     embedding_api_base: str = "http://10.10.20.197:8006/v1"
-    # API key for the remote embedding service. Empty means no auth (the
+    # API key for the fallback embedding endpoint. Empty means no auth (the
     # interim service has no api_key); the formal inference-service may set one.
     embedding_api_key: str = ""
     embedding_dim: int = 1024

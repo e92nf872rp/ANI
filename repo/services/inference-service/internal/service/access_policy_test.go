@@ -12,12 +12,14 @@ import (
 )
 
 type policyStoreFake struct {
-	policies   []domain.AccessPolicy
-	events     []domain.AccessPolicyEvent
-	published  map[string]domain.Service
-	resolveErr error
-	listErr    error
-	updateHash string
+	policies      []domain.AccessPolicy
+	events        []domain.AccessPolicyEvent
+	published     map[string]domain.Service
+	services      map[uuid.UUID]domain.Service
+	resolveErr    error
+	getServiceErr error
+	listErr       error
+	updateHash    string
 }
 
 func (f *policyStoreFake) ListServiceAccessPolicies(context.Context, uuid.UUID, uuid.UUID) ([]domain.AccessPolicy, error) {
@@ -54,6 +56,17 @@ func (f *policyStoreFake) ResolvePublishedService(_ context.Context, tenantID uu
 		return domain.Service{}, f.resolveErr
 	}
 	service, ok := f.published[tenantID.String()+"/"+servedModelName]
+	if !ok {
+		return domain.Service{}, repository.ErrNotFound
+	}
+	return service, nil
+}
+
+func (f *policyStoreFake) GetService(_ context.Context, _ uuid.UUID, serviceID uuid.UUID) (domain.Service, error) {
+	if f.getServiceErr != nil {
+		return domain.Service{}, f.getServiceErr
+	}
+	service, ok := f.services[serviceID]
 	if !ok {
 		return domain.Service{}, repository.ErrNotFound
 	}
@@ -215,6 +228,65 @@ func TestCheckAccessReturnsDenyForAllowlistMiss(t *testing.T) {
 	decision, err := NewAccessPolicyService(store, limiterFake{allow: true, lease: true}, time.Now).CheckAccess(context.Background(), in)
 	if err != nil || decision.HTTPStatus != 403 || len(store.events) != 1 {
 		t.Fatalf("decision=%+v err=%v events=%d", decision, err, len(store.events))
+	}
+}
+
+func TestResolveInternalEndpointPrefersServedModelName(t *testing.T) {
+	tenantID := uuid.New()
+	store := &policyStoreFake{}
+	store.addPublished(tenantID, uuid.New(), "qwen3-embedding-0.6b", domain.InferenceTaskEmbed)
+	svc := NewAccessPolicyService(store, nil, nil)
+
+	resource, err := svc.ResolveInternalEndpoint(context.Background(), tenantID, "qwen3-embedding-0.6b", "not-a-uuid")
+	if err != nil {
+		t.Fatalf("ResolveInternalEndpoint() error = %v", err)
+	}
+	if resource.ServedModelName != "qwen3-embedding-0.6b" || resource.DesiredSpec.ExecutionProfile.Task != domain.InferenceTaskEmbed {
+		t.Fatalf("resource=%+v", resource)
+	}
+}
+
+func TestResolveInternalEndpointFallsBackToServiceID(t *testing.T) {
+	tenantID := uuid.New()
+	id := uuid.New()
+	store := &policyStoreFake{services: map[uuid.UUID]domain.Service{
+		id: {ID: id, TenantID: tenantID, ServedModelName: "qwen3.5-0.8b", Status: domain.StatusRunning,
+			DesiredSpec: domain.Spec{ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskGenerate}}},
+	}}
+	svc := NewAccessPolicyService(store, nil, nil)
+
+	resource, err := svc.ResolveInternalEndpoint(context.Background(), tenantID, "", id.String())
+	if err != nil {
+		t.Fatalf("ResolveInternalEndpoint() error = %v", err)
+	}
+	if resource.ID != id || resource.ServedModelName != "qwen3.5-0.8b" {
+		t.Fatalf("resource=%+v", resource)
+	}
+}
+
+func TestResolveInternalEndpointRejectsEmptyKeys(t *testing.T) {
+	svc := NewAccessPolicyService(&policyStoreFake{}, nil, nil)
+	if _, err := svc.ResolveInternalEndpoint(context.Background(), uuid.New(), "  ", ""); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if _, err := svc.ResolveInternalEndpoint(context.Background(), uuid.Nil, "m", ""); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestValidateInternalEndpoint(t *testing.T) {
+	running := domain.Service{Status: domain.StatusRunning, RuntimeEndpoint: "http://pw-x.svc:8000"}
+	if err := ValidateInternalEndpoint(running); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if err := ValidateInternalEndpoint(domain.Service{Status: domain.StatusDeploying, RuntimeEndpoint: "http://pw-x.svc:8000"}); !errors.Is(err, ErrInferenceServiceNotReady) {
+		t.Fatalf("err = %v, want ErrInferenceServiceNotReady", err)
+	}
+	if err := ValidateInternalEndpoint(domain.Service{Status: domain.StatusRunning}); !errors.Is(err, ErrRuntimeEndpointMissing) {
+		t.Fatalf("err = %v, want ErrRuntimeEndpointMissing", err)
+	}
+	if err := ValidateInternalEndpoint(domain.Service{Status: domain.StatusRunning, RuntimeEndpoint: "pw-x.svc:8000"}); !errors.Is(err, ErrRuntimeEndpointInvalid) {
+		t.Fatalf("err = %v, want ErrRuntimeEndpointInvalid", err)
 	}
 }
 

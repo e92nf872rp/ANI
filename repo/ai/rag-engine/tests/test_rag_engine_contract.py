@@ -132,7 +132,7 @@ class TestRagEngineContract:
 
         monkeypatch.setattr(
             "app.services.embed_rpc_service.get_embed_model",
-            lambda model="": fake_model,
+            lambda model="", runtime_endpoint="": fake_model,
         )
 
         servicer = RagEngineServicer()

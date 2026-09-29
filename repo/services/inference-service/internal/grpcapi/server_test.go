@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	inferencecontrolv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1"
+	inferenceinternalv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/internalendpoint/v1"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog"
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/repository"
@@ -53,8 +54,10 @@ type fakeController struct {
 }
 
 type fakeAccessPolicies struct {
-	input    service.AccessCheckInput
-	decision service.AccessDecision
+	input       service.AccessCheckInput
+	decision    service.AccessDecision
+	resolved    domain.Service
+	internalErr error
 }
 
 func (f *fakeAccessPolicies) CheckAccess(_ context.Context, input service.AccessCheckInput) (service.AccessDecision, error) {
@@ -62,6 +65,15 @@ func (f *fakeAccessPolicies) CheckAccess(_ context.Context, input service.Access
 	return f.decision, nil
 }
 func (*fakeAccessPolicies) ReleaseAccessLease(context.Context, string) error { return nil }
+func (f *fakeAccessPolicies) ResolveRuntimeEndpoint(_ context.Context, _ uuid.UUID, _ string) (domain.Service, error) {
+	return f.resolved, nil
+}
+func (f *fakeAccessPolicies) ResolveInternalEndpoint(_ context.Context, _ uuid.UUID, _, _ string) (domain.Service, error) {
+	if f.internalErr != nil {
+		return domain.Service{}, f.internalErr
+	}
+	return f.resolved, nil
+}
 
 func (f *fakeController) Get(_ context.Context, tenantID, serviceID uuid.UUID) (service.ServiceView, error) {
 	f.tenant, f.id = tenantID, serviceID
@@ -128,6 +140,104 @@ func TestCheckInferenceAccessDelegatesTenantAndKeyIdentity(t *testing.T) {
 	}
 	if policies.input.TenantID != testTenant || policies.input.APIKeyID != keyID || policies.input.ServedModelName != "ani-c40-chat" || policies.input.KeyPrefix != "ani_live" {
 		t.Fatalf("input=%+v", policies.input)
+	}
+}
+
+func TestResolveInferenceServiceEndpointReturnsRuntimeEndpoint(t *testing.T) {
+	policies := &fakeAccessPolicies{resolved: domain.Service{ID: testService, RuntimeEndpoint: "http://pw-x.svc.cluster.local:8000"}}
+	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(policies)
+	response, err := server.ResolveInferenceServiceEndpoint(context.Background(), &inferencecontrolv1.ResolveInferenceServiceEndpointRequest{
+		TenantId: testTenant.String(), ServedModelName: "qwen3-embedding-0.6b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetInferenceServiceId() != testService.String() || response.GetRuntimeEndpoint() != "http://pw-x.svc.cluster.local:8000" {
+		t.Fatalf("response=%+v", response)
+	}
+}
+
+func TestResolveInternalEndpointReturnsBaseURLAndTask(t *testing.T) {
+	policies := &fakeAccessPolicies{resolved: domain.Service{
+		ID: testService, Status: domain.StatusRunning, ServedModelName: "qwen3.5-0.8b",
+		RuntimeEndpoint: "http://pw-x.ani-tenant-t.svc.cluster.local:8000",
+		DesiredSpec:     domain.Spec{ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskGenerate}},
+	}}
+	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(policies)
+	response, err := server.ResolveInternalEndpoint(context.Background(), &inferenceinternalv1.ResolveInternalEndpointRequest{
+		TenantId: testTenant.String(), ServedModelName: "qwen3.5-0.8b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetBaseUrl() != "http://pw-x.ani-tenant-t.svc.cluster.local:8000/v1" ||
+		response.GetServedModelName() != "qwen3.5-0.8b" ||
+		response.GetTask() != "generate" || response.GetStatus() != "running" {
+		t.Fatalf("response=%+v", response)
+	}
+}
+
+func TestResolveInternalEndpointAppendsV1OnlyForPathlessEndpoint(t *testing.T) {
+	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(&fakeAccessPolicies{})
+	cases := map[string]string{
+		"http://pw-x.svc.cluster.local:8000":     "http://pw-x.svc.cluster.local:8000/v1",
+		"http://pw-x.svc.cluster.local:8000/":    "http://pw-x.svc.cluster.local:8000/v1",
+		"http://pw-x.svc.cluster.local:8000/v1":  "http://pw-x.svc.cluster.local:8000/v1",
+		"http://pw-x.svc.cluster.local:8000/v1/": "http://pw-x.svc.cluster.local:8000/v1/",
+		"https://gw.example.com/api/openai/v1":   "https://gw.example.com/api/openai/v1",
+	}
+	for in, want := range cases {
+		policies := &fakeAccessPolicies{resolved: domain.Service{
+			ID: testService, Status: domain.StatusRunning, ServedModelName: "m",
+			RuntimeEndpoint: in,
+			DesiredSpec:     domain.Spec{ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskGenerate}},
+		}}
+		server := server.WithAccessPolicies(policies)
+		response, err := server.ResolveInternalEndpoint(context.Background(), &inferenceinternalv1.ResolveInternalEndpointRequest{
+			TenantId: testTenant.String(), ServedModelName: "m",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.GetBaseUrl() != want {
+			t.Fatalf("openAIBaseURL(%q) = %q, want %q", in, response.GetBaseUrl(), want)
+		}
+	}
+}
+
+func TestResolveInternalEndpointRequiresLookupKey(t *testing.T) {
+	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(&fakeAccessPolicies{})
+	_, err := server.ResolveInternalEndpoint(context.Background(), &inferenceinternalv1.ResolveInternalEndpointRequest{
+		TenantId: testTenant.String(),
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("err = %v, want INVALID_ARGUMENT", err)
+	}
+}
+
+func TestResolveInternalEndpointMapsSemanticErrors(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		want    codes.Code
+		message string
+	}{
+		{"not_found", repository.ErrNotFound, codes.NotFound, "NOT_FOUND"},
+		{"not_ready", service.ErrInferenceServiceNotReady, codes.FailedPrecondition, "INFERENCE_SERVICE_NOT_READY"},
+		{"endpoint_missing", service.ErrRuntimeEndpointMissing, codes.FailedPrecondition, "RUNTIME_ENDPOINT_MISSING"},
+		{"endpoint_invalid", service.ErrRuntimeEndpointInvalid, codes.FailedPrecondition, "RUNTIME_ENDPOINT_INVALID"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := NewServer(&fakeCreator{}, &fakeController{}).
+				WithAccessPolicies(&fakeAccessPolicies{internalErr: tc.err})
+			_, err := server.ResolveInternalEndpoint(context.Background(), &inferenceinternalv1.ResolveInternalEndpointRequest{
+				TenantId: testTenant.String(), ServedModelName: "qwen3.5-0.8b",
+			})
+			if status.Code(err) != tc.want || !strings.Contains(status.Convert(err).Message(), tc.message) {
+				t.Fatalf("err = %v, want %s %s", err, tc.want, tc.message)
+			}
+		})
 	}
 }
 

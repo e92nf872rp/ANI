@@ -108,6 +108,9 @@ class _ParseOrchestrator(Protocol):
         chunk_size: int,
         vector_store_id: str,
         embedding_model: str = "",
+        generate_model: str = "",
+        embed_runtime_endpoint: str = "",
+        generate_runtime_endpoint: str = "",
     ) -> None: ...
 
 
@@ -133,16 +136,46 @@ class RebuildConsumer:
         orchestrator: _ParseOrchestrator,
         subject: str,
         max_concurrency: int = REBUILD_MAX_CONCURRENCY,
+        inference_service_client: Any | None = None,
     ) -> None:
         self._nats = nats_client
         self._pool = db_pool
         self._orchestrator = orchestrator
         self._subject = subject
         self._max_concurrency = max_concurrency
+        # Resolves (tenant_id, served_model_name) → runtime_endpoint so rebuild
+        # parses direct-connect to the tenant's inference service. Optional:
+        # when None, endpoints stay empty and rag-engine uses its default base.
+        self._inference_service_client = inference_service_client
         self._subscription = None
         self._semaphore: asyncio.Semaphore | None = None
         self._pending: set[asyncio.Task] = set()
         self._stopped = True
+
+    async def _resolve_runtime_endpoint(
+        self, *, tenant_id: str, model: str
+    ) -> tuple[str, str]:
+        """Resolve (runtime endpoint, canonical served_model_name) for ``model``.
+
+        Returns ("", "") when no client is configured or resolution fails; the
+        rag-engine then falls back to its default base URL and the caller keeps
+        the original model name.
+        """
+        model = (model or "").strip()
+        if not model or self._inference_service_client is None:
+            return "", ""
+        try:
+            resolved = await self._inference_service_client.resolve_endpoint(
+                tenant_id=tenant_id, served_model_name=model,
+            )
+            return resolved.base_url, resolved.served_model_name or model
+        except Exception as exc:  # noqa: BLE001 — degrade to rag-engine default
+            logger.warning(
+                "rebuild_consumer: failed to resolve runtime endpoint for model "
+                "%r (tenant %s), falling back to rag-engine default: %s",
+                model, tenant_id, exc,
+            )
+            return "", ""
 
     async def start(self) -> None:
         """Subscribe to the rebuild subject and begin consuming."""
@@ -342,6 +375,7 @@ class RebuildConsumer:
                 return
             vector_store_id = str(kb_row.get("vector_store_id") or "")
             embedding_model = str(kb_row.get("embedding_model") or "")
+            generate_model = str(kb_row.get("default_inference_service") or "")
             chunk_size = kb_row.get("chunk_size")
             if chunk_size is None:
                 chunk_size = 1024  # NOT NULL column; defensive fallback
@@ -357,6 +391,21 @@ class RebuildConsumer:
                         failed_doc_ids=[],
                     )
                 return
+
+            # Resolve the tenant's inference-service endpoints per model:
+            # embedding uses embedding_model, summary generation uses the KB's
+            # chat model. The canonical served_model_name replaces the config
+            # name for the OpenAI request body.
+            embed_runtime_endpoint, resolved_embed_model = (
+                await self._resolve_runtime_endpoint(
+                    tenant_id=tenant_id, model=embedding_model,
+                )
+            )
+            generate_runtime_endpoint, resolved_generate_model = (
+                await self._resolve_runtime_endpoint(
+                    tenant_id=tenant_id, model=generate_model,
+                )
+            )
 
             # 3. snapshot eligible doc ids (ready/failed, soft-deleted
             #    excluded). Later deletions are skipped per-doc below.
@@ -417,7 +466,10 @@ class RebuildConsumer:
                         file_type=str(doc_row.get("file_type") or ""),
                         chunk_size=int(chunk_size),
                         vector_store_id=vector_store_id,
-                        embedding_model=embedding_model,
+                        embedding_model=resolved_embed_model or embedding_model,
+                        generate_model=resolved_generate_model or generate_model,
+                        embed_runtime_endpoint=embed_runtime_endpoint,
+                        generate_runtime_endpoint=generate_runtime_endpoint,
                     )
                     succeeded += 1
                 except Exception as exc:  # noqa: BLE001 — per-doc isolation
@@ -526,6 +578,7 @@ def build_rebuild_consumer(
     orchestrator: _ParseOrchestrator,
     subject: str,
     max_concurrency: int = REBUILD_MAX_CONCURRENCY,
+    inference_service_client: Any | None = None,
 ) -> RebuildConsumer:
     """Factory for constructing a RebuildConsumer (called from main.py).
 
@@ -538,4 +591,5 @@ def build_rebuild_consumer(
         orchestrator=orchestrator,
         subject=subject,
         max_concurrency=max_concurrency,
+        inference_service_client=inference_service_client,
     )

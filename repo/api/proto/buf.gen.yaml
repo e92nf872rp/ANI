@@ -8,6 +8,9 @@ managed:
       path: inference/control/v1/inference_control.proto
       value: github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1;inferencecontrolv1
     - file_option: go_package
+      path: inference/internalendpoint/v1/inference_internal.proto
+      value: github.com/kubercloud/ani/pkg/generated/pb/inference/internalendpoint/v1;inferenceinternalv1
+    - file_option: go_package
       path: tenant/integration/v1/tenant_iam_integration.proto
       value: github.com/kubercloud/ani/pkg/generated/pb/tenant/integration/v1;tenantintegrationv1
 plugins:

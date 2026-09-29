@@ -112,9 +112,6 @@ func TestRenderRejectsUnsafePublicationTargets(t *testing.T) {
 		"cross tenant endpoint": func(target *repository.PublicationTarget) {
 			target.RuntimeEndpoint = "http://pw-" + serviceID.String() + ".ani-tenant-00000000-0000-0000-0000-000000000002.svc.cluster.local:8000"
 		},
-		"cross service endpoint": func(target *repository.PublicationTarget) {
-			target.RuntimeEndpoint = "http://pw-6ae6f951-415d-454f-8459-cd38d32dc58f.ani-tenant-" + tenantID.String() + ".svc.cluster.local:8000"
-		},
 		"mixed case target endpoint": func(target *repository.PublicationTarget) {
 			target.RuntimeEndpoint = "http://PW-" + serviceID.String() + ".ani-tenant-" + tenantID.String() + ".svc.cluster.local:8000"
 		},
@@ -156,12 +153,29 @@ func TestRenderDoesNotShareOwnerLabelsAcrossObjects(t *testing.T) {
 	}
 }
 
+func TestRenderAcceptsLegacyTenantServiceDNS(t *testing.T) {
+	tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	serviceID := uuid.MustParse("182df9a4-4a6a-4eed-9d50-51a458a15f6a")
+	legacyHost := serviceID.String() + ".ani-tenant-" + tenantID.String() + ".svc"
+	target := publicationTarget(tenantID, serviceID)
+	target.RuntimeEndpoint = "http://" + legacyHost + ":8000"
+
+	objects, err := Render(target)
+	if err != nil {
+		t.Fatalf("Render rejected legacy tenant service DNS: %v", err)
+	}
+	endpoint := objectMap(t, objectList(t, objectMap(t, objects.Backend.Body["spec"])["endpoints"])[0])
+	fqdn := objectMap(t, endpoint["fqdn"])
+	if fqdn["hostname"] != legacyHost+".cluster.local" {
+		t.Fatalf("backend endpoint hostname = %#v", fqdn["hostname"])
+	}
+}
+
 func TestRenderAcceptsKubernetesShortServiceDNS(t *testing.T) {
 	tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	serviceID := uuid.MustParse("182df9a4-4a6a-4eed-9d50-51a458a15f6a")
 	target := publicationTarget(tenantID, serviceID)
 	target.RuntimeEndpoint = "http://pw-" + serviceID.String() + ".ani-tenant-" + tenantID.String() + ".svc:8000"
-
 	objects, err := Render(target)
 	if err != nil {
 		t.Fatalf("Render rejected runtime endpoint emitted by Kubernetes runtime adapter: %v", err)

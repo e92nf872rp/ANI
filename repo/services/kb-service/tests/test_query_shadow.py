@@ -49,7 +49,7 @@ class _FakeRagEngine:
         self._dimension = dimension
         self.embed_calls: list[dict] = []
 
-    async def embed(self, *, texts, model: str = ""):
+    async def embed(self, *, texts, model: str = "", runtime_endpoint: str = ""):
         self.embed_calls.append({"texts": list(texts), "model": model})
         return list(self._vectors), self._dimension
 

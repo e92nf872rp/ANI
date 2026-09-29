@@ -65,12 +65,14 @@ class ParseResponse(_message.Message):
     def __init__(self, chunks: _Optional[_Iterable[_Union[ParsedChunk, _Mapping]]] = ...) -> None: ...
 
 class EmbedRequest(_message.Message):
-    __slots__ = ("texts", "model")
+    __slots__ = ("texts", "model", "runtime_endpoint")
     TEXTS_FIELD_NUMBER: _ClassVar[int]
     MODEL_FIELD_NUMBER: _ClassVar[int]
+    RUNTIME_ENDPOINT_FIELD_NUMBER: _ClassVar[int]
     texts: _containers.RepeatedScalarFieldContainer[str]
     model: str
-    def __init__(self, texts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ...) -> None: ...
+    runtime_endpoint: str
+    def __init__(self, texts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ..., runtime_endpoint: _Optional[str] = ...) -> None: ...
 
 class EmbedResponse(_message.Message):
     __slots__ = ("vectors_flat", "dimension", "count")
@@ -83,20 +85,22 @@ class EmbedResponse(_message.Message):
     def __init__(self, vectors_flat: _Optional[_Iterable[float]] = ..., dimension: _Optional[int] = ..., count: _Optional[int] = ...) -> None: ...
 
 class GenerateRequest(_message.Message):
-    __slots__ = ("question", "session_id", "context", "inference_service_name", "max_tokens", "history")
+    __slots__ = ("question", "session_id", "context", "inference_service_name", "max_tokens", "history", "runtime_endpoint")
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_FIELD_NUMBER: _ClassVar[int]
     INFERENCE_SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
     MAX_TOKENS_FIELD_NUMBER: _ClassVar[int]
     HISTORY_FIELD_NUMBER: _ClassVar[int]
+    RUNTIME_ENDPOINT_FIELD_NUMBER: _ClassVar[int]
     question: str
     session_id: str
     context: _containers.RepeatedCompositeFieldContainer[SourceChunk]
     inference_service_name: str
     max_tokens: int
     history: _containers.RepeatedCompositeFieldContainer[ChatMessage]
-    def __init__(self, question: _Optional[str] = ..., session_id: _Optional[str] = ..., context: _Optional[_Iterable[_Union[SourceChunk, _Mapping]]] = ..., inference_service_name: _Optional[str] = ..., max_tokens: _Optional[int] = ..., history: _Optional[_Iterable[_Union[ChatMessage, _Mapping]]] = ...) -> None: ...
+    runtime_endpoint: str
+    def __init__(self, question: _Optional[str] = ..., session_id: _Optional[str] = ..., context: _Optional[_Iterable[_Union[SourceChunk, _Mapping]]] = ..., inference_service_name: _Optional[str] = ..., max_tokens: _Optional[int] = ..., history: _Optional[_Iterable[_Union[ChatMessage, _Mapping]]] = ..., runtime_endpoint: _Optional[str] = ...) -> None: ...
 
 class ChatMessage(_message.Message):
     __slots__ = ("role", "content")

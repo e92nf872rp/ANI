@@ -117,6 +117,8 @@ class QueryOrchestrator:
         vector_store_id: str,
         embedding_model: str = "",
         history: list[dict[str, str]],
+        embed_runtime_endpoint: str = "",
+        generate_runtime_endpoint: str = "",
     ) -> QueryResult:
         """Run a synchronous RAG query and return a QueryResult.
 
@@ -126,6 +128,11 @@ class QueryOrchestrator:
             (LLM not called).
           ③ sources empty after dedup → NO_RESULT_ANSWER, tokens = LLM
             actual usage (LLM was called).
+
+        Note: the embedding model and the chat model are two distinct
+        inference services with distinct cluster endpoints, so the retrieval
+        (embed) leg and the generation leg each receive their own resolved
+        endpoint (``embed_runtime_endpoint`` / ``generate_runtime_endpoint``).
         """
         # 1. retrieve → (sources, max_score)
         #    sources already deduped + parent-backfilled by RetrieveService.
@@ -140,6 +147,7 @@ class QueryOrchestrator:
             retrieval_mode=retrieval_mode,
             vector_store_id=vector_store_id,
             embedding_model=embedding_model,
+            runtime_endpoint=embed_runtime_endpoint,
         )
 
         # 2. Gate ①: retrieval empty (legacy QAService lines 471-483).
@@ -176,6 +184,7 @@ class QueryOrchestrator:
             context=sources,
             history=history,
             inference_service_name=inference_service_name,
+            runtime_endpoint=generate_runtime_endpoint,
         )
 
         answer = str(result.get("answer", "") or "")
@@ -223,6 +232,8 @@ class QueryOrchestrator:
         vector_store_id: str,
         embedding_model: str = "",
         history: list[dict[str, str]],
+        embed_runtime_endpoint: str = "",
+        generate_runtime_endpoint: str = "",
     ) -> AsyncIterator[Any]:
         """Streaming RAG query — async generator (issue-038: Retrieve RPC).
 
@@ -234,6 +245,9 @@ class QueryOrchestrator:
         The caller (grpc_server.Retrieve) maps these to ``RetrieveEvent`` proto
         messages. This keeps the three-gate logic in one place, shared by both
         the sync ``query()`` and the streaming ``query_stream()`` paths.
+
+        As in ``query()``, the embed and generate legs receive their own
+        resolved endpoints (distinct inference services).
         """
         # 1. retrieve → (sources, max_score)
         sources, max_score = await self._retrieve.retrieve(
@@ -245,6 +259,7 @@ class QueryOrchestrator:
             retrieval_mode=retrieval_mode,
             vector_store_id=vector_store_id,
             embedding_model=embedding_model,
+            runtime_endpoint=embed_runtime_endpoint,
         )
 
         # 2. Gate ①: retrieval empty → NO_RESULT, tokens=0 (LLM not called).
@@ -275,6 +290,7 @@ class QueryOrchestrator:
             context=sources,
             history=history,
             inference_service_name=inference_service_name,
+            runtime_endpoint=generate_runtime_endpoint,
         ):
             content = str(tok.get("content", "") or "")
             if tok.get("done"):

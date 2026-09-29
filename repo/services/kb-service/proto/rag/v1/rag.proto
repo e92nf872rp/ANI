@@ -76,6 +76,7 @@ message ParseResponse {
 message EmbedRequest {
   repeated string texts = 1;
   string model = 2;  // embedding model name; empty = use server default (settings.embedding_model)
+  string runtime_endpoint = 3;  // KB owner's inference service cluster endpoint (http://host:port); empty = server fallback
 }
 
 message EmbedResponse {
@@ -95,6 +96,7 @@ message GenerateRequest {
   string inference_service_name = 4;
   int32  max_tokens             = 5;
   repeated ChatMessage history  = 6;  // includes current-turn user msg (reproduces legacy behavior)
+  string runtime_endpoint       = 7;  // KB owner's inference service cluster endpoint (http://host:port); empty = server fallback
 }
 
 message ChatMessage {

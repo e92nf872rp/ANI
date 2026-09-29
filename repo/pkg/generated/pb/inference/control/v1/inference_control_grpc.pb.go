@@ -19,24 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	InferenceControl_ListInferenceServices_FullMethodName          = "/inference.control.v1.InferenceControl/ListInferenceServices"
-	InferenceControl_CreateInferenceService_FullMethodName         = "/inference.control.v1.InferenceControl/CreateInferenceService"
-	InferenceControl_GetInferenceService_FullMethodName            = "/inference.control.v1.InferenceControl/GetInferenceService"
-	InferenceControl_ScaleInferenceService_FullMethodName          = "/inference.control.v1.InferenceControl/ScaleInferenceService"
-	InferenceControl_DeleteInferenceService_FullMethodName         = "/inference.control.v1.InferenceControl/DeleteInferenceService"
-	InferenceControl_ApplyInferenceServiceLifecycle_FullMethodName = "/inference.control.v1.InferenceControl/ApplyInferenceServiceLifecycle"
-	InferenceControl_GetInferenceOperation_FullMethodName          = "/inference.control.v1.InferenceControl/GetInferenceOperation"
-	InferenceControl_ListInferenceServiceLogs_FullMethodName       = "/inference.control.v1.InferenceControl/ListInferenceServiceLogs"
-	InferenceControl_ListInferenceAccessPolicies_FullMethodName    = "/inference.control.v1.InferenceControl/ListInferenceAccessPolicies"
-	InferenceControl_CreateInferenceAccessPolicy_FullMethodName    = "/inference.control.v1.InferenceControl/CreateInferenceAccessPolicy"
-	InferenceControl_GetInferenceAccessPolicy_FullMethodName       = "/inference.control.v1.InferenceControl/GetInferenceAccessPolicy"
-	InferenceControl_PatchInferenceAccessPolicy_FullMethodName     = "/inference.control.v1.InferenceControl/PatchInferenceAccessPolicy"
-	InferenceControl_DeleteInferenceAccessPolicy_FullMethodName    = "/inference.control.v1.InferenceControl/DeleteInferenceAccessPolicy"
-	InferenceControl_ListInferenceServicePolicies_FullMethodName   = "/inference.control.v1.InferenceControl/ListInferenceServicePolicies"
-	InferenceControl_UpdateInferenceServicePolicies_FullMethodName = "/inference.control.v1.InferenceControl/UpdateInferenceServicePolicies"
-	InferenceControl_ListInferencePolicyEvents_FullMethodName      = "/inference.control.v1.InferenceControl/ListInferencePolicyEvents"
-	InferenceControl_CheckInferenceAccess_FullMethodName           = "/inference.control.v1.InferenceControl/CheckInferenceAccess"
-	InferenceControl_ReleaseInferenceAccessLease_FullMethodName    = "/inference.control.v1.InferenceControl/ReleaseInferenceAccessLease"
+	InferenceControl_ListInferenceServices_FullMethodName           = "/inference.control.v1.InferenceControl/ListInferenceServices"
+	InferenceControl_CreateInferenceService_FullMethodName          = "/inference.control.v1.InferenceControl/CreateInferenceService"
+	InferenceControl_GetInferenceService_FullMethodName             = "/inference.control.v1.InferenceControl/GetInferenceService"
+	InferenceControl_ScaleInferenceService_FullMethodName           = "/inference.control.v1.InferenceControl/ScaleInferenceService"
+	InferenceControl_DeleteInferenceService_FullMethodName          = "/inference.control.v1.InferenceControl/DeleteInferenceService"
+	InferenceControl_ApplyInferenceServiceLifecycle_FullMethodName  = "/inference.control.v1.InferenceControl/ApplyInferenceServiceLifecycle"
+	InferenceControl_GetInferenceOperation_FullMethodName           = "/inference.control.v1.InferenceControl/GetInferenceOperation"
+	InferenceControl_ListInferenceServiceLogs_FullMethodName        = "/inference.control.v1.InferenceControl/ListInferenceServiceLogs"
+	InferenceControl_ListInferenceAccessPolicies_FullMethodName     = "/inference.control.v1.InferenceControl/ListInferenceAccessPolicies"
+	InferenceControl_CreateInferenceAccessPolicy_FullMethodName     = "/inference.control.v1.InferenceControl/CreateInferenceAccessPolicy"
+	InferenceControl_GetInferenceAccessPolicy_FullMethodName        = "/inference.control.v1.InferenceControl/GetInferenceAccessPolicy"
+	InferenceControl_PatchInferenceAccessPolicy_FullMethodName      = "/inference.control.v1.InferenceControl/PatchInferenceAccessPolicy"
+	InferenceControl_DeleteInferenceAccessPolicy_FullMethodName     = "/inference.control.v1.InferenceControl/DeleteInferenceAccessPolicy"
+	InferenceControl_ListInferenceServicePolicies_FullMethodName    = "/inference.control.v1.InferenceControl/ListInferenceServicePolicies"
+	InferenceControl_UpdateInferenceServicePolicies_FullMethodName  = "/inference.control.v1.InferenceControl/UpdateInferenceServicePolicies"
+	InferenceControl_ListInferencePolicyEvents_FullMethodName       = "/inference.control.v1.InferenceControl/ListInferencePolicyEvents"
+	InferenceControl_CheckInferenceAccess_FullMethodName            = "/inference.control.v1.InferenceControl/CheckInferenceAccess"
+	InferenceControl_ReleaseInferenceAccessLease_FullMethodName     = "/inference.control.v1.InferenceControl/ReleaseInferenceAccessLease"
+	InferenceControl_ResolveInferenceServiceEndpoint_FullMethodName = "/inference.control.v1.InferenceControl/ResolveInferenceServiceEndpoint"
 )
 
 // InferenceControlClient is the client API for InferenceControl service.
@@ -61,6 +62,11 @@ type InferenceControlClient interface {
 	ListInferencePolicyEvents(ctx context.Context, in *ListInferencePolicyEventsRequest, opts ...grpc.CallOption) (*InferencePolicyEventListResponse, error)
 	CheckInferenceAccess(ctx context.Context, in *CheckInferenceAccessRequest, opts ...grpc.CallOption) (*CheckInferenceAccessResponse, error)
 	ReleaseInferenceAccessLease(ctx context.Context, in *ReleaseInferenceAccessLeaseRequest, opts ...grpc.CallOption) (*ReleaseInferenceAccessLeaseResponse, error)
+	// ResolveInferenceServiceEndpoint is a service-to-service internal API used by
+	// core data-plane services (for example kb-service) to resolve a published
+	// served_model_name to its cluster runtime endpoint. The endpoint is never
+	// returned to tenants; it must not be exposed through the Gateway surface.
+	ResolveInferenceServiceEndpoint(ctx context.Context, in *ResolveInferenceServiceEndpointRequest, opts ...grpc.CallOption) (*ResolveInferenceServiceEndpointResponse, error)
 }
 
 type inferenceControlClient struct {
@@ -233,6 +239,15 @@ func (c *inferenceControlClient) ReleaseInferenceAccessLease(ctx context.Context
 	return out, nil
 }
 
+func (c *inferenceControlClient) ResolveInferenceServiceEndpoint(ctx context.Context, in *ResolveInferenceServiceEndpointRequest, opts ...grpc.CallOption) (*ResolveInferenceServiceEndpointResponse, error) {
+	out := new(ResolveInferenceServiceEndpointResponse)
+	err := c.cc.Invoke(ctx, InferenceControl_ResolveInferenceServiceEndpoint_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InferenceControlServer is the server API for InferenceControl service.
 // All implementations must embed UnimplementedInferenceControlServer
 // for forward compatibility
@@ -255,6 +270,11 @@ type InferenceControlServer interface {
 	ListInferencePolicyEvents(context.Context, *ListInferencePolicyEventsRequest) (*InferencePolicyEventListResponse, error)
 	CheckInferenceAccess(context.Context, *CheckInferenceAccessRequest) (*CheckInferenceAccessResponse, error)
 	ReleaseInferenceAccessLease(context.Context, *ReleaseInferenceAccessLeaseRequest) (*ReleaseInferenceAccessLeaseResponse, error)
+	// ResolveInferenceServiceEndpoint is a service-to-service internal API used by
+	// core data-plane services (for example kb-service) to resolve a published
+	// served_model_name to its cluster runtime endpoint. The endpoint is never
+	// returned to tenants; it must not be exposed through the Gateway surface.
+	ResolveInferenceServiceEndpoint(context.Context, *ResolveInferenceServiceEndpointRequest) (*ResolveInferenceServiceEndpointResponse, error)
 	mustEmbedUnimplementedInferenceControlServer()
 }
 
@@ -315,6 +335,9 @@ func (UnimplementedInferenceControlServer) CheckInferenceAccess(context.Context,
 }
 func (UnimplementedInferenceControlServer) ReleaseInferenceAccessLease(context.Context, *ReleaseInferenceAccessLeaseRequest) (*ReleaseInferenceAccessLeaseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleaseInferenceAccessLease not implemented")
+}
+func (UnimplementedInferenceControlServer) ResolveInferenceServiceEndpoint(context.Context, *ResolveInferenceServiceEndpointRequest) (*ResolveInferenceServiceEndpointResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResolveInferenceServiceEndpoint not implemented")
 }
 func (UnimplementedInferenceControlServer) mustEmbedUnimplementedInferenceControlServer() {}
 
@@ -653,6 +676,24 @@ func _InferenceControl_ReleaseInferenceAccessLease_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InferenceControl_ResolveInferenceServiceEndpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveInferenceServiceEndpointRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InferenceControlServer).ResolveInferenceServiceEndpoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InferenceControl_ResolveInferenceServiceEndpoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InferenceControlServer).ResolveInferenceServiceEndpoint(ctx, req.(*ResolveInferenceServiceEndpointRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InferenceControl_ServiceDesc is the grpc.ServiceDesc for InferenceControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -731,6 +772,10 @@ var InferenceControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReleaseInferenceAccessLease",
 			Handler:    _InferenceControl_ReleaseInferenceAccessLease_Handler,
+		},
+		{
+			MethodName: "ResolveInferenceServiceEndpoint",
+			Handler:    _InferenceControl_ResolveInferenceServiceEndpoint_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

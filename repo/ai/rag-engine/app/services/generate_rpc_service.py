@@ -241,6 +241,7 @@ def _import_openai_exceptions():
         "APIConnectionError": _Dummy,
         "APITimeoutError": _Dummy,
         "APIStatusError": _Dummy,
+        "AuthenticationError": _Dummy,
     }
     try:
         import openai
@@ -251,6 +252,7 @@ def _import_openai_exceptions():
             ("APIConnectionError", "APIConnectionError"),
             ("APITimeoutError", "APITimeoutError"),
             ("APIStatusError", "APIStatusError"),
+            ("AuthenticationError", "AuthenticationError"),
         ):
             val = getattr(openai, attr_name, None)
             # Verify it's a real type (not a MagicMock stub attribute).
@@ -292,6 +294,20 @@ def _map_openai_exception(exc: Exception) -> Exception:
     if isinstance(exc, ConnectionError):
         raise RuntimeError(f"vLLM unavailable: {exc}") from exc  # noqa: TRY004
     raise RuntimeError(f"vLLM error: {exc}") from exc
+
+
+def _resolve_base(runtime_endpoint: str) -> str:
+    """Return the LLM API base for ``runtime_endpoint``.
+
+    Empty falls back to ``settings.vllm_api_base`` so a caller that passes
+    no endpoint keeps the previous behavior. The OpenAI SDK requires an
+    explicit scheme.
+    """
+    endpoint = (runtime_endpoint or "").strip()
+    base = endpoint or settings.vllm_api_base
+    if base and not base.startswith(("http://", "https://")):
+        base = "http://" + base
+    return base
 
 
 def _repack_context(context: list[dict], max_context_tokens: int) -> list[str]:
@@ -344,35 +360,43 @@ class GenerateRPCService:
     DEFAULT_REFINE_TEMPLATE = DEFAULT_REFINE_TEMPLATE
 
     def __init__(self) -> None:
-        # Reuse a single OpenAI client per service instance to avoid
-        # leaking httpx connection pools on every request.
-        self._client: Any = None
+        # Reuse one OpenAI client per inference service endpoint to avoid
+        # leaking httpx connection pools on every request. Keyed by the
+        # resolved base URL ("" endpoint = global fallback base).
+        self._clients: dict[str, Any] = {}
 
-    def _make_client(self) -> Any:
-        """Return a cached ``openai.OpenAI`` client (created lazily).
+    def _make_client(self, runtime_endpoint: str = "") -> Any:
+        """Return a cached ``openai.OpenAI`` client for ``runtime_endpoint``.
 
-        The client carries an httpx connection pool; reusing it avoids
-        pool leaks. Tests can monkeypatch this method to inject a fake.
+        The client carries an httpx connection pool; reusing it avoids pool
+        leaks. The endpoint is the KB owner's inference service cluster
+        address — the model is already tenant-scoped, so we call it directly
+        instead of routing through the AI Gateway. An empty endpoint falls
+        back to ``settings.vllm_api_base``. Tests can monkeypatch this method
+        to inject a fake.
         """
-        if self._client is not None:
-            return self._client
+        base = _resolve_base(runtime_endpoint)
+        client = self._clients.get(base)
+        if client is not None:
+            return client
         import openai
 
-        self._client = openai.OpenAI(
-            base_url=settings.vllm_api_base,
+        client = openai.OpenAI(
+            base_url=base,
             api_key=settings.vllm_api_key or "EMPTY",
             timeout=LLM_TIMEOUT_SECONDS,
         )
-        return self._client
+        self._clients[base] = client
+        return client
 
     def close(self) -> None:
-        """Close the cached OpenAI client (release httpx connection pool)."""
-        if self._client is not None:
+        """Close all cached OpenAI clients (release httpx connection pools)."""
+        for client in self._clients.values():
             try:
-                self._client.close()
+                client.close()
             except Exception:  # noqa: BLE001, S110 — best-effort close
                 pass
-            self._client = None
+        self._clients = {}
 
     def _max_context_tokens(
         self,
@@ -492,11 +516,12 @@ class GenerateRPCService:
         """Make a single LLM call and return (answer, input_tokens, output_tokens).
 
         Args:
-            client: OpenAI-compatible client (base_url unchanged per model).
+            client: OpenAI-compatible client (base_url bound to the KB's
+                inference service endpoint).
             messages: Chat messages.
             max_tokens: Max output tokens.
-            model: Per-request model name (served_model_name routed by the
-                AI Gateway); empty falls back to ``settings.vllm_model``.
+            model: Per-request model name (served_model_name); empty falls
+                back to ``settings.vllm_model``.
 
         Raises:
             TimeoutError: vLLM timed out.
@@ -531,6 +556,7 @@ class GenerateRPCService:
         history: list[dict],
         inference_service_name: str = "",
         max_tokens: int = 2048,
+        runtime_endpoint: str = "",
     ) -> dict:
         """Run LLM completion with CompactAndRefine multi-round synthesis.
 
@@ -548,10 +574,12 @@ class GenerateRPCService:
             session_id: Session ID (echoed back in the response).
             context: Retrieved source chunks (list of dicts with ``content``).
             history: Chat history (includes current-turn user message).
-            inference_service_name: Per-request model name (served_model_name
-                routed by the AI Gateway); empty falls back to the default
-                ``settings.vllm_model``.
+            inference_service_name: Per-request model name (served_model_name);
+                empty falls back to the default ``settings.vllm_model``.
             max_tokens: Max output tokens per round.
+            runtime_endpoint: Cluster endpoint of the KB owner's inference
+                service (``GenerateRequest.runtime_endpoint``), already
+                tenant-scoped. Empty falls back to ``settings.vllm_api_base``.
 
         Returns:
             ``{"answer", "input_tokens", "output_tokens", "session_id"}``.
@@ -560,7 +588,7 @@ class GenerateRPCService:
             TimeoutError: vLLM timed out (→ gRPC DEADLINE_EXCEEDED).
             RuntimeError: vLLM unavailable / API error.
         """
-        client = self._make_client()
+        client = self._make_client(runtime_endpoint)
         max_tokens = min(max_tokens, _max_completion_tokens())
 
         # Dynamic per-round budget: window − completion − overhead −
@@ -577,7 +605,8 @@ class GenerateRPCService:
                 question, "", trimmed_history
             )
             answer, input_tokens, output_tokens = self._call_llm(
-                client, messages, max_tokens, model=inference_service_name
+                client, messages, max_tokens,
+                model=inference_service_name,
             )
             return {
                 "answer": answer,
@@ -645,6 +674,7 @@ class GenerateRPCService:
         history: list[dict],
         inference_service_name: str = "",
         max_tokens: int = 2048,
+        runtime_endpoint: str = "",
     ) -> Iterator[dict]:
         """Stream LLM tokens (Plan §2.4 GenerateStream).
 
@@ -659,6 +689,10 @@ class GenerateRPCService:
           ``{"content": "", "done": True, "input_tokens": int, "output_tokens": int}``
           as the final event (usage from the last chunk via
           ``stream_options={"include_usage": True}``).
+
+        ``runtime_endpoint`` is the KB owner's tenant-scoped inference
+        service cluster endpoint; empty falls back to
+        ``settings.vllm_api_base``.
         """
         # Single-round budget (same formula as generate's first round);
         # context is truncated to it and history to its cap so the whole
@@ -670,16 +704,20 @@ class GenerateRPCService:
         messages = self._build_initial_messages(
             question, context_str, trimmed_history
         )
-        client = self._make_client()
+        client = self._make_client(runtime_endpoint)
         max_tokens = min(max_tokens, _max_completion_tokens())
-        try:
-            stream = client.chat.completions.create(
+
+        def _open_stream(c: Any) -> Any:
+            return c.chat.completions.create(
                 model=inference_service_name or settings.vllm_model,
                 messages=messages,
                 max_tokens=max_tokens,
                 stream=True,
                 stream_options={"include_usage": True},
             )
+
+        try:
+            stream = _open_stream(client)
         except TimeoutError:
             raise
         except Exception as exc:  # noqa: BLE001

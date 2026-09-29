@@ -176,4 +176,7 @@ type AccessPolicyStore interface {
 	ListAccessPolicyEvents(context.Context, uuid.UUID, domain.AccessPolicyEventQuery) ([]domain.AccessPolicyEvent, string, error)
 	RecordAccessPolicyEvent(context.Context, domain.AccessPolicyEvent) error
 	ResolvePublishedService(context.Context, uuid.UUID, string) (domain.Service, error)
+	// GetService supports the legacy service_id lookup path of the internal
+	// endpoint resolver (inference.internal.v1). Tenant-scoped.
+	GetService(context.Context, uuid.UUID, uuid.UUID) (domain.Service, error)
 }

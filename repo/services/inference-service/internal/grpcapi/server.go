@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
 	inferencecontrolv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1"
+	inferenceinternalv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/internalendpoint/v1"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog"
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/repository"
@@ -45,6 +47,8 @@ type LogsUseCase interface {
 type AccessPolicyUseCase interface {
 	CheckAccess(context.Context, service.AccessCheckInput) (service.AccessDecision, error)
 	ReleaseAccessLease(context.Context, string) error
+	ResolveRuntimeEndpoint(context.Context, uuid.UUID, string) (domain.Service, error)
+	ResolveInternalEndpoint(context.Context, uuid.UUID, string, string) (domain.Service, error)
 }
 
 type AccessPolicyControlUseCase interface {
@@ -61,6 +65,7 @@ type AccessPolicyControlUseCase interface {
 // Server 实现 InferenceControl gRPC。Gateway HTTP 只调这里，不直连 Core。
 type Server struct {
 	inferencecontrolv1.UnimplementedInferenceControlServer
+	inferenceinternalv1.UnimplementedInferenceEndpointResolverServer
 	creator       CreateUseCase
 	controller    ControlUseCase
 	logs          LogsUseCase
@@ -90,6 +95,7 @@ func (s *Server) WithAccessPolicyControl(control AccessPolicyControlUseCase) *Se
 // Register 挂到 bootstrap gRPC server。
 func (s *Server) Register(grpcServer *grpc.Server) {
 	inferencecontrolv1.RegisterInferenceControlServer(grpcServer, s)
+	inferenceinternalv1.RegisterInferenceEndpointResolverServer(grpcServer, s)
 }
 
 func (s *Server) ListInferenceServices(ctx context.Context, req *inferencecontrolv1.ListInferenceServicesRequest) (*inferencecontrolv1.ListInferenceServicesResponse, error) {
@@ -275,6 +281,71 @@ func (s *Server) ReleaseInferenceAccessLease(ctx context.Context, req *inference
 		return nil, status.Error(codes.Unavailable, "policy lease release unavailable")
 	}
 	return &inferencecontrolv1.ReleaseInferenceAccessLeaseResponse{}, nil
+}
+
+func (s *Server) ResolveInferenceServiceEndpoint(ctx context.Context, req *inferencecontrolv1.ResolveInferenceServiceEndpointRequest) (*inferencecontrolv1.ResolveInferenceServiceEndpointResponse, error) {
+	if s.policies == nil {
+		return nil, status.Error(codes.Unavailable, "policy service unavailable")
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	resource, err := s.policies.ResolveRuntimeEndpoint(ctx, tenantID, req.GetServedModelName())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &inferencecontrolv1.ResolveInferenceServiceEndpointResponse{
+		InferenceServiceId: uuidString(resource.ID),
+		RuntimeEndpoint:    strings.TrimSpace(resource.RuntimeEndpoint),
+	}, nil
+}
+
+// ResolveInternalEndpoint 服务于 inference.internal.v1（kb-service 数据面）：
+// 按 served_model_name（首选）或 service_id（旧兼容）解析集群内 base_url。
+// 不校验用户身份；语义化错误经 mapError 映射（NOT_FOUND /
+// INFERENCE_SERVICE_NOT_READY / RUNTIME_ENDPOINT_MISSING|INVALID）。
+func (s *Server) ResolveInternalEndpoint(ctx context.Context, req *inferenceinternalv1.ResolveInternalEndpointRequest) (*inferenceinternalv1.ResolveInternalEndpointResponse, error) {
+	if s.policies == nil {
+		return nil, status.Error(codes.Unavailable, "policy service unavailable")
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	if strings.TrimSpace(req.GetServedModelName()) == "" && strings.TrimSpace(req.GetServiceId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "INVALID_ARGUMENT")
+	}
+	resource, err := s.policies.ResolveInternalEndpoint(ctx, tenantID, req.GetServedModelName(), req.GetServiceId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	if err := service.ValidateInternalEndpoint(resource); err != nil {
+		return nil, mapError(err)
+	}
+	endpoint := openAIBaseURL(resource.RuntimeEndpoint)
+	return &inferenceinternalv1.ResolveInternalEndpointResponse{
+		BaseUrl:         endpoint,
+		ServedModelName: resource.ServedModelName,
+		Task:            string(resource.DesiredSpec.ExecutionProfile.Task),
+		Status:          string(resource.Status),
+	}, nil
+}
+
+// openAIBaseURL normalizes a runtime endpoint (scheme://host[:port]) into an
+// OpenAI-client base URL: the SDK appends "/chat/completions" or
+// "/embeddings" to it, so a pathless endpoint gets "/v1" appended. An
+// endpoint that already carries a path (e.g. "/v1") is kept as-is.
+func openAIBaseURL(endpoint string) string {
+	ep := strings.TrimSpace(endpoint)
+	if ep == "" {
+		return ""
+	}
+	u, err := url.Parse(ep)
+	if err != nil || (u.Path != "" && u.Path != "/") {
+		return ep
+	}
+	return strings.TrimRight(ep, "/") + "/v1"
 }
 
 func (s *Server) ListInferenceAccessPolicies(ctx context.Context, req *inferencecontrolv1.ListInferenceAccessPoliciesRequest) (*inferencecontrolv1.ListInferenceAccessPoliciesResponse, error) {
@@ -535,6 +606,12 @@ func mapError(err error) error {
 		return status.Error(codes.FailedPrecondition, "MODEL_NOT_READY")
 	case errors.Is(err, catalog.ErrNoCompatibleProfile):
 		return status.Error(codes.FailedPrecondition, "MODEL_INCOMPATIBLE")
+	case errors.Is(err, service.ErrInferenceServiceNotReady):
+		return status.Error(codes.FailedPrecondition, "INFERENCE_SERVICE_NOT_READY")
+	case errors.Is(err, service.ErrRuntimeEndpointMissing):
+		return status.Error(codes.FailedPrecondition, "RUNTIME_ENDPOINT_MISSING")
+	case errors.Is(err, service.ErrRuntimeEndpointInvalid):
+		return status.Error(codes.FailedPrecondition, "RUNTIME_ENDPOINT_INVALID")
 	case errors.Is(err, service.ErrUnsupportedTopology):
 		return status.Error(codes.FailedPrecondition, "UNSUPPORTED_TOPOLOGY")
 	case errors.Is(err, service.ErrAcceleratorSpecUnavailable):

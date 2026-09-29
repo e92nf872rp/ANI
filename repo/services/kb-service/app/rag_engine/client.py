@@ -118,7 +118,7 @@ class RagEngineGRPCClient:
         return out
 
     async def embed(
-        self, *, texts: list[str], model: str = ""
+        self, *, texts: list[str], model: str = "", runtime_endpoint: str = ""
     ) -> tuple[list[list[float]], int]:
         """Call Embed RPC and deserialize the flattened vectors array.
 
@@ -131,8 +131,11 @@ class RagEngineGRPCClient:
             texts: Texts to embed.
             model: Per-KB embedding model name (``EmbedRequest.model``);
                 empty uses the rag-engine server default.
+            runtime_endpoint: Cluster runtime endpoint of the KB owner's
+                published inference service (``EmbedRequest.runtime_endpoint``);
+                empty falls back to the rag-engine server default.
         """
-        request = rag_pb2.EmbedRequest(texts=texts, model=model)
+        request = rag_pb2.EmbedRequest(texts=texts, model=model, runtime_endpoint=runtime_endpoint)
         self._ensure_channel()
         resp: rag_pb2.EmbedResponse = await self._stub.Embed(request, timeout=self._timeout)
         dim = resp.dimension
@@ -162,6 +165,7 @@ class RagEngineGRPCClient:
         history: list[dict[str, str]] | None = None,
         inference_service_name: str = "",
         max_tokens: int = 2048,
+        runtime_endpoint: str = "",
     ) -> dict[str, Any]:
         """Call Generate RPC.
 
@@ -179,6 +183,7 @@ class RagEngineGRPCClient:
             inference_service_name=inference_service_name,
             max_tokens=max_tokens,
             history=_build_chat_messages(history or []),
+            runtime_endpoint=runtime_endpoint,
         )
         self._ensure_channel()
         resp: rag_pb2.GenerateResponse = await self._stub.Generate(request, timeout=self._timeout)
@@ -198,6 +203,7 @@ class RagEngineGRPCClient:
         history: list[dict[str, str]] | None = None,
         inference_service_name: str = "",
         max_tokens: int = 2048,
+        runtime_endpoint: str = "",
     ) -> AsyncIterator[dict[str, Any]]:
         """Call GenerateStream RPC; async iterator of token dicts.
 
@@ -211,6 +217,7 @@ class RagEngineGRPCClient:
             inference_service_name=inference_service_name,
             max_tokens=max_tokens,
             history=_build_chat_messages(history or []),
+            runtime_endpoint=runtime_endpoint,
         )
         self._ensure_channel()
         async for tok in self._stub.GenerateStream(request):

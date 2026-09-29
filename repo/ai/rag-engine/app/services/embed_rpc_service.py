@@ -4,10 +4,12 @@ Stateless embedding execution: calls ``OpenAICompatibleEmbedding`` directly
 (no LlamaIndex dependency). The Embed RPC uses this service to compute
 embedding vectors for a batch of texts.
 
-``get_embed_model(model)`` returns the per-model
-:class:`OpenAICompatibleEmbedding` adapter from the registry (no
-``BaseEmbedding`` wrapper), so this service calls
-``get_text_embedding_batch`` directly.
+``get_embed_model(model, runtime_endpoint)`` returns the
+per-(endpoint, model) :class:`OpenAICompatibleEmbedding` adapter from the
+registry (no ``BaseEmbedding`` wrapper), so this service calls
+``get_text_embedding_batch`` directly. The endpoint is the KB owner's
+tenant-scoped inference service, so we call it directly rather than routing
+through the AI Gateway.
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ class EmbedRPCService:
     """
 
     def embed(
-        self, texts: list[str], model: str = ""
+        self, texts: list[str], model: str = "", runtime_endpoint: str = ""
     ) -> tuple[list[list[float]], int]:
         """Embed a batch of texts.
 
@@ -31,6 +33,10 @@ class EmbedRPCService:
             texts: List of text strings to embed.
             model: Per-KB embedding model name (``EmbedRequest.model``);
                 empty falls back to the server default.
+            runtime_endpoint: Cluster endpoint of the KB owner's inference
+                service (``EmbedRequest.runtime_endpoint``), already
+                tenant-scoped. Empty falls back to
+                ``settings.embedding_api_base``.
 
         Returns:
             ``(vectors, dimension)`` where ``vectors`` is a list of float
@@ -39,7 +45,7 @@ class EmbedRPCService:
         """
         if not texts:
             return [], 0
-        emb_model = get_embed_model(model)
+        emb_model = get_embed_model(model, runtime_endpoint)
         vectors = emb_model.get_text_embedding_batch(texts)
         dim = len(vectors[0]) if vectors else 0
         return vectors, dim

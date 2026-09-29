@@ -53,7 +53,7 @@ class _RagEngineEmbedder(Protocol):
     """
 
     async def embed(
-        self, *, texts: list[str], model: str = ""
+        self, *, texts: list[str], model: str = "", runtime_endpoint: str = ""
     ) -> tuple[list[list[float]], int]: ...
 
 
@@ -159,6 +159,7 @@ class RetrieveService:
         retrieval_mode: str = "hybrid",
         vector_store_id: str | None = None,
         embedding_model: str = "",
+        runtime_endpoint: str = "",
     ) -> tuple[list[dict[str, Any]], float]:
         """Run hybrid retrieval and return (sources, max_score).
 
@@ -186,7 +187,9 @@ class RetrieveService:
         # ── Vector leg (hybrid | vector) ──────────────────────────────────
         if retrieval_mode in ("hybrid", "vector"):
             vectors, _dim = await self._rag_engine.embed(
-                texts=[question], model=embedding_model
+                texts=[question],
+                model=embedding_model,
+                runtime_endpoint=runtime_endpoint,
             )
             query_vector = vectors[0] if vectors else []
             # async with ensures the per-call CoreClient's httpx pool is
