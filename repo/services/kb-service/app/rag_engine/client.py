@@ -65,7 +65,15 @@ class RagEngineGRPCClient:
         dedicated event loop architecture.
         """
         if self._channel is None:
-            self._channel = grpc.aio.insecure_channel(self._addr)
+            # Parse responses grow far faster than the source file: a single
+            # Parse RPC returns every chunk (child + parent text, plus
+            # image_bytes), so a ~7.8MB document produced a ~50MB response.
+            # gRPC's default receive cap is 4MB (RESOURCE_EXHAUSTED). Raise
+            # it to 256MB to cover documents toward the 100MB upload limit.
+            self._channel = grpc.aio.insecure_channel(
+                self._addr,
+                options=[("grpc.max_receive_message_length", 256 * 1024 * 1024)],
+            )
         if self._stub is None:
             self._stub = rag_pb2_grpc.RagEngineStub(self._channel)
 

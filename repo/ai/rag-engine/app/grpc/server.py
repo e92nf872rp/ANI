@@ -653,7 +653,14 @@ class GrpcServer:
             self._loop = None
 
     async def _serve_async(self) -> None:
-        self._server = grpc.aio.server()
+        # Raise the receive cap well above gRPC's 4MB default. kb-service
+        # sends every chunk of a document in a single Embed request (~1x the
+        # source size, so a 32MB upload yields a ~34MB request), and Parse
+        # responses are read on the client side. 256MB covers the full 100MB
+        # upload contract and the 32MB working ceiling with headroom.
+        self._server = grpc.aio.server(
+            options=[("grpc.max_receive_message_length", 256 * 1024 * 1024)],
+        )
         rag_grpc.add_RagEngineServicer_to_server(self._servicer, self._server)
         self._server.add_insecure_port(self._bind_addr)
         await self._server.start()
