@@ -3,9 +3,11 @@ package router
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -108,7 +110,7 @@ func (f *fakeKBRetrieveClient) GetKB(context.Context, string, string) (*kbv1.Kno
 func (f *fakeKBRetrieveClient) UpdateKB(context.Context, string, string, string, string, string) (*kbv1.KnowledgeBase, error) {
 	return nil, nil
 }
-func (f *fakeKBRetrieveClient) ListKBs(context.Context, string, int32, string, string) (*kbv1.ListKBsResponse, error) {
+func (f *fakeKBRetrieveClient) ListKBs(context.Context, string, int32, string, string, string, string) (*kbv1.ListKBsResponse, error) {
 	return nil, nil
 }
 func (f *fakeKBRetrieveClient) DeleteKB(context.Context, string, string) (*emptypb.Empty, error) {
@@ -204,6 +206,10 @@ var _ kbv1.KBService_RetrieveClient = (*fakeRetrieveStream)(nil)
 // TestSSE_NewPath_TokenSourcesDone asserts the new path (kb-service Retrieve
 // gRPC stream) produces the same token*→sources→done event sequence as the
 // legacy path (Plan §10.3, issue-038 AC 7).
+//
+// Real server required: SSE frames are written on the Hijacked raw connection
+// with per-frame Flush; the ut in-memory transport cannot capture hijacked
+// writes (same reason instance_log_stream tests use startRealHertzServer).
 func TestSSE_NewPath_TokenSourcesDone(t *testing.T) {
 	stream := &fakeRetrieveStream{
 		events: []*kbv1.RetrieveEvent{
@@ -220,21 +226,49 @@ func TestSSE_NewPath_TokenSourcesDone(t *testing.T) {
 		},
 	}
 	kbClient := &fakeKBRetrieveClient{stream: stream}
-	h := setupSSETestServer(KbSSEConfig{
-		KBClient: kbClient,
-	})
-	resp := ut.PerformRequest(h.Engine, http.MethodGet,
-		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi&inference_service_name=qwen3-32b", nil,
-		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
-	).Result()
 
-	if resp.StatusCode() != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find free port: %v", err)
 	}
-	if ct := string(resp.Header.ContentType()); !strings.Contains(ct, "text/event-stream") {
+	addr := l.Addr().String()
+	_ = l.Close()
+
+	h := server.New(server.WithHostPorts(addr))
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		tenantID := string(c.GetHeader("X-Dev-Tenant-ID"))
+		if tenantID == "" {
+			tenantID = "tenant-test"
+		}
+		c.Set("tenant_id", tenantID)
+		c.Next(ctx)
+	})
+	registerKnowledgeBasesWithClient(h.Group("/api/v1/svc"), nil, KbSSEConfig{KBClient: kbClient})
+	go func() { _ = h.Run() }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, dialErr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	resp, err := http.Get("http://" + addr + "/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi&inference_service_name=qwen3-32b")
+	if err != nil {
+		t.Fatalf("GET stream: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
 		t.Fatalf("content-type = %q, want text/event-stream", ct)
 	}
-	body := string(resp.Body())
 
 	// Event sequence: token* → sources → done (SPEC §4.3).
 	tokenIdx := strings.Index(body, "event: token")

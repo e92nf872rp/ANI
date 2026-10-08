@@ -538,6 +538,7 @@ var CursorPaginationOperations = []string{
 	"listInferenceServices",
 	"getInferenceServiceLogs",
 	"listIntegrations",
+	"listKnowledgeBases",
 	"listKnowledgeBaseAuditLogs",
 	"listKnowledgeBaseCitations",
 	"listKnowledgeBaseDocumentChunks",

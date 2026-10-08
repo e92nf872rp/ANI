@@ -526,6 +526,7 @@ CURSOR_PAGINATION_OPERATIONS = [
     "listInferenceServices",
     "getInferenceServiceLogs",
     "listIntegrations",
+    "listKnowledgeBases",
     "listKnowledgeBaseAuditLogs",
     "listKnowledgeBaseCitations",
     "listKnowledgeBaseDocumentChunks",

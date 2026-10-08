@@ -132,64 +132,67 @@ async def list_kbs(
     limit: int = 20,
     cursor: str | None = None,
     status: str | None = None,
+    name: str | None = None,
+    kb_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """List knowledge_bases with cursor pagination (RLS-scoped).
 
     Returns (rows, total). Cursor is the `id` of the last row of the previous
     page (lexicographic UUID ordering). Soft-deleted rows (status='deleted')
-    are excluded from both the page and the total. A non-empty ``status``
-    (active | rebuilding) additionally narrows both to that exact status.
+    are excluded from both the page and the total. Optional filters narrow both
+    the page and the total:
+
+    - ``status`` (active | rebuilding): exact status match.
+    - ``name``: case-insensitive substring match (ILIKE), ``%``/``_`` escaped.
+    - ``kb_id``: exact id match (UUID).
     """
     status = (status or "").strip()
-    status_total_sql = (
-        "SELECT count(*) FROM knowledge_bases "
-        "WHERE status <> 'deleted' AND status = $1"
-        if status
-        else "SELECT count(*) FROM knowledge_bases WHERE status <> 'deleted'"
-    )
+    name = (name or "").strip()
+    kb_id = (kb_id or "").strip()
+
+    filters = ["status <> 'deleted'"]
+    filter_args: list[Any] = []
+    if status:
+        filter_args.append(status)
+        filters.append(f"status = ${len(filter_args)}")
+    if name:
+        escaped = name.replace("%", "\\%").replace("_", "\\_")
+        filter_args.append(f"%{escaped}%")
+        filters.append(f"name ILIKE ${len(filter_args)} ESCAPE CHR(92)")
+    if kb_id:
+        filter_args.append(uuid.UUID(kb_id))
+        filters.append(f"id = ${len(filter_args)}")
+    where_sql = " AND ".join(filters)
+
     async with conn.transaction():
         await set_tenant_context(conn, tenant_id)
-        total = await conn.fetchval(status_total_sql, *( (status,) if status else () ))
+        total = await conn.fetchval(
+            f"SELECT count(*) FROM knowledge_bases WHERE {where_sql}",
+            *filter_args,
+        )
+        page_args = list(filter_args)
+        cursor_frag = ""
         if cursor:
-            rows = await conn.fetch(
-                """
-                SELECT id, tenant_id, name, description, embedding_model,
-                       chunk_size, top_k, score_threshold, retrieval_mode,
-                       default_inference_service, status,
-                       (SELECT count(*) FROM kb_documents d
-                         WHERE d.kb_id = knowledge_bases.id
-                           AND NOT (d.parse_status = 'failed'
-                                    AND d.error_message = 'deleted')) AS doc_count,
-                       created_at, updated_at, vector_store_id
-                  FROM knowledge_bases
-                 WHERE id > $1 AND status <> 'deleted'
-                   AND ($3 = '' OR status = $3)
-                 ORDER BY id ASC
-                 LIMIT $2
-                """,
-                uuid.UUID(cursor),
-                limit,
-                status,
-            )
-        else:
-            rows = await conn.fetch(
-                """
-                SELECT id, tenant_id, name, description, embedding_model,
-                       chunk_size, top_k, score_threshold, retrieval_mode,
-                       default_inference_service, status,
-                       (SELECT count(*) FROM kb_documents d
-                         WHERE d.kb_id = knowledge_bases.id
-                           AND NOT (d.parse_status = 'failed'
-                                    AND d.error_message = 'deleted')) AS doc_count,
-                       created_at, updated_at, vector_store_id
-                  FROM knowledge_bases
-                 WHERE status <> 'deleted' AND ($2 = '' OR status = $2)
-                 ORDER BY id ASC
-                 LIMIT $1
-                """,
-                limit,
-                status,
-            )
+            page_args.append(uuid.UUID(cursor))
+            cursor_frag = f" AND id > ${len(page_args)}"
+        page_args.append(limit)
+        rows = await conn.fetch(
+            f"""
+            SELECT id, tenant_id, name, description, embedding_model,
+                   chunk_size, top_k, score_threshold, retrieval_mode,
+                   default_inference_service, status,
+                   (SELECT count(*) FROM kb_documents d
+                     WHERE d.kb_id = knowledge_bases.id
+                       AND NOT (d.parse_status = 'failed'
+                                AND d.error_message = 'deleted')) AS doc_count,
+                   created_at, updated_at, vector_store_id
+              FROM knowledge_bases
+             WHERE {where_sql}{cursor_frag}
+             ORDER BY id ASC
+             LIMIT ${len(page_args)}
+            """,
+            *page_args,
+        )
     return [dict(r) for r in rows], total
 
 

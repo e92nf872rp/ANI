@@ -35,8 +35,8 @@ STDJSON_APPLICATIONS = {
     "services/auth-service",
 }
 PINNED_COMPONENT_VERSIONS = {
-    "go.opentelemetry.io/otel": "v1.44.0",
-    "go.opentelemetry.io/otel/exporters/prometheus": "v0.66.0",
+    "go.opentelemetry.io/otel": "v1.45.0",
+    "go.opentelemetry.io/otel/exporters/prometheus": "v0.67.0",
     "github.com/prometheus/client_golang": "v1.24.1",
     "github.com/prometheus/otlptranslator": "v1.0.0",
     "google.golang.org/grpc": "v1.83.2",
