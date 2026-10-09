@@ -412,7 +412,7 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 	var networks []ports.WorkloadNetworkAttachment
 	if request.Kind == ports.WorkloadKindVM && resource.Kind == "VirtualMachine" {
 		var err error
-		phase, nodeName, reason, networks, err = c.observeKubeVirtVMI(ctx, resource.Namespace, resource.Name, phase, nodeName, reason)
+		phase, nodeName, reason, networks, err = c.observeKubeVirtVMI(ctx, resource.Namespace, resource.Name, phase, nodeName, reason, kubeVirtVMExpectsRunning(doc))
 		if err != nil {
 			return ports.WorkloadProviderObservation{}, err
 		}
@@ -432,7 +432,7 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 	}, nil
 }
 
-func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace string, name string, phase string, nodeName string, reason string) (string, string, string, []ports.WorkloadNetworkAttachment, error) {
+func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace string, name string, phase string, nodeName string, reason string, expectsRunning bool) (string, string, string, []ports.WorkloadNetworkAttachment, error) {
 	resource := kubernetesResource{
 		Provider:   "kubevirt",
 		APIGroup:   "kubevirt.io",
@@ -448,6 +448,14 @@ func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace
 		if isKubernetesNotFound(err) {
 			switch strings.ToLower(strings.TrimSpace(phase)) {
 			case "stopped", "halted":
+				if expectsRunning {
+					// KubeVirt leaves status.printableStatus at its CRD default
+					// "Stopped" on a VM that was just applied, until virt-controller
+					// creates the VMI and moves it to Starting. Reporting terminal
+					// Stopped here would persist a wrong terminal state at create
+					// time, so a VM that is meant to run stays provisioning.
+					return "Pending", nodeName, fmt.Sprintf("VirtualMachineInstance not found while VirtualMachine status is %s", phase), nil, nil
+				}
 				return "Stopped", nodeName, reason, nil, nil
 			case "running", "starting":
 				return "Pending", nodeName, fmt.Sprintf("VirtualMachineInstance not found while VirtualMachine status is %s", phase), nil, nil
@@ -469,6 +477,26 @@ func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace
 		reason = observed
 	}
 	return phase, nodeName, reason, kubevirtVMINetworks(doc), nil
+}
+
+// kubeVirtVMExpectsRunning reports whether a VirtualMachine is meant to be
+// powered on (spec.running=true, or spec.runStrategy Always/RerunOnFailure).
+// It separates a VM that has simply not spawned its VMI yet from one the user
+// deliberately stopped, which also clears the run intent in the VM spec.
+func kubeVirtVMExpectsRunning(doc map[string]any) bool {
+	spec, _ := doc["spec"].(map[string]any)
+	if spec == nil {
+		return false
+	}
+	if running, ok := spec["running"].(bool); ok && running {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(stringValue(spec["runStrategy"]))) {
+	case "always", "rerunonfailure":
+		return true
+	default:
+		return false
+	}
 }
 
 // kubevirtVMINetworks extracts the private IP addresses reported by a

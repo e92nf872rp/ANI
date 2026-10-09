@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"unicode"
@@ -119,11 +120,19 @@ func (r *KubeOVNNetworkRenderer) RenderRoute(_ context.Context, record ports.Net
 	if nextHopType != "gateway" {
 		return nil, fmt.Errorf("%w: kubeovn route rendering currently supports gateway next_hop_type only", ports.ErrUnsupported)
 	}
+	nextHopIP := strings.TrimSpace(record.NextHopID)
+	if net.ParseIP(nextHopIP) == nil {
+		// Kube-OVN formats the whole VPC from Vpc.spec.staticRoutes[].nextHopIP.
+		// A non-IP next hop makes that format step fail permanently, which then
+		// blocks every subnet created afterwards in this VPC from ever getting
+		// an OVN logical switch, so pods on those subnets cannot build a port.
+		return nil, fmt.Errorf("%w: gateway next_hop_id %q must be an IP address", ports.ErrInvalid, record.NextHopID)
+	}
 	name := networkProviderName("vpc", record.VPCID)
 	metadata := networkProviderMetadata(record.TenantID, name, "vpc", record.VPCID)
 	metadata["annotations"] = map[string]string{
 		"ani.kubercloud.io/network-route-id":            record.RouteID,
-		"ani.kubercloud.io/network-route-next-hop":      strings.TrimSpace(record.NextHopID),
+		"ani.kubercloud.io/network-route-next-hop":      nextHopIP,
 		"ani.kubercloud.io/network-route-next-hop-type": nextHopType,
 	}
 	content := manifest(map[string]any{
@@ -131,9 +140,13 @@ func (r *KubeOVNNetworkRenderer) RenderRoute(_ context.Context, record ports.Net
 		"kind":       "Vpc",
 		"metadata":   metadata,
 		"spec": map[string]any{
+			// Every Vpc manifest is applied through one server-side-apply field
+			// manager, so omitting namespaces here would delete the field the VPC
+			// renderer already owns and break subnet/namespace binding.
+			"namespaces": []any{tenantNamespace(record.TenantID)},
 			"staticRoutes": []any{map[string]any{
 				"cidr":      strings.TrimSpace(record.DestinationCIDR),
-				"nextHopIP": strings.TrimSpace(record.NextHopID),
+				"nextHopIP": nextHopIP,
 				"policy":    "policyDst",
 			}},
 		},

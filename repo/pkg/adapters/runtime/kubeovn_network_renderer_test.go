@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -122,9 +123,26 @@ func TestKubeOVNNetworkRendererRendersRouteAsVpcStaticRoute(t *testing.T) {
 	if manifests[0].Kind != "Vpc" || manifests[0].Provider != "kubeovn" || manifests[0].Name != "vpc-vpc-main" {
 		t.Fatalf("RenderRoute() manifest = %+v, want kubeovn Vpc vpc-vpc-main", manifests[0])
 	}
-	for _, want := range []string{`"kind": "Vpc"`, `"staticRoutes"`, `"cidr": "0.0.0.0/0"`, `"nextHopIP": "10.40.1.1"`, `"policy": "policyDst"`, "rt_default"} {
+	for _, want := range []string{`"kind": "Vpc"`, `"staticRoutes"`, `"cidr": "0.0.0.0/0"`, `"nextHopIP": "10.40.1.1"`, `"policy": "policyDst"`, "rt_default", `"namespaces"`, "ani-tenant-tenant-a"} {
 		if !strings.Contains(manifests[0].Content, want) {
 			t.Fatalf("rendered route missing %q:\n%s", want, manifests[0].Content)
 		}
+	}
+}
+
+func TestKubeOVNNetworkRendererRejectsNonIPGatewayNextHop(t *testing.T) {
+	renderer := NewKubeOVNNetworkRenderer()
+
+	_, err := renderer.RenderRoute(context.Background(), ports.NetworkRouteRecord{
+		TenantID:        "tenant-a",
+		RouteID:         "rt_default",
+		VPCID:           "vpc_main",
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "test",
+		State:           ports.NetworkResourceAvailable,
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("RenderRoute(non-IP next hop) error = %v, want ErrInvalid", err)
 	}
 }
