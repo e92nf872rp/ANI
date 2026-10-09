@@ -164,16 +164,17 @@ PASS  A   创建 VM -> 201 state=provisioning
 - 失败内容为「Your code is affected by 5 vulnerabilities from the Go standard library」，`GO-2026-6603/6611/6612/6613/6617`，`Found in: net/http@go1.25.13`，`Fixed in: net/http@go1.26.9`。这 5 条公告 `published=2026-10-08T22:31:09Z`，晚于 main 上一次全绿（2026-10-08T11:23:51Z），故**任何新 PR（含 main 自身）都会被拦**，rebase 无用。
 - 注意：名字更像的 `Dependency CVE Scan` job 反而**不阻断**——它在 `ci.yml` 标了 `continue-on-error: true`，且未列入 `required-gates.needs`。
 - 修复：`ci.yml` 的 `GO_VERSION` `1.25.13` → `1.26.9`；仓库 CI 策略校验 `scripts/validate_ci_workflow.py` 强制 `GO_DOCKERFILE_PATHS`（ani-gateway / auth-service / reconcile-worker）的 Dockerfile 必须含 `FROM golang:{GO_VERSION}-`，故同步把 **12 个 Go 构建 Dockerfile**（含 inference-service 的 `Dockerfile.publisher`；model-service / model-fetcher 两个 digest 钉死项重新解析为 `golang:1.26.9-alpine@sha256:cdfd4fe2…b84e0`）升到 `golang:1.26.9-alpine`。
-- 未动 `go.work`/`go.mod` 的 `go 1.25.0` 指令，未动 `golang.org/x/net`（govulncheck 报告其不可达，非阻断项）。若抬 go 指令会波及 10+ 模块的 go.sum，属不必要的爆炸半径。
+- 未动业务代码；`golang.org/x/net` 首轮评估为「不可达、非阻断」，但切到 1.26.9 后第二轮 CI 实测显示**同一批公告经由 `golang.org/x/net@v0.58.0` 变为可达**（`Fixed in: golang.org/x/net@v0.60.0`），故第二轮已把 `golang.org/x/net` 升到 `v0.60.0`，随之 `golang.org/x/{crypto,sync,sys,text}` 联动升级。x/net 0.60.0 的 `go.mod` 要求 `go 1.26.0`，故 `go.work` 与 13 个 go.mod 的 `go` 指令同步由 `1.25.0` 升到 `1.26.0`（`cli/ani`、`sdks/*` 未在 x/net 依赖链上，保持原状）。
 
-本地/构建机验证（构建机内以 `golang:1.26.9-alpine` 容器执行）：
+本地/构建机验证（Go 1.26.9）：
 
-- 最小 net/http 探针：`1.25.13` → 5 个 stdlib 漏洞（exit 3）；`1.26.9` → `No vulnerabilities found`（exit 0）。
+- 最小 net/http 探针（构建机）：`1.25.13` → 5 个 stdlib 漏洞（exit 3）；`1.26.9` → `No vulnerabilities found`（exit 0）。
 - `docker build --no-cache` 构建 ani-gateway 通过（exit 0）。
-- `pkg/adapters/runtime` 目标用例在 1.26.9 下 `ok`。
-- `python scripts/validate_ci_workflow.py` → `CI workflow contract valid`；`validate_ci_workflow_test.py` → 13 tests OK。
+- `govulncheck` 全 10 个 CI 模块（`runtimeadmin pkg services/pkg ani-gateway auth-service model-service task-service inference-service tenant-service metering-service`）均 `No vulnerabilities found`（exit 0）；`cli/ani`、`sdks/core/go`、`envoy-authz-adapter`、`model-fetcher`、`platform-settings-service`、`reconcile-worker`、`kms-sm4-live-fixture` 同样 exit 0。
+- `go build ./...` + `go vet`（pkg）、目标用例 `go test ./adapters/runtime/` 在 1.26.9 下 `ok`。
+- `python scripts/validate_ci_workflow.py` → `CI workflow contract valid`；`validate_ci_workflow_test.py` → 13 tests OK；`validate_doc_entrypoints.py` → valid；`gofmt -l` 无输出；`git diff --check` 通过。
 
-遗留：已发布到 Harbor 的旧镜像仍是 1.25.13 stdlib，需手动触发一次重新构建/发布才算镜像侧闭环；`build-image.yml` 仅在版本 tag 或 `workflow_dispatch` 触发，合并代码不会自动重建。
+遗留：已发布到 Harbor 的旧镜像仍是旧 stdlib/x-net，需手动触发一次重新构建/发布才算镜像侧闭环；`build-image.yml` 仅在版本 tag 或 `workflow_dispatch` 触发，合并代码不会自动重建。
 
 ---
 
