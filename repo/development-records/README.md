@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### VM 创建后误判 stopped + 子网 OVN 逻辑交换机缺失（2026-10-09，ani-test2 live verified + ani-system 部署，分支 hotfix/vm-start-and-network-route）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-VM-START-AND-NETWORK-ROUTE-A | 用户报障「10.10.1.66 上创建的 VM 无法启动」。同一现象由两个独立缺陷叠加，分开修：**A 产品代码缺陷**——创建时的同步观测把「VM 刚 apply、VMI 尚未生成」的瞬时态按 KubeVirt CRD 默认值 `printableStatus=Stopped` 写成终态 `stopped`，且此后不可自愈（gateway 读修复粘滞守卫不回写 + `mapProviderPhase` 缺 `scheduling` 使后台收敛报 `ErrUnsupported`）；**B ANI 代码缺陷引发集群故障**——`KubeOVNNetworkRenderer.RenderRoute` 把未校验的用户自由文本写进 `Vpc.spec.staticRoutes[].nextHopIP`（实库值 `"test"`），kube-ovn `format vpc` 永久失败，使该 VPC 之后新建的子网永远拿不到 OVN 逻辑交换机；同一次 apply 又因两处 `Vpc` 渲染共用同一 fieldManager，SSA 语义把 `spec.namespaces` 一并删除，子网侧报 `namespace out of range to custom vpc`。**修复**：`RenderRoute` 校验 gateway `next_hop_id` 必须是合法 IP（fail-closed，`ErrInvalid`，apply 前拒绝）+ 渲染的 `Vpc` spec 带上 `namespaces`；`observeKubeVirtVMI` 新增 `kubeVirtVMExpectsRunning`（`spec.running==true` 或 `runStrategy∈{Always,RerunOnFailure}`）意图判断，VMI-404 且 VM 为 `stopped`/`halted` 时按意图返回 `Pending` 而非终态；`mapProviderPhase` provisioning 组补 `scheduling`。**未动**粘滞守卫（需产品/架构决策）。无契约/迁移/生成物变更。**集群侧止血**：全集群扫描出 6 个 `namespaces` 被清空的 VPC（5 个含非法 nextHop `100/123/212`），merge patch 补回 `namespaces` 并清非法路由（保留 1 条合法路由）；ani-system 库 4 条非法 gateway 路由软删为 `state=deleted`（`ani_app` 无 DELETE 权限，路由本就软删设计）。**单测**：非 IP nextHop 拒绝、路由渲染保留 namespaces、VMI-404 开机意图三例（含 `running=false+runStrategy=Halted` 仍 Stopped）、`Scheduling`→provisioning；全绿（仅既有 Windows sandbox symlink 用例环境性失败）。**live 验证 PASS（ani-test2 30083，镜像 `test2-20261009-vmstart`）**：B1 非法 nextHop → 400 明确错误；B2 合法 IP 路由 → 201 且 K8s `Vpc` 同时保留 `namespaces` 与 `staticRoutes`；A 创建 VM → 201 `state=provisioning`、reason 命中新分支、即刻 GET `pending`、VMI 最终 Running/IP 10.240.1.2。**ani-system 已替换同镜像**（`maxSurge=0/maxUnavailable=1`，rollout 一次通过；Pod 1/1 Running、healthz/readyz 200、日志无 ERROR、受影响 VPC 保持健康）。遗留：粘滞守卫不可逆（历史 stopped 实例需人工干预或等收敛）、契约层仍无 `next_hop_id` 格式声明、ani-test2 建议补 `maxUnavailable:1` | instance-vm-start-and-network-route-a.md |
+
 ### 存储卷 volume_mode（Block/Filesystem）契约与消费方校验（2026-09-28 完成，2026-09-29 live verified，分支 feat/volume-mode-block）
 
 | 批次 | 内容摘要 | 文件 |

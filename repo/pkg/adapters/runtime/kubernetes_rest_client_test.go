@@ -648,6 +648,7 @@ func TestKubernetesRESTClientObservesKubeVirtVMIForPhaseAndNode(t *testing.T) {
 func TestKubernetesRESTClientKubeVirtVMIPhaseIsAuthoritative(t *testing.T) {
 	tests := []struct {
 		name              string
+		vmSpec            string
 		vmPrintableStatus string
 		vmiStatus         int
 		vmiPhase          string
@@ -704,6 +705,29 @@ func TestKubernetesRESTClientKubeVirtVMIPhaseIsAuthoritative(t *testing.T) {
 			wantPhase:         "Pending",
 			wantReason:        "VirtualMachineInstance not found while VirtualMachine status is Starting",
 		},
+		{
+			name:              "vm newly created with run intent vmi missing stays provisioning",
+			vmPrintableStatus: "Stopped",
+			vmSpec:            `{"running":true}`,
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Pending",
+			wantReason:        "VirtualMachineInstance not found while VirtualMachine status is Stopped",
+		},
+		{
+			name:              "vm runStrategy always vmi missing stays provisioning",
+			vmPrintableStatus: "Stopped",
+			vmSpec:            `{"runStrategy":"Always"}`,
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Pending",
+			wantReason:        "VirtualMachineInstance not found while VirtualMachine status is Stopped",
+		},
+		{
+			name:              "vm explicitly halted without run intent stays stopped",
+			vmPrintableStatus: "Stopped",
+			vmSpec:            `{"running":false,"runStrategy":"Halted"}`,
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Stopped",
+		},
 	}
 
 	for _, tt := range tests {
@@ -711,7 +735,12 @@ func TestKubernetesRESTClientKubeVirtVMIPhaseIsAuthoritative(t *testing.T) {
 			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				switch {
 				case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-01"):
-					return jsonResponse(http.StatusOK, `{"kind":"VirtualMachine","status":{"printableStatus":"`+tt.vmPrintableStatus+`"}}`), nil
+					body := `{"kind":"VirtualMachine"`
+					if tt.vmSpec != "" {
+						body += `,"spec":` + tt.vmSpec
+					}
+					body += `,"status":{"printableStatus":"` + tt.vmPrintableStatus + `"}}`
+					return jsonResponse(http.StatusOK, body), nil
 				case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-01"):
 					if tt.vmiStatus == http.StatusNotFound {
 						return jsonResponse(http.StatusNotFound, `{"message":"not found"}`), nil

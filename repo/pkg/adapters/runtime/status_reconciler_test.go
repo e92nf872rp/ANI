@@ -36,6 +36,22 @@ func TestLocalStatusReconcilerMapsRunningObservation(t *testing.T) {
 	}
 }
 
+func TestLocalStatusReconcilerMapsKubeVirtSchedulingObservation(t *testing.T) {
+	// KubeVirt reports the VMI phase as "Scheduling" while the virt-launcher pod
+	// is still being set up. It must map to provisioning instead of failing the
+	// whole reconcile with an unsupported phase.
+	request := validReconcileRequest()
+	request.Observation.Phase = "Scheduling"
+
+	result, err := NewLocalStatusReconciler().Reconcile(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Reconcile(Scheduling) error = %v", err)
+	}
+	if result.Status.State != ports.WorkloadStateProvisioning {
+		t.Fatalf("state = %s, want provisioning", result.Status.State)
+	}
+}
+
 func TestLocalStatusReconcilerRejectsMissingAudit(t *testing.T) {
 	request := validReconcileRequest()
 	request.AuditID = ""

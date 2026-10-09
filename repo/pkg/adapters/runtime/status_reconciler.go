@@ -118,7 +118,7 @@ func validateReconcileRequest(request ports.WorkloadReconcileRequest) error {
 
 func mapProviderPhase(phase string) (ports.WorkloadState, error) {
 	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "pending", "creating", "provisioning", "scheduled", "starting", "waitingforvolumebinding":
+	case "pending", "creating", "provisioning", "scheduling", "scheduled", "starting", "waitingforvolumebinding":
 		return ports.WorkloadStateProvisioning, nil
 	case "ready", "running", "started":
 		return ports.WorkloadStateRunning, nil
